@@ -40,6 +40,7 @@ For each beat also give:
    {{"kind":"timeline","title":"short title","steps":[{{"when":"1-2 words","label":"2-4 words"}}]}}   (3 steps)
   Vary the kinds across beats. Keep all graphic text short. Quotes and stats name the person in full ("who"/"sub").
   A stat must be a real quantity from the notes (a percentage, multiple, count, amount): never a model version, year or name.
+  The number counts up on screen, so "prefix"/"suffix" are only symbols or units ("$", ">", "%", "x", "B"), never numbers or ranges.
 - "queries": 2 stock-video search phrases (2-4 words each) for what to SHOW while this beat plays: concrete and filmable,
   e.g. "server room lights", "doctor reading scan", "city traffic night aerial", "students library". No abstract words
   ("AI", "future", "concept", "technology"), no brand names, no famous people, nothing that is mostly text or a screen.
@@ -97,6 +98,9 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                 "description": j.get("description", ""), "mode": mode, "sections": []}
         for i, b in enumerate(j["beats"]):
             gs = [g for g in (b.get("graphics") or []) if isinstance(g, dict) and isinstance(g.get("g"), dict) and g["g"].get("kind") in KINDS][:2]
+            for g in gs:   # a counting-up number can't carry a range like "$5-10B"
+                if g["g"]["kind"] == "stat" and re.search(r"\d", str(g["g"].get("prefix", "")) + str(g["g"].get("suffix", ""))):
+                    g["g"]["kind"] = "hook"; g["g"]["lines"] = [f"{g['g'].get('prefix', '')}{g['g'].get('value', '')}{g['g'].get('suffix', '')}", str(g["g"].get("label", "")).upper()]; g["g"]["accent"] = 0
             plan["sections"].append({"id": f"b{i}", "title": f"Beat {i + 1}", "vo": re.sub(r"\s+", " ", b["vo"]).strip(),
                                      "queries": [q for q in b.get("queries", []) if isinstance(q, str)][:3] or ["city skyline aerial"],
                                      "visuals": [{"type": "chart", "chart": g["g"], "at": g.get("at")} for g in gs]})
