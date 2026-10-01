@@ -1,0 +1,1 @@
+module.exports = { run: [ { method: "shell.run", params: { path: "F:/code/explainer-studio/remotion_short", message: ["node -v", "npm -v", "npm install --no-audit --no-fund", "npx remotion versions"] } } ] }

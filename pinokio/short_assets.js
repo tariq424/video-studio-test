@@ -1,0 +1,1 @@
+module.exports = { run: [ { method: "shell.run", params: { venv: "F:/code/explainer-studio/app/env", path: "F:/videos/explainer_studio/shorts/moonshots_teaser", message: ["python make_assets.py"] } } ] }

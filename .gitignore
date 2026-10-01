@@ -1,0 +1,21 @@
+# secrets
+.env
+settings.json
+*.key
+# environments / deps
+app/env/
+node_modules/
+__pycache__/
+*.pyc
+# media & outputs (live in F:\videos)
+assets/
+jobs/
+shorts/
+*.mp4
+*.wav
+*.mp3
+*.png
+*.jpg
+remotion_*/public/
+pinokio/logs/
+pinokio/installed.flag

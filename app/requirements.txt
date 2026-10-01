@@ -1,0 +1,11 @@
+flask>=3.0
+requests>=2.31
+anthropic>=0.40
+yt-dlp>=2025.1.1
+matplotlib>=3.8
+numpy>=1.26
+pillow>=10.0
+faster-whisper>=1.1
+json-repair
+keyring
+imageio-ffmpeg

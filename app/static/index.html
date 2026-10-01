@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Explainer Studio</title>
+<style>
+:root{--bg:#0d1117;--panel:#161b22;--line:#30363d;--fg:#e6edf3;--mut:#8b949e;--acc:#f5a524;--ok:#3ecf8e;--bad:#ff5c5c;--blue:#4ea1ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,Segoe UI,sans-serif}
+header{display:flex;align-items:center;gap:16px;padding:14px 24px;border-bottom:1px solid var(--line)}
+h1{font-size:20px;margin:0}h2{font-size:16px;margin:0 0 12px}.mut{color:var(--mut)}
+.pill{padding:3px 10px;border-radius:99px;font-size:12px;border:1px solid var(--line)}.pill.ok{color:var(--ok);border-color:var(--ok)}.pill.bad{color:var(--bad);border-color:var(--bad)}
+main{display:grid;grid-template-columns:380px 1fr;gap:20px;padding:20px 24px;max-width:1500px;margin:auto}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
+input[type=text],input[type=password],textarea,select{width:100%;background:#0d1117;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font:inherit}
+textarea{min-height:90px;resize:vertical}
+button{background:var(--acc);color:#111;border:0;border-radius:8px;padding:9px 14px;font-weight:600;cursor:pointer}
+button.sec{background:transparent;color:var(--fg);border:1px solid var(--line)}button:disabled{opacity:.5;cursor:default}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.job{padding:10px;border:1px solid var(--line);border-radius:8px;margin-bottom:8px;cursor:pointer}.job.sel{border-color:var(--acc)}
+.stages{display:flex;gap:4px;flex-wrap:wrap;margin:10px 0}.st{font-size:12px;padding:3px 8px;border-radius:6px;background:#0d1117;border:1px solid var(--line);color:var(--mut)}
+.st.done{color:var(--ok);border-color:var(--ok)}.st.cur{color:var(--acc);border-color:var(--acc)}
+pre{background:#0d1117;border:1px solid var(--line);border-radius:8px;padding:10px;max-height:320px;overflow:auto;font-size:12.5px;white-space:pre-wrap}
+.sec-edit{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}.sec-edit input{font-weight:600}
+video{width:100%;border-radius:8px;margin-top:10px}
+details summary{cursor:pointer;color:var(--mut);font-size:13px;margin-top:10px}
+.script-doc{margin-top:18px;background:#0d1117;border:1px solid var(--line);border-radius:10px;padding:22px 26px;max-height:none}.script-doc h1{font-size:22px;margin:6px 0 4px}.script-doc .sub{color:var(--mut,#9aa4b2);margin:0 0 14px;font-style:italic}.script-doc h3{font-size:16px;margin:20px 0 6px}.script-doc p{line-height:1.65;margin:0;font-size:15.5px}
+</style></head><body>
+<header><h1>Explainer Studio</h1><span class="mut">YouTube link → narrated 1080p explainer</span><span style="flex:1"></span>
+<span id="pw" class="pill">WanGP …</span><span id="pk" class="pill">API key …</span><button class="sec" onclick="toggleSettings()">Settings</button></header>
+<main>
+<section>
+ <div class="card" id="settings" style="display:none"><h2>Settings</h2>
+  <label>Script AI</label><select id="sp"><option value="zai">z.ai GLM (cheap API)</option><option value="deepseek">DeepSeek (cheap API)</option><option value="claude">Claude API (best quality)</option><option value="local">Local AI via Ollama (free, no key)</option></select>
+  <label>Image check AI</label><select id="qp"><option value="zai">z.ai GLM vision</option><option value="deepseek">DeepSeek</option><option value="claude">Claude</option><option value="off">Off</option></select>
+  <p class="mut" style="font-size:12px;margin:6px 0 0">Keys are saved in the Windows Credential Manager vault (entry "ExplainerStudio"), encrypted to your Windows login, never in a file. Type delete in a key box and Save to remove it.</p>
+  <label>z.ai API key</label><input id="zk" type="password" placeholder="z.ai key">
+  <label>z.ai model</label><input id="zm" type="text"><label>z.ai vision model</label><input id="zv" type="text">
+  <label>z.ai Anthropic-compatible URL</label><input id="zu" type="text"><label>z.ai OpenAI-compatible URL (for vision)</label><input id="zo" type="text">
+  <label>DeepSeek API key</label><input id="dk" type="password" placeholder="sk-...">
+  <label>DeepSeek model</label><input id="dm" type="text">
+  <label>Anthropic API key</label><input id="k" type="password" placeholder="sk-ant-...">
+  <label>Claude script model</label><input id="sm" type="text"><label>Claude image-check model</label><input id="qm" type="text">
+  <label>Target narration speed (words per minute)</label><input id="wpm" type="text">
+  <label>Motion share (0–0.3; lower = faster renders)</label><input id="ms" type="text">
+  <label><input id="iqa" type="checkbox"> Automatic image QA (catches deformed people/robots)</label>
+  <div class="row" style="margin-top:12px"><button onclick="saveSettings()">Save</button><button class="sec" onclick="testKey()">Test saved keys</button><span id="ssaved" class="mut"></span></div>
+ </div>
+ <div class="card"><h2>New explainer</h2>
+  <label>YouTube link</label><input id="url" type="text" placeholder="https://www.youtube.com/watch?v=...">
+  <label>Target length: <b id="mv">15</b> minutes</label><input id="min" type="range" min="3" max="20" value="15" oninput="mv.textContent=this.value" style="width:100%">
+  <label>Script AI for this video</label><select id="jp"><option value="">Use Settings default</option><option value="zai">z.ai GLM</option><option value="deepseek">DeepSeek</option><option value="claude">Claude</option><option value="local">Local AI (Ollama)</option></select>
+  <label><input id="caps" type="checkbox" checked> Animated captions with icons</label>
+  <label><input id="pres" type="checkbox"> On-screen presenter (small corner window, experimental)</label>
+  <label><input id="auto" type="checkbox"> Skip script review (render straight away)</label>
+  <details><summary>Paste a transcript instead (if the video has no captions)</summary><textarea id="tx"></textarea></details>
+  <div class="row" style="margin-top:12px"><button onclick="createJob()">Make explainer</button><span id="cmsg" class="mut"></span></div>
+ </div>
+ <div class="card"><h2>Jobs</h2><div id="jobs" class="mut">No jobs yet.</div></div>
+</section>
+<section><div class="card" id="detail"><span class="mut">Select a job to see progress.</span></div></section>
+</main>
+<script>
+let sel=null, stages=[], planCache=null, editing=false;
+const $=id=>document.getElementById(id);
+async function j(u,o){const r=await fetch(u,o);if(!r.ok)throw new Error(await r.text());return r.json()}
+function toggleSettings(){const s=$('settings');s.style.display=s.style.display=='none'?'block':'none';loadSettings()}
+async function loadSettings(){const s=await j('/api/settings');$('k').value=s.anthropic_api_key;$('sm').value=s.script_model;$('qm').value=s.qa_model;$('wpm').value=s.wpm;$('ms').value=s.motion_share;$('iqa').checked=s.image_qa;$('sp').value=s.script_provider;$('qp').value=s.qa_provider;$('zk').value=s.zai_api_key;$('zm').value=s.zai_model;$('zv').value=s.zai_vision_model;$('zu').value=s.zai_base_url;$('zo').value=s.zai_openai_url;$('dk').value=s.deepseek_api_key;$('dm').value=s.deepseek_model}
+async function testKey(){$('ssaved').textContent='Testing...';const st=await j('/api/status');const ps=[['zai',st.zai_key],['deepseek',st.deepseek_key],['claude',st.api_key]].filter(x=>x[1]).map(x=>x[0]);if(!ps.length){$('ssaved').textContent='No keys saved yet';return}let out=[];for(const p of ps){const r=await j('/api/test_key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:p})});out.push((r.ok?'✓ ':'✗ ')+r.msg)}$('ssaved').innerHTML=out.map(esc).join('<br>')}
+async function saveSettings(){await j('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({anthropic_api_key:$('k').value,script_model:$('sm').value,qa_model:$('qm').value,wpm:+$('wpm').value,motion_share:+$('ms').value,image_qa:$('iqa').checked,script_provider:$('sp').value,qa_provider:$('qp').value,zai_api_key:$('zk').value,zai_model:$('zm').value,zai_vision_model:$('zv').value,zai_base_url:$('zu').value,zai_openai_url:$('zo').value,deepseek_api_key:$('dk').value,deepseek_model:$('dm').value})});$('ssaved').textContent='Saved';status()}
+async function status(){try{const s=await j('/api/status');stages=s.stages;$('pw').textContent=s.wangp?'WanGP running':'WanGP not running';$('pw').className='pill '+(s.wangp?'ok':'bad');const pn={deepseek:'DeepSeek',zai:'z.ai',claude:'Claude',local:'Local AI'}[s.provider]||s.provider;const rdy=s.provider=='local'||(s.provider=='zai'?s.zai_key:s.provider=='deepseek'?s.deepseek_key:s.api_key);$('pk').textContent='Script: '+pn+(rdy?'':' (no key)');$('pk').className='pill '+(rdy?'ok':'bad')}catch(e){}}
+async function createJob(){$('cmsg').textContent='';try{const r=await j('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:$('url').value.trim(),minutes:+$('min').value,presenter:$('pres').checked,captions:$('caps').checked,auto_approve:$('auto').checked,transcript:$('tx').value,provider:$('jp').value})});sel=r.id;$('url').value='';loadJobs()}catch(e){$('cmsg').textContent='Enter a link first.'}}
+async function loadJobs(){const js=await j('/api/jobs');$('jobs').innerHTML=js.length?js.map(x=>`<div class="job ${x.id==sel?'sel':''}" onclick="sel='${x.id}';editing=false;planCache=null;loadJobs()"><b>${esc(x.title||x.url||x.id)}</b><div class="mut" style="font-size:12px">${x.id} · ${x.status} · ${x.stage}</div></div>`).join(''):'No jobs yet.';if(sel)loadDetail()}
+function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+let lastKey='';
+async function loadDetail(){if(editing)return;const s=await j('/api/jobs/'+sel);const done=s.done||[];
+ const key=sel+'|'+s.status+'|'+s.stage;
+ if(s.status=='awaiting_review'&&key==lastKey)return;   // don't redraw the script while you read it
+ lastKey=key;
+ let h=`<h2>${esc(s.title||s.url)}</h2><div class="mut">target ${s.minutes} min · <b>${statusText(s)}</b>${s.error?` · <span style="color:var(--bad)">${esc(s.error)}</span>`:''}</div>`;
+ h+=`<div class="stages">${stages.map(t=>`<span class="st ${done.includes(t)?'done':(s.stage==t?'cur':'')}">${t}</span>`).join('')}</div>`;
+ h+=`<div class="row">`;
+ if(s.status=='awaiting_review')h+=`<button onclick="act('approve')">Approve & render</button><button class="sec" onclick="editPlan()">Edit script</button>`;
+ if(['running','queued'].includes(s.status))h+=`<button class="sec" onclick="act('stop')">Stop</button>`;
+ if(['error','stopped'].includes(s.status))h+=`<button onclick="act('resume')">Resume</button>`;
+ h+=`</div>`;
+ if(s.output){const rel=s.output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished video: <code>${esc(s.output)}</code></p><video controls src="/files/${sel}/${rel}"></video>`}
+ h+=`<div id="doc"></div><div id="ed"></div>`;
+ h+=`<details ${s.status=='error'?'open':''} style="margin-top:18px"><summary class="mut">Technical log</summary><pre id="log">${esc((s.log||[]).join('\n'))}</pre></details>`;
+ $('detail').innerHTML=h;const l=$('log');if(l)l.scrollTop=l.scrollHeight;
+ if(s.plan_summary&&['awaiting_review','queued','running','stopped','done','error'].includes(s.status)&&done.includes('script'))showScript()}
+function statusText(s){return {awaiting_review:'Script ready — read it below, then approve',running:'Working: '+s.stage,queued:'Queued',done:'Finished',error:'Stopped with an error',stopped:'Stopped'}[s.status]||s.status}
+async function showScript(){const p=await j(`/api/jobs/${sel}/plan`);const w=p.sections.reduce((a,x)=>a+x.vo.split(/\s+/).length,0);
+ let h=`<div class="script-doc"><div class="mut" style="font-size:13px">${p.sections.length} sections · ${w} words · about ${(w/155).toFixed(1)} minutes</div>`;
+ if(p.questions&&p.questions.length)h+=`<div style="border:1px solid #d29922;border-radius:8px;padding:10px 14px;margin:10px 0"><b>Please check before approving:</b><ul>${p.questions.map(q=>`<li>${esc(q)}</li>`).join('')}</ul><span class="mut" style="font-size:13px">Fix with Edit script, or approve if it's fine.</span></div>`;else if(p.checked)h+=`<div class="mut" style="font-size:13px;margin-top:4px">✓ Checked against the transcript (names, speakers, claims)</div>`;
+ h+=`<h1>${esc(p.title)}</h1>${p.subtitle?`<p class="sub">${esc(p.subtitle)}</p>`:''}`;
+ p.sections.forEach((x,i)=>{h+=`<h3>${i+1}. ${esc(x.title)}</h3><p>${esc(x.vo)}</p>`});
+ h+=`</div>`;$('doc').innerHTML=h}
+async function act(a){await j(`/api/jobs/${sel}/${a}`,{method:'POST'});editing=false;lastKey='';loadJobs()}
+async function editPlan(){editing=true;planCache=await j(`/api/jobs/${sel}/plan`);$('doc').innerHTML='';
+ let h=`<h2 style="margin-top:16px">Script review</h2><label>Title</label><input type="text" id="pt" value="${esc(planCache.title)}"><label>Subtitle</label><input type="text" id="ps" value="${esc(planCache.subtitle||'')}">`;
+ planCache.sections.forEach((x,i)=>{h+=`<div class="sec-edit"><input type="text" id="st${i}" value="${esc(x.title)}"><textarea id="sv${i}" rows="6">${esc(x.vo)}</textarea><details><summary>${x.visuals.length} visuals</summary><pre>${x.visuals.map(v=>v.type+': '+(v.prompt||JSON.stringify(v.chart))).map(esc).join('\n')}</pre></details></div>`});
+ h+=`<div class="row" style="margin-top:12px"><button onclick="savePlan(true)">Save & approve</button><button class="sec" onclick="savePlan(false)">Save</button><button class="sec" onclick="editing=false;lastKey='';loadDetail()">Cancel</button></div>`;
+ $('ed').innerHTML=h}
+async function savePlan(ap){planCache.title=$('pt').value;planCache.subtitle=$('ps').value;planCache.sections.forEach((x,i)=>{x.title=$('st'+i).value;x.vo=$('sv'+i).value});
+ await j(`/api/jobs/${sel}/plan`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(planCache)});if(ap)await act('approve');else{editing=false;lastKey='';loadDetail()}}
+status();loadJobs();setInterval(()=>{status();loadJobs()},5000);
+</script></body></html>
