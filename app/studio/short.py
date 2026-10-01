@@ -57,7 +57,7 @@ def _log_none(m): pass
 
 # ---------------------------------------------------------------- script
 def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir):
-    words = int((secs - 7 - GAP * 11) * cfg["wpm"] / 60)
+    words = int((secs - 7 - GAP * 11) * cfg.get("voice_wpm", 142) / 60)   # measured pace of the cloned narrator incl. pauses
     nb = max(7, min(12, round(words / 38)))
     title, channel = meta.get("title") or "the source", meta.get("channel") or meta.get("uploader") or "the creator"
     with LLM(cfg, log, stop) as llm:
@@ -116,7 +116,7 @@ def do_stock(job, plan, cfg, log, stop):
             slots.append({"id": s["id"], "text": "calm, general background for the closing end card", "queries": ["city skyline dusk aerial", "night sky stars timelapse"]})
             need[s["id"]] = 1
         else:
-            secs = len(s["vo"].split()) / cfg["wpm"] * 60 + GAP
+            secs = len(s["vo"].split()) / cfg.get("voice_wpm", 142) * 60 + GAP
             slots.append({"id": s["id"], "text": s["vo"], "queries": s["queries"]})
             need[s["id"]] = max(2, min(3, math.ceil(secs / 6.0)))
     picked = footage.fill(cfg, slots, "portrait", need, d, log, stop, want_long_side=2560, max_secs=10.0, state_file=d / "footage.json", fallback=True)
