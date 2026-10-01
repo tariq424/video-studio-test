@@ -253,7 +253,7 @@ def fetch(c, out, max_secs):
         try:
             media.ff("-user_agent", UA["User-Agent"], "-ss", f"{start:.2f}", "-i", c["file"], "-t", f"{length:.2f}", "-an",
                      "-vf", f"scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H},fps=30,format=yuv420p",
-                     "-c:v", "libx264", "-preset", "medium", "-crf", "14", out, timeout=600)
+                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "12", out, timeout=600)   # light on CPU so it can run beside narration
             if media.ok(out): return out
         except Exception as e:
             if attempt: raise RuntimeError(f"download of {c['id']} failed: {str(e)[:200]}")

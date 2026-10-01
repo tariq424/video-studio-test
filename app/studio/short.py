@@ -272,7 +272,7 @@ def do_render(job, plan, cfg, meta, log, stop):
     safe = re.sub(r"[^A-Za-z0-9]+", "_", plan["title"]).strip("_")[:60] or "short"
     out = out_dir / f"{safe}_short.mp4"; tmp = out_dir / "_short_rendering.mp4"
     cmd = [_npx(), "remotion", "render", "src/Root.tsx", "Teaser", str(tmp), f"--public-dir={job / 'short' / 'public'}",
-           f"--concurrency={cfg.get('short_concurrency', '100%')}", "--jpeg-quality=95", "--crf=16", "--log=info"]
+           f"--concurrency={cfg.get('short_concurrency', '75%')}", "--jpeg-quality=95", "--crf=16", "--log=info"]
     log(f"Rendering the Short with Remotion ({total:.0f}s of video)...")
     p = subprocess.Popen(cmd, cwd=rdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
     last, t0 = "", time.time()

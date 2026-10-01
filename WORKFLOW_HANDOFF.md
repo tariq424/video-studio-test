@@ -107,7 +107,10 @@ Making a video from the app uses **no Claude resources**.
 
 Claude is used only if "Claude" is picked as the Script AI (that needs an Anthropic API key, which isn't set up), or when you ask an AI assistant in chat to review or change things.
 
-**Typical Short timings (Oct 2026):** script about 2 min, footage about 5 min, narration about 9 min (GPU), render about 7–8 min (CPU). That's roughly 25 minutes in total.
+**Typical Short timings (Oct 2026, after the speed-ups):** about 18 minutes of machine time, plus your script review. Before the speed-ups it was about 25.
+- Script and fact-check: about 1 min.
+- Footage and narration together: about 8 min. They run side by side, and narration batches about 115 words per voice call. Each WanGP call has about 32 s of fixed overhead, so fewer, longer calls are faster.
+- Render: about 8.5 min on the CPU. Raising concurrency from 75% to 100% didn't help.
 
 ## Reviewing a script before approving it
 This is the human or AI step the app can't do for itself:
@@ -144,6 +147,9 @@ This is the human or AI step the app can't do for itself:
 - **Fixed after test 2, so new jobs only:**
   - Vision checks no longer reject clips on a too-literal reading of the search phrase.
   - Scripts are sized to the narrator's measured pace (`voice_wpm` 142).
+- **Test 3:** job `F:\videos\video_studio\jobs\20261001_173258`, the Fireship Remotion tutorial (`https://youtu.be/deg8bOoziaE`), Short only, 2:44.
+  - First run with batched narration and footage running alongside it: 18 minutes of machine time.
+  - The script reviewer caught a quote DeepSeek had invented ("Code is the new camera"). **Always check quote cards against the transcript.**
 - **Not yet tested end to end:** long-video B-roll (the `broll` stage).
 
 ## Open items
@@ -151,5 +157,6 @@ This is the human or AI step the app can't do for itself:
 - Possible improvements:
   - a "my clips" folder per job, for hero shots made by hand in CapCut (Seedance), used before stock footage;
   - Internet Archive public-domain footage as an option for historical topics;
-  - batching the narration (fewer, longer voice calls) to roughly halve the 9-minute voice step.
+  - word timings with whisper on the GPU instead of the CPU, to save about 30–60 s;
+  - a stronger brand-logo check: a phone advert with a visible "vivo" logo got past the vision model twice.
 - Upload the Moonshots long video, and put its link in the Short descriptions.
