@@ -50,10 +50,10 @@ def jobs(): return jsonify(studio.list())
 @app.post("/api/jobs")
 def create():
     from studio.sources import kind_of
-    if request.files:   # multipart form with an uploaded audio/document file
+    if request.mimetype in ("multipart/form-data", "application/x-www-form-urlencoded"):   # web form (optionally with a file)
         b = {k: v for k, v in request.form.items()}; f = request.files.get("file")
         for k in ("presenter", "auto_approve", "captions"): b[k] = b.get(k) in ("true", "1", "on")
-    else: b = request.json or {}; f = None
+    else: b = request.get_json(silent=True) or {}; f = None
     if f is not None and f.filename and not kind_of(f.filename): return jsonify(error="Unsupported file type. Use audio (.mp3 .m4a .wav ...) or .txt .md .pdf .docx"), 400
     if not b.get("url") and not b.get("transcript") and not (f and f.filename): return jsonify(error="Give a YouTube link, a file, or paste some text."), 400
     jid = studio.create(b.get("url", "").strip(), b.get("minutes", 15), b.get("presenter", False), b.get("auto_approve", False), b.get("transcript", ""),
