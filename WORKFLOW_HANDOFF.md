@@ -1,78 +1,92 @@
-# Explainer Studio — Workflow Handoff
-
-**Project home (code): `F:\code\explainer-studio`** — git repo, pushed to GitHub (private).
-Outputs (jobs, shorts, videos) stay in `F:\videos\explainer_studio`. Secrets: `.env` (Pexels key) and `settings.json` live in the project but are git-ignored; API keys are in the Windows vault.
-Folders: `app/` (Flask app + pipeline), `remotion_teaser/` (teaser Short, Remotion), `remotion_short/` (an earlier Short template from another session), `pinokio/` (copies of the launcher scripts in `C:\pinokio\api\explainer-studio`).
+# Video Studio — Workflow Handoff
 
 This guide lets any AI assistant (ChatGPT, etc.) or a human continue this project. Paste or upload this file at the start of a new chat.
 
+Video Studio is a fork of Explainer Studio (`F:\code\explainer-studio`, github `tariq424/explainer-studio`). That repo is frozen; new work happens here.
+
+- **Code:** `F:\code\video-studio`, a private GitHub repo at `tariq424/video-studio`. The copy on F: is the working copy; GitHub is kept in sync with it.
+- **Outputs:** `F:\videos\video_studio\jobs\<job id>\`. A job's videos are in its `output\` folder.
+- **UI:** `http://127.0.0.1:42006`. Start it from Pinokio → **Video Studio** → Start (launcher scripts in `C:\pinokio\api\video-studio`, with copies in `pinokio/` in the repo).
+
 ## Ground rules (owner: Tariq)
-- **All outputs go on F:.** Videos go in `F:\videos`. C: is for system files only.
-- **Never print, paste or type API keys.** Keys are stored in Windows Credential Manager (service `ExplainerStudio`) and entered only through the app's Settings page. The Pexels key in the project `.env` is read by scripts at runtime and must never be displayed.
+- **Everything on F:.** Videos go in `F:\videos`. C: is for system files only; Ollama's model store on C: is the one accepted exception.
+- **Never print, paste or type API keys.**
+  - LLM keys live in Windows Credential Manager under the service name `ExplainerStudio`, shared with the old app. Enter them only in the app's Settings page.
+  - The Pexels key is in the project's `.env`, which git ignores. Scripts read it at runtime; never display it.
 - **No deletions** without explicit approval. Rename old versions instead (for example `_v2.mp4`).
-- **No footage copied from YouTube or the podcast.** We use only Pexels stock (free, commercial use OK), our own AI-generated clips and stills, and charts.
-- **Communication:** be direct and terse, and give honest assessments.
+- **No footage from YouTube or podcasts.** Use only Pexels stock (free for commercial use, credited anyway), our own AI clips and stills, and our own graphics.
+- **Communication:** direct and terse, with honest assessments.
+- **Review scripts before showing them.** Fix names, facts and length yourself, using the transcript as the reference, and only ask the owner about what can't be fixed automatically.
+
+## Inputs
+1. **YouTube link.** Captions are used if available, otherwise local faster-whisper transcription. A transcript can also be pasted.
+2. **Uploaded file:**
+   - audio (`.mp3 .m4a .wav ...`), for example a NotebookLM Audio Overview, transcribed locally with whisper;
+   - documents (`.txt .md .pdf .docx`).
+3. **Pasted text,** such as NotebookLM notes or a briefing doc.
+
+Inputs 2 and 3 take an optional title and credit. Code: `app/studio/sources.py`.
+
+## Outputs ("Make")
+- **Long explainer:** 1080p, 3–20 min, made by the original pipeline (`writer.py`, `render.py`, `captions.py`, `assemble.py`), using WanGP stills and motion.
+- **Short:** vertical 1080×1920, default 2:45. YouTube's limit is 3:00, so the code caps it at 2:56 and speeds up the narration slightly if it runs over.
+- **Both:** the Short's end card then points to the full breakdown ("linked below").
+
+## Pipeline stages (`app/studio/pipeline.py`)
+Full order: `transcript → script (long) → short_script → review → short_stock → short_voice → short_render → charts → voice → captions → presenter → motion → stills → assemble`.
+
+Stages that don't apply to the chosen mode are skipped (`stages_for(mode)`). Rendering stages retry automatically, 3 times, 60 s apart.
+
+### Short pipeline (`app/studio/short.py`): almost no GPU
+1. **short_script.**
+   - Notes come from `writer.make_notes`, cached in `src/notes.txt` so the long and short scripts share them.
+   - One LLM call writes 7–12 beats. Each beat has narration (30–48 words), 1–2 animated graphics and 2 Pexels search phrases.
+   - Graphic types: hook, quote, stat, compare, icons, timeline. A beat's second graphic appears when its `at` word is spoken.
+   - `writer.fact_check` checks the narration and graphics against the transcript.
+   - The end-card beat is added automatically.
+   - The plan is saved in `short/plan.json`.
+2. **review.** The owner approves in the UI ("Edit Short script" is available). Before that, the AI should do its own once-over:
+   - total length about 400–430 words for 2:45;
+   - hook in plain words;
+   - one idea per beat;
+   - real stats only (not version numbers);
+   - names spelled correctly.
+3. **short_stock.**
+   - Searches Pexels for portrait clips of at least 6 s.
+   - Builds a 4-frame contact sheet from each clip's preview pictures, so nothing is downloaded before vetting.
+   - A vision model scores each clip 0–10 and rejects text or logos, scene cuts and nonsense.
+   - Setting `vet_provider`: `local` uses Ollama `qwen2.5vl:7b`, downloaded automatically the first time; alternatives are `zai`, `claude` and `off`.
+   - Keeps 2–3 clips per beat, then downloads them and trims them to 1080×1920, 30 fps, at most 10 s.
+   - Picks are saved in `short/stock/pick.json` and clips in `short/stock/clips/`.
+4. **short_voice.** WanGP TTS (`qwen3_tts_base`, cloned narrator voice) per beat; word timings from faster-whisper, saved in `short/timings.json`.
+5. **short_render.**
+   - Builds `short/public/teaser.json`, `voice.wav` (loudness -14 LUFS) and the media folder.
+   - Runs `npx remotion render src/Root.tsx Teaser` in `remotion/` with `--public-dir` set to the job's `short/public`.
+   - Writes `output/<title>_short.mp4` and `output/youtube_short_description.txt` (source credit plus Pexels credits; if the mode is Both, paste the long video's link into its placeholder).
+
+### Remotion template (`remotion/`)
+React/TypeScript, Remotion 4.0.531. `npm install` and the Chrome headless shell are installed by Pinokio Install.
+- `Root.tsx`: loads `teaser.json` from the public dir.
+- `Teaser.tsx`: timeline, progress bar and top tag. Graphics stay at most 4.6 s so the footage shows.
+- `Background.tsx`: stock clips are cover-fit with a slow zoom at 0.85× speed; landscape clips use `fit:"frame"`; stills scroll.
+- `Captions.tsx`: karaoke captions, up to 6 words, 46 px, at y=1390. The space between words must stay **inside** the span.
+- `Graphics.tsx`: the graphic types plus the CTA end card (optional thumbnail and badge).
 
 ## Hardware and tools
-- **PC:** Windows, RTX 5060 Ti 16 GB.
-- **Pinokio:** runs at `http://localhost:42000`. To run one of the app's helper scripts, open `http://localhost:42000/api/explainer-studio/<script>.js`. The launcher scripts live in `C:\pinokio\api\explainer-studio\` (start.js, install.js, test_ff.js = generic runner).
-- **WanGP:** runs local generation; its MCP endpoint is `http://127.0.0.1:42004/mcp/`. Models:
-  - `flux2_klein_9b` for stills (1920×1088);
-  - `ltx2_distilled` for motion clips. Use **1280×720 landscape, 121 frames only**. Vertical LTX output always burns in gibberish text.
-  - `qwen3_tts_base` for the cloned narrator voice.
-- **Ollama:** `qwen3:14b` (models on C:, accepted). Optional local script provider.
-- **ffmpeg:** comes from the imageio-ffmpeg package (7.1, includes libass), installed in the app's own Python environment (`app\env`).
+- **PC:** Windows, RTX 5060 Ti 16 GB. Pinokio at `http://localhost:42000`; a script runs when you open `http://localhost:42000/api/video-studio/<script>.js`.
+- **WanGP:** MCP at `http://127.0.0.1:42004/mcp/`. Models:
+  - `flux2_klein_9b` for stills;
+  - `ltx2_distilled` for motion, **landscape 1280×720 only**, because vertical output burns in gibberish text;
+  - `qwen3_tts_base` for the voice.
+- **Ollama:** `qwen3:14b` (optional script AI) and `qwen2.5vl:7b` (clip vetting).
+- **Script AI:** DeepSeek by default (`deepseek-v4-pro`, Anthropic-compatible endpoint, thinking disabled). DeepSeek can't see images, so image QA for long videos is off.
+- **ffmpeg:** imageio-ffmpeg 7.1. On Windows, image overlays must be full-length looped inputs starting at t=0, or ffmpeg hangs.
 
-## Part 1 — Long explainer video (Explainer Studio app)
-- **Location:** app code in `F:\code\explainer-studio\app\`; UI at `http://127.0.0.1:42005` (start it via Pinokio start.js).
-- **Use:** paste a YouTube link and set a target length, then press Start. Jobs are saved in `F:\videos\explainer_studio\jobs\<timestamp>\`.
-- **Pipeline stages**, in `studio/pipeline.py`. Failed stages retry automatically, 3 times, 60 s apart.
-  1. **transcript** (`transcript.py`): YouTube captions, falling back to faster-whisper.
-  2. **script** (`writer.py`): written in chunks, notes → outline → sections → fact check against the transcript. Default provider is **DeepSeek** (`deepseek-v4-pro`, Anthropic-compatible endpoint, thinking disabled). Other providers: z.ai, Claude, Ollama. Provider code is in `llm.py`; settings are in `config.py`.
-  3. **review:** the owner approves a clean script in the UI. Before showing it, the AI should check it itself: correct names (the guest is **Salim** Ismail), facts against the transcript, and only ask the owner about things it can't fix.
-  4. **charts** (`charts.py`).
-  5. **voice** (TTS clone, `render.py`). The text sent to TTS is folded to plain ASCII ("Rémi" → "Remi").
-  6. **captions** (`captions.py`): one caption per full sentence (split if over about 24 words), keyword highlighted in gold, emoji icons. Word timings come from faster-whisper small.en.
-  7. **presenter:** OFF by default. The lip sync was bad, so it was dropped.
-  8. **motion**, then **stills** (WanGP).
-  9. **assemble** (`assemble.py`, ffmpeg): scene cuts follow sentence starts.
-- **Image QA:** DeepSeek can't see images, so `qa_provider` is set to off. Check stills by eye using contact sheets.
-- **Known ffmpeg trap on Windows:** image overlays must be full-length looped inputs starting at t=0 (`-loop 1 -framerate 24 -t <dur>`), shown with `enable=between(...)`. Inputs that start late hang ffmpeg 7. Always pass `-nostdin` and set a timeout.
-- **Latest finished long video:** `F:\videos\explainer_studio\jobs\20260929_222317\output\AI_s_Wild_Next_Decade_Safety_Abundance_and_the_Race_to_Scale_explainer_1080p.mp4`
+## Syncing code
+- The F: copy is the working copy.
+- When an AI edits the code, it commits and pushes to `tariq424/video-studio`.
+- **Verify every copy to F: with a checksum** (`md5sum`). A file-copy tool once silently wrote an older version.
 
-## Part 2 — YouTube Short teaser (Remotion)
-- **Source:** `F:\code\explainer-studio\remotion_teaser\`. This is React/TypeScript built with Remotion 4.0.531.
-  - `src/Root.tsx`: loads `public/teaser.json`.
-  - `src/Teaser.tsx`: the timeline. Each graphic stays at most 4.6 s so the scenery shows.
-  - `src/Background.tsx`: stock clips are cover-fit with a slow zoom; landscape AI clips use `fit:"frame"` (shown whole over a blurred copy); stills scroll horizontally.
-  - `src/Captions.tsx`: karaoke captions, up to 6 words per page, 46 px, at y=1390. Put the space between words **inside** each span, or the spaces disappear.
-  - `src/Graphics.tsx`: graphic types hook, quote, compare, stat, icons, timeline and cta, shown in a band at the top.
-  - `build_teaser.py`: builds `public/teaser.json` and `public/voice.wav` from the narration. The `SCENES` dictionary sets which clip plays in each beat (b0–b8) and which graphic appears at which word.
-- **Teaser assets:** `F:\videos\explainer_studio\shorts\moonshots_teaser_v2\`
-  - `plan.json`: 9 beats, about 300 words of narration.
-  - `voice\b*.wav` and `timings.json`: made by `app\make_teaser_voice.py`.
-  - `motion\*_l.mp4`: landscape AI clips made by `app\make_teaser_motion.py`. Ignore the vertical ones; they contain gibberish text.
-  - `stock\`: Pexels footage. `queries.json` holds the searches, `candidates.json` what came back, `pick.json` the vetted picks, `clips\` the originals and `trim\` the 10 s 1080×1920 versions.
-- **Rebuild steps:**
-  1. Run `npm install` in the remotion folder.
-  2. Copy the media into `public\media\`: stills (`s*.jpg`), motion clips (`*_l.mp4`), and `stock\trim\*.mp4` into `public\media\stock\`.
-  3. Run `python build_teaser.py <teaser folder>`.
-  4. Run `npx remotion render Teaser out.mp4 --concurrency=2`. The render is 1080×1920 and takes about 15 minutes.
-- **Stock-footage workflow** (the "Videer" approach; Videer itself lives in `F:\videer` and `F:\videer_wsl`):
-  1. Write 2 search phrases per beat. Use concrete visuals ("MRI scanner", "solar farm aerial"), not abstract ideas.
-  2. Run `app\stock_search.py`. It calls the Pexels `/videos/search` endpoint with `orientation=portrait` and reads the key from the project `.env`.
-  3. **Vet every clip.** Pull 4 frames spread across each candidate. Reject clips with on-screen text or logos, nonsense or off-topic content, duplicates, and shots that change partway through. Only about 1 in 6 candidates survives.
-  4. Run `app\stock_download.py`, then trim each clip to 10 s at 1080×1920.
-  5. Add creator credits to the description file, even though Pexels doesn't require them.
-- **Current teaser (v3):** `F:\videos\explainer_studio\shorts\moonshots_teaser_v2\Moonshots_AMA293_teaser_short.mp4`, 118.6 s, about 96% motion. Older versions are `_v1` and `_v2` in the same folder.
-- **Upload text:** `youtube_short_description.txt`. **TODO:** paste the long video's YouTube URL in place of the placeholder.
-
-## Open items / ideas
-1. Upload the long video, put its URL in the Short's description, then upload the Short.
-2. Optional: build Pexels search, vetting and the Remotion render into the Explainer Studio app, so every job gets stock footage automatically. The hard part is vetting: it needs a vision model that can actually see images (DeepSeek can't), or vetting by eye from contact sheets.
-3. Optional: render Remotion on the PC instead of in the cloud.
-
-## Tips for the next AI
-- Ask it to read the code files above before changing anything. The pipeline is stable, so make small edits.
-- If a render or ffmpeg step hangs, check first for the late-starting-input trap described in Part 1.
-- Large files: work locally on F:. Don't route big files through chat uploads.
+## Open items
+- Upload the Moonshots long video, and put its link in the Short descriptions.
+- Optional: B-roll for long videos from the same Pexels search plus vetting, which would cut WanGP render time.

@@ -14,12 +14,17 @@ SHORT = """You are writing a vertical YouTube Short of about {secs} seconds (abo
 that condenses "{title}" by {channel}. The goal: a viewer who watches only this Short understands the main ideas and the
 most striking facts, and wants more.
 
+People in the source (use these full names and spellings; captions often mishear names): {people}
+
 NOTES ON THE SOURCE (use only these facts):
 {notes}
 
-Write {nb} beats that tell one story. Each beat is 28-50 words (about 10-18 seconds spoken).
-- Beat 1 is the hook: within the first sentence, a surprising claim, number or sharp question from the notes. No greetings, no "in this video".
-- Middle beats: the strongest points, one idea per beat, concrete (numbers, names, examples). Attribute opinions and predictions to who said them.
+Write {nb} beats that tell one story. Each beat is 30-48 words (about 11-17 seconds spoken). The total must be {words} words (+/- 5%);
+YouTube Shorts are cut off at 3 minutes, so do not go over.
+- Beat 1 is the hook: one short line framing what this is (who is talking, about what), then the most surprising claim or number,
+  in plain words (no jargon in the first sentence). No greetings, no "in this video".
+- Middle beats: the strongest points, ONE idea per beat (never two unrelated topics in one beat), concrete (numbers, names, examples).
+  Attribute opinions and predictions to who said them (first name is fine in narration).
 - Last beat: the payoff / biggest takeaway, ending on a strong line.
 Narration: spoken, punchy, short sentences, plain words, numbers written as spoken words ("ten billion dollars", "twenty thirty").
 No markdown, no stage directions. Never invent numbers, quotes or names.
@@ -27,13 +32,14 @@ No markdown, no stage directions. Never invent numbers, quotes or names.
 For each beat also give:
 - "graphics": 1 or 2 on-screen graphics. The first appears as the beat starts ("at": null). An optional second one appears when
   the word in "at" is spoken ("at" must be ONE word that appears in that beat's narration, from its second half). Kinds:
-   {{"kind":"hook","lines":["2-4 short lines"],"accent":1}}   (accent = index of the line to highlight; use for beat 1 and big questions)
+   {{"kind":"hook","lines":["2-4 lines of at most 3 words each, in capitals"],"accent":1}}   (accent = index of the line to highlight; use for beat 1 and big questions)
    {{"kind":"quote","text":"max 16 words","who":"speaker name"}}
    {{"kind":"stat","value":5,"decimals":0,"prefix":"","suffix":"x","label":"2-4 words","sub":"optional short line"}}
    {{"kind":"compare","badge":"vs","note":"short source line","left":{{"icon":"one emoji","head":"1-3 words","body":"2-5 words"}},"right":{{"icon":"one emoji","head":"1-3 words","body":"2-5 words"}}}}
    {{"kind":"icons","title":"short title","items":[{{"icon":"one emoji","label":"1-2 words"}}]}}   (3-4 items)
-   {{"kind":"timeline","title":"short title","steps":[{{"when":"short","label":"2-4 words"}}]}}   (3 steps)
-  Vary the kinds across beats. Keep all graphic text short. Stat values are plain numbers taken from the notes.
+   {{"kind":"timeline","title":"short title","steps":[{{"when":"1-2 words","label":"2-4 words"}}]}}   (3 steps)
+  Vary the kinds across beats. Keep all graphic text short. Quotes and stats name the person in full ("who"/"sub").
+  A stat must be a real quantity from the notes (a percentage, multiple, count, amount): never a model version, year or name.
 - "queries": 2 stock-video search phrases (2-4 words each) for what to SHOW while this beat plays: concrete and filmable,
   e.g. "server room lights", "doctor reading scan", "city traffic night aerial", "students library". No abstract words
   ("AI", "future", "concept", "technology"), no brand names, no famous people, nothing that is mostly text or a screen.
@@ -44,14 +50,24 @@ and "description" (2-3 sentences for YouTube that credit {channel} and the origi
 Reply with ONLY JSON:
 {{"title":"...","tag":"...","description":"...","beats":[{{"vo":"...","graphics":[{{"at":null,"g":{{...}}}},{{"at":"word","g":{{...}}}}],"queries":["...","..."]}}]}}"""
 
-VET = """You are vetting a stock video clip for a vertical YouTube Short. The image shows 4 frames from the clip (in order).
-While this clip plays, the narration says: "{vo}"
-The clip was found by searching: "{query}"
-Score how well it works as a background for that moment (0-10): 10 = clearly fits the topic and mood, good quality;
-5 = generic but acceptable; 0 = unrelated, nonsensical, ugly or confusing.
-Also report problems: readable text, captions, logos or watermarks covering the frame; a jarring cut to an unrelated scene
-between frames; distorted or low-quality footage; anything inappropriate.
-Reply with JSON only: {{"score": 0-10, "text": true|false, "problem": "short reason or empty"}}"""
+VET = """These are 4 frames, in order, from one short stock video clip.
+Answer each question about what you actually see:
+1. "shows": does the clip show "{query}"? Answer "yes", "partly" (related scene or similar subject) or "no".
+2. "overlay_text": is there large readable text, a caption, title, logo or watermark overlaid on the video, or a clearly
+   visible brand name/logo on a product (like an advert)? (Small incidental text in the background does not count.) true or false.
+3. "same_scene": do all 4 frames come from the same continuous scene (no hard cut to something unrelated)? true or false.
+4. "looks_ok": is it clear, real footage (not blurry, glitchy, distorted or disturbing)? true or false.
+Reply with JSON only: {{"shows": "yes|partly|no", "overlay_text": false, "same_scene": true, "looks_ok": true, "seen": "10-20 words: what the clip shows (subject, setting, mood)"}}"""
+
+PICK = """You are the editor of a vertical YouTube Short. For each beat below you get the narration and a list of vetted
+stock clips (id + what the clip shows). Pick the clips that best support what is being SAID in that beat: same subject,
+setting or mood; literal matches are best, a fitting mood or metaphor is fine; avoid clips that would confuse a viewer
+(e.g. someone posing for the camera, an unrelated product, an empty room when the narration is about people).
+Pick exactly the number asked for each beat; if fewer fit, pick fewer. Never use the same clip id twice.
+Also pick one unused clip with a calm, general look for the closing end card ("end").
+Reply with ONLY JSON: {{"b0": ["id", "id"], "b1": ["id"], ..., "end": ["id"]}}
+
+{beats}"""
 
 def _log_none(m): pass
 
@@ -69,8 +85,10 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             for x in b:
                 if not isinstance(x.get("vo"), str) or not x.get("queries"): raise ValueError("beat missing vo or queries")
             n = sum(len(x["vo"].split()) for x in b)
-            if n < words * 0.85: raise ValueError(f"narration is {n} words in total but must be about {words}; add detail from the notes")
-        prompt = SHORT.format(secs=int(secs), words=int(words * 1.1), title=title, channel=channel, notes=notes[:24000], nb=nb)
+            if n < words * 0.88: raise ValueError(f"narration is {n} words in total but must be about {words}; add detail from the notes")
+            if n > words * 1.1: raise ValueError(f"narration is {n} words in total but must be at most {int(words * 1.05)}; cut weaker points")
+        prompt = SHORT.format(secs=int(secs), words=words, title=title, channel=channel, notes=notes[:24000], nb=nb,
+                              people=(meta.get("description") or "")[:1200] or "(see notes)")
         try: j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=chk)
         except RuntimeError:
             log("  length still short after 3 tries; keeping the best version")
@@ -84,6 +102,8 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                                      "visuals": [{"type": "chart", "chart": g["g"], "at": g.get("at")} for g in gs]})
         log("Checking the Short against the source (names, attributions, numbers)...")
         plan = fact_check(llm, plan, meta, transcript, log, stop)
+    n = sum(len(x["vo"].split()) for x in plan["sections"])
+    if n > words * 1.12: log(f"  NOTE: script is {n} words (target {words}); trim it in review or it will be sped up to fit 3:00")
     # closing call-to-action beat
     if mode == "both":
         cta_vo = "Want the full story? The complete breakdown is linked below."
@@ -163,61 +183,91 @@ def _unload_vet(cfg):
     except Exception: pass
 
 def _score(cfg, cand, vo, sheet, log):
-    if cfg.get("vet_provider", "local") == "off": return 6, ""
-    try: t = _vision(cfg, sheet, VET.format(vo=vo[:400], query=cand["query"]))
-    except Exception as e: log(f"  vetting error ({str(e)[:100]})"); return 5, "unchecked"
+    sc, prob, _ = _vet(cfg, cand, sheet, log); return sc, prob
+
+def _vet(cfg, cand, sheet, log):
+    """0-10 from simple factual answers (small local vision models judge facts well, 'fit' poorly)."""
+    from PIL import Image, ImageStat
+    if sum(ImageStat.Stat(Image.open(sheet).convert("L")).mean) < 28: return 2, "too dark", ""
+    if cfg.get("vet_provider", "local") == "off": return 6, "", cand["query"]
+    try: t = _vision(cfg, sheet, VET.format(query=cand["query"]))
+    except Exception as e: log(f"  vetting error ({str(e)[:100]})"); return 5, "unchecked", cand["query"]
     try: j = parse_json(t)
-    except Exception: return 5, "unparsed"
-    sc = float(j.get("score") or 0)
-    if j.get("text") is True or str(j.get("text")).lower() == "true": sc = min(sc, 2)
-    return sc, str(j.get("problem") or "")
+    except Exception: return 5, "unparsed", cand["query"]
+    yes = lambda k, d: str(j.get(k, d)).strip().lower() in ("true", "yes", "1")
+    shows = str(j.get("shows", "")).strip().lower()
+    sc = {"yes": 8, "partly": 6}.get(shows, 2)
+    probs = []
+    if yes("overlay_text", False): sc = min(sc, 1); probs.append("text/logo overlay")
+    if not yes("same_scene", True): sc = min(sc, 3); probs.append("scene cut")
+    if not yes("looks_ok", True): sc = min(sc, 3); probs.append("poor footage")
+    if shows not in ("yes", "partly"): probs.append(f"doesn't show '{cand['query']}' (shows: {str(j.get('seen', ''))[:60]})")
+    return sc, ", ".join(probs), str(j.get("seen") or cand["query"])[:160]
+
+KEYS = ("id", "query", "dur", "file", "page", "author", "author_url", "score", "seen")
 
 def do_stock(job, plan, cfg, log, stop):
+    """1) search Pexels per beat; 2) vision model describes each candidate and drops text/logo overlays, cuts, dark or bad
+    footage; 3) the script AI picks the best-fitting clips per beat from those descriptions; 4) download + normalise."""
     d = job / "short" / "stock"; (d / "sheets").mkdir(parents=True, exist_ok=True); (d / "clips").mkdir(exist_ok=True)
-    pickf = d / "pick.json"
+    pickf, poolf = d / "pick.json", d / "pool.json"
     pick = json.loads(pickf.read_text(encoding="utf-8")) if pickf.exists() else {}
-    key = _pexels_key()
-    if not key: raise RuntimeError("No PEXELS_API_KEY in the project .env file (free key from pexels.com/api).")
-    _ensure_vet_model(cfg, log)
-    used = {c["id"] for v in pick.values() for c in v}
+    pool = json.loads(poolf.read_text(encoding="utf-8")) if poolf.exists() else {}
     beats = [s for s in plan["sections"] if not s.get("cta")]
-    spare = []
-    try:
-        for s in beats:
-            if s["id"] in pick: continue
-            if stop(): raise RuntimeError("cancelled")
-            secs = len(s["vo"].split()) / cfg["wpm"] * 60 + GAP
-            need = max(2, min(3, math.ceil(secs / 6.0)))
-            cands, seen = [], set()
-            lists = [_search(key, q, log) for q in s["queries"]]
-            for i in range(max(map(len, lists), default=0)):   # interleave queries, best Pexels matches first
-                for l in lists:
-                    if i < len(l) and l[i]["id"] not in seen and l[i]["id"] not in used: seen.add(l[i]["id"]); cands.append(l[i])
-            good, scored = [], []
-            for c in cands[:12]:
-                if len(good) >= need: break
-                sh = d / "sheets" / f"{c['id']}.jpg"
-                try:
-                    if not sh.exists(): _sheet(c["pics"], sh)
-                except Exception as e: log(f"  preview for {c['id']} failed ({e})"); continue
-                sc, prob = _score(cfg, c, s["vo"], sh, log); c["score"] = sc; scored.append(c)
-                if sc >= 6: good.append(c)
-                else: log(f"  {s['id']}: rejected '{c['query']}' clip {c['id']} (score {sc:.0f}{', ' + prob if prob else ''})")
-            if len(good) < need:
-                extra = [c for c in sorted(scored, key=lambda c: -c["score"]) if c not in good and c["score"] >= 4]
-                good += extra[:need - len(good)]
-            spare += [c for c in sorted(scored, key=lambda c: -c["score"]) if c not in good and c["score"] >= 6]
-            for c in good: used.add(c["id"])
-            pick[s["id"]] = [{k: c[k] for k in ("id", "query", "dur", "file", "page", "author", "author_url", "score")} for c in good]
-            log(f"  {s['id']}: {len(good)} clip(s) kept out of {len(scored)} checked ({', '.join(s['queries'])})")
-            pickf.write_text(json.dumps(pick, indent=1), encoding="utf-8")
-    finally:
-        _unload_vet(cfg)
     cta = next((s for s in plan["sections"] if s.get("cta")), None)
-    if cta and cta["id"] not in pick:
-        alt = [c for c in spare if c["id"] not in used][:1]
-        pick[cta["id"]] = [{k: c[k] for k in ("id", "query", "dur", "file", "page", "author", "author_url", "score")} for c in alt] or pick[beats[0]["id"]][:1]
-    pickf.write_text(json.dumps(pick, indent=1), encoding="utf-8")
+    need = {s["id"]: max(2, min(3, math.ceil((len(s["vo"].split()) / cfg["wpm"] * 60 + GAP) / 6.0))) for s in beats}
+    todo = [s for s in beats if s["id"] not in pick]
+    if todo:
+        key = _pexels_key()
+        if not key: raise RuntimeError("No PEXELS_API_KEY in the project .env file (free key from pexels.com/api).")
+        _ensure_vet_model(cfg, log)
+        seen_ids = {c["id"] for v in pool.values() for c in v} | {c["id"] for v in pick.values() for c in v}
+        try:
+            for s in todo:
+                if s["id"] in pool: continue
+                if stop(): raise RuntimeError("cancelled")
+                lists = [_search(key, q, log) for q in s["queries"]]
+                cands = []
+                for i in range(max(map(len, lists), default=0)):   # interleave queries, best Pexels matches first
+                    for l in lists:
+                        if i < len(l) and l[i]["id"] not in seen_ids: seen_ids.add(l[i]["id"]); cands.append(l[i])
+                ok, checked = [], 0
+                for c in cands[:12]:
+                    if len(ok) >= need[s["id"]] + 3: break
+                    sh = d / "sheets" / f"{c['id']}.jpg"
+                    try:
+                        if not sh.exists(): _sheet(c["pics"], sh)
+                    except Exception as e: log(f"  preview for {c['id']} failed ({e})"); continue
+                    sc, prob, seen = _vet(cfg, c, sh, log); checked += 1; c["score"], c["seen"] = sc, seen
+                    if sc >= 5: ok.append(c)
+                    else: log(f"  {s['id']}: dropped clip {c['id']} ({prob or 'off-topic'})")
+                pool[s["id"]] = [{k: c.get(k) for k in KEYS} for c in ok]
+                poolf.write_text(json.dumps(pool, indent=1), encoding="utf-8")
+                log(f"  {s['id']}: {len(ok)} usable clips out of {checked} checked ({', '.join(s['queries'])})")
+        finally:
+            _unload_vet(cfg)
+        # editor pass: the script AI matches clip descriptions to the narration
+        listing = "\n\n".join(f"BEAT {s['id']} (pick {need[s['id']]}): \"{s['vo']}\"\n" + "\n".join(f"  {c['id']}: {c['seen']}" for c in pool.get(s["id"], []))
+                              for s in todo)
+        others = [c for v in pool.values() for c in v]
+        choice = {}
+        try:
+            with LLM(cfg, log, stop) as llm:
+                log(f"  choosing the best-fitting clips with {llm.name}...")
+                choice = llm.chat_json("You are a precise video editor.", PICK.format(beats=listing), max_tokens=2000)
+        except Exception as e: log(f"  clip choice by AI failed ({str(e)[:100]}); using vetting order")
+        byid = {c["id"]: c for c in others}; used = {c["id"] for v in pick.values() for c in v}
+        for s in todo:
+            ids = [i for i in (choice.get(s["id"]) or []) if isinstance(i, str) and i in byid and i not in used][:need[s["id"]]]
+            if len(ids) < 2:   # fallback / top-up from this beat's own vetted clips
+                ids += [c["id"] for c in sorted(pool.get(s["id"], []), key=lambda c: -c["score"]) if c["id"] not in used and c["id"] not in ids][:need[s["id"]] - len(ids)]
+            pick[s["id"]] = [byid[i] for i in ids]; used.update(ids)
+            log(f"  {s['id']}: using {', '.join(byid[i]['seen'][:50] for i in ids) or 'no clip (will reuse others)'}")
+        if cta and cta["id"] not in pick:
+            e = [i for i in (choice.get("end") or []) if i in byid and i not in used][:1]
+            if not e: e = [c["id"] for c in sorted(others, key=lambda c: -c["score"]) if c["id"] not in used][:1]
+            pick[cta["id"]] = [byid[i] for i in e] or pick[beats[0]["id"]][:1]
+        pickf.write_text(json.dumps(pick, indent=1), encoding="utf-8")
     # download + normalise to 1080x1920, 30 fps, no audio, max 10 s
     for b, cs in pick.items():
         for c in cs:
