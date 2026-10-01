@@ -169,9 +169,11 @@ def build(job, plan, cfg, log):
         clips = list(pick.get(s["id"]) or [])
         # top up from other beats' clips until the footage covers the beat (clips play at 0.85x speed)
         def cap(cs): return sum(_clip_len(sd, c) / 0.85 for c in cs)
+        near = {c["id"] for j in (i - 1, i + 1) if 0 <= j < len(secs) for c in pick.get(secs[j]["id"], [])}
+        borrow = [c for c in pool if c["id"] not in near] or pool   # never repeat a neighbouring beat's shot
         k = 0
-        while pool and cap(clips) < d + 0.3 and k < len(pool):
-            c = pool[(i * 3 + k) % len(pool)]; k += 1
+        while borrow and cap(clips) < d + 0.3 and k < len(borrow):
+            c = borrow[(i * 5 + k) % len(borrow)]; k += 1
             if all(c["id"] != x["id"] for x in clips): clips.append(c)
         bgs = []
         clips = [c for c in clips if _clip_len(sd, c) > 0]

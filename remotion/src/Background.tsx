@@ -10,7 +10,8 @@ export const Shot: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur,
   const t = f / fps;
   const p = Math.min(1, t / Math.max(dur, 0.1));
   const ease = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
-  const fadeIn = interpolate(t, [0, 0.35], [0, 1], { extrapolateRight: "clamp" });
+  // first shot of a beat cuts in hard (a fade there dips to black between beats); later shots crossfade over the previous one
+  const fadeIn = bg.from === 0 ? 1 : interpolate(t, [0, 0.35], [0, 1], { extrapolateRight: "clamp" });
   const shade = "linear-gradient(180deg, rgba(5,8,14,0.45) 0%, rgba(5,8,14,0) 18%, rgba(5,8,14,0) 62%, rgba(5,8,14,0.7) 100%)";
   if (bg.type === "video" && bg.fit === "frame") {
     // landscape clip shown whole, over a blurred enlarged copy of itself
