@@ -99,7 +99,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
         cta = {"kind": "cta", "badge": "FULL BREAKDOWN", "title": long_title or plan["title"], "line": "Watch it, linked below"}
     else:
         cta_vo = f"That was a short summary of {src_name}. Follow for more."
-        cta = {"kind": "cta", "badge": "SUMMARIZED FROM", "title": title[:80], "line": "Original linked below" if meta.get("webpage_url") else "Follow for more"}
+        cta = {"kind": "cta", "badge": "SUMMARIZED FROM", "title": title[:80], "line": "Follow for more", "play": False, "arrow": False}
     plan["sections"].append({"id": f"b{len(plan['sections'])}", "title": "Call to action", "vo": cta_vo, "queries": [], "cta": cta, "visuals": []})
     w = sum(len(s["vo"].split()) for s in plan["sections"])
     log(f"Short script ready: {len(plan['sections'])} beats, {w} words (~{w / cfg['wpm'] * 60 + GAP * len(plan['sections']) + TAIL:.0f}s)")

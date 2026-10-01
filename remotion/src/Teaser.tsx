@@ -17,6 +17,17 @@ const Exit: React.FC<{ dur: number; children: React.ReactNode }> = ({ dur, child
   return <AbsoluteFill style={{ opacity: 1 - k, transform: `translateY(${-90 * k}px)` }}>{children}</AbsoluteFill>;
 };
 
+// top label; hidden on the end card, where it would overlap the card's badge
+const Tag: React.FC<{ tag: string; hideFrom: number }> = ({ tag, hideFrom }) => {
+  const f = useCurrentFrame(); const { fps } = useVideoConfig();
+  if (!tag || f / fps >= hideFrom) return null;
+  return (
+    <div style={{ position: "absolute", top: 60, left: 0, right: 0, textAlign: "center" }}>
+      <span style={{ fontFamily: BODY, fontWeight: 800, fontSize: 30, color: C.text, background: "rgba(0,0,0,0.45)", border: `1px solid ${C.line}`, borderRadius: 999, padding: "10px 24px", letterSpacing: 1 }}>{tag}</span>
+    </div>
+  );
+};
+
 export const Teaser: React.FC<TeaserProps> = ({ audio, total, tag, beats }) => {
   const { fps } = useVideoConfig();
   const fr = (s: number) => Math.max(1, Math.round(s * fps));
@@ -44,9 +55,7 @@ export const Teaser: React.FC<TeaserProps> = ({ audio, total, tag, beats }) => {
           {b.words.length > 0 && b.graphics[0]?.g.kind !== "cta" && <Captions words={b.words} />}
         </Sequence>
       ))}
-      <div style={{ position: "absolute", top: 60, left: 0, right: 0, textAlign: "center" }}>
-        <span style={{ fontFamily: BODY, fontWeight: 800, fontSize: 30, color: C.text, background: "rgba(0,0,0,0.45)", border: `1px solid ${C.line}`, borderRadius: 999, padding: "10px 24px", letterSpacing: 1 }}>{tag}</span>
-      </div>
+      <Tag tag={tag} hideFrom={(beats.find((b) => b.graphics.some((g) => g.g.kind === "cta"))?.start ?? 1e9)} />
       <Progress total={total} />
       <Audio src={staticFile(audio)} />
     </AbsoluteFill>
