@@ -27,6 +27,20 @@ def test_vision():
     ok, issue = qa.check(cfg, b["image"], b.get("prompt", "a photo"))
     return jsonify(ok=ok, issue=issue, provider=cfg.get("qa_provider"))
 
+@app.get("/api/test_footage")
+def test_footage():
+    """Search every footage source once (keys never returned) so setup problems show up before a job runs."""
+    from studio import footage
+    q = request.args.get("q", "rocket launch"); orient = request.args.get("orient", "portrait"); logs = []
+    out = {}
+    for name, fn in (("Pexels", lambda: footage.pexels(q, orient, logs.append, 2560)), ("Pixabay", lambda: footage.pixabay(q, orient, logs.append, 2560)),
+                     ("NASA", lambda: footage.nasa(q, logs.append, limit=3))):
+        try: r = fn(); out[name] = {"count": len(r), "examples": [{"id": c["id"], "desc": c["desc"][:80], "size": f"{c['w']}x{c['h']}", "dur": c["dur"]} for c in r[:3]]}
+        except Exception as e: out[name] = {"error": str(e)[:200]}
+    keys = footage._keys()
+    out["keys"] = {k: bool(keys.get(k)) for k in ("PEXELS_API_KEY", "PIXABAY_API_KEY")}; out["log"] = logs[-10:]
+    return jsonify(out)
+
 @app.post("/api/test_key")
 def test_key():
     from studio.llm import LLM

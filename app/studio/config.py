@@ -26,6 +26,7 @@ DEFAULTS = {
     "vet_provider": "local",          # stock-clip vetting: local (Ollama vision) | zai | claude | off
     "vet_model": "qwen2.5vl:7b",
     "short_concurrency": "75%",
+    "long_broll": True,               # long videos: use real stock footage first, AI stills/motion only where nothing fits
     "voice_ref_wav": str(ROOT / "assets" / "voice_ref_baritone.wav"),
     "voice_ref_text": "Every few months, someone announces that artificial intelligence is about to change everything. Some say it will end work as we know it. Others say it is mostly hype. Stanford economist Chad Jones has spent years building models to answer a simpler question.",
     "presenter_image": str(ROOT / "assets" / "presenter.jpg"),

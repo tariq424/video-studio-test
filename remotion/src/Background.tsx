@@ -14,13 +14,13 @@ export const Shot: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur,
   const shade = "linear-gradient(180deg, rgba(5,8,14,0.45) 0%, rgba(5,8,14,0) 18%, rgba(5,8,14,0) 62%, rgba(5,8,14,0.7) 100%)";
   if (bg.type === "video" && bg.fit === "frame") {
     // landscape clip shown whole, over a blurred enlarged copy of itself
-    const z = interpolate(p, [0, 1], [1.0, 1.06]);
+    const z = interpolate(p, [0, 1], [1.0, 1.03]);
     return (
       <AbsoluteFill style={{ opacity: fadeIn, overflow: "hidden", background: "#000" }}>
         <OffthreadVideo src={staticFile(bg.src)} muted playbackRate={0.85}
           style={{ width: "100%", height: "100%", objectFit: "cover", filter: "blur(38px) brightness(0.55)", transform: "scale(1.15)" }} />
         <AbsoluteFill style={{ alignItems: "center", justifyContent: "center" }}>
-          <div style={{ width: width, height: (width * 704) / 1280, overflow: "hidden", boxShadow: "0 30px 80px rgba(0,0,0,0.6)", transform: `translateY(40px) scale(${z})` }}>
+          <div style={{ width: width, height: (width * 9) / 16, overflow: "hidden", boxShadow: "0 30px 80px rgba(0,0,0,0.6)", transform: `translateY(40px) scale(${z})` }}>
             <OffthreadVideo src={staticFile(bg.src)} muted playbackRate={0.85} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           </div>
         </AbsoluteFill>
@@ -28,7 +28,7 @@ export const Shot: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur,
     );
   }
   if (bg.type === "video") {
-    const z = interpolate(p, [0, 1], [1.04, 1.12]);
+    const z = interpolate(p, [0, 1], [1.0, 1.04]);   // gentle: every % of zoom softens the picture
     return (
       <AbsoluteFill style={{ opacity: fadeIn, overflow: "hidden" }}>
         <OffthreadVideo src={staticFile(bg.src)} muted playbackRate={0.85}

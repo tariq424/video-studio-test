@@ -9,6 +9,10 @@ ENC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", 17, "-pix_fmt", "yuv420
 
 def _visual(job, v, slot, out, k):
     nfr = int(round(slot * FPS))
+    if v.get("stock"):   # real footage: slow it down up to 1.4x to fill the slot, then hold the last frame if still short
+        src = job / v["stock"]; dd = media.dur(src); f = min(1.4, max(1.0, slot / max(dd, 0.1)))
+        media.ff("-i", src, "-an", "-vf", f"setpts={f:.4f}*PTS,fps={FPS},scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H},setsar=1,tpad=stop_mode=clone:stop_duration={slot:.3f},trim=duration={slot:.3f}", "-frames:v", nfr, *ENC, out)
+        return
     if v["type"] == "motion":
         src = job / "motion" / f"{v['id']}.mp4"; f = slot / media.dur(src)
         media.ff("-i", src, "-an", "-vf", f"setpts={f:.4f}*PTS,fps={FPS},scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H},setsar=1,trim=duration={slot:.3f}", "-frames:v", nfr, *ENC, out)

@@ -116,7 +116,7 @@ def do_motion(job, plan, cfg, wg, log, stop):
     d = job / "motion"; d.mkdir(exist_ok=True); seed = 3000
     for s in plan["sections"]:
         for v in s["visuals"]:
-            if v["type"] != "motion": continue
+            if v["type"] != "motion" or v.get("stock"): continue
             seed += 1; out = d / f"{v['id']}.mp4"
             if media.ok(out): continue
             ok = False
@@ -136,7 +136,7 @@ def do_motion(job, plan, cfg, wg, log, stop):
 
 def do_stills(job, plan, cfg, wg, log, stop):
     d = job / "stills"; d.mkdir(exist_ok=True); seed = 1000; n = 0
-    todo = [v for s in plan["sections"] for v in s["visuals"] if v["type"] == "still"]
+    todo = [v for s in plan["sections"] for v in s["visuals"] if v["type"] == "still" and not v.get("stock")]
     for i, v in enumerate(todo):
         seed += 1; out = d / f"{v['id']}.jpg"
         if out.exists(): continue

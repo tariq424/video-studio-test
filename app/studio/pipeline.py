@@ -5,8 +5,8 @@ from . import config, transcript, writer, render, assemble, media, sources, shor
 from .wangp import WanGP
 
 STAGES = ["transcript", "script", "short_script", "review", "short_stock", "short_voice", "short_render",
-          "charts", "voice", "captions", "presenter", "motion", "stills", "assemble"]
-LONG = {"script", "charts", "voice", "captions", "presenter", "motion", "stills", "assemble"}
+          "charts", "voice", "captions", "broll", "presenter", "motion", "stills", "assemble"]
+LONG = {"script", "charts", "voice", "captions", "broll", "presenter", "motion", "stills", "assemble"}
 SHORT = {"short_script", "short_stock", "short_voice", "short_render"}
 def stages_for(mode): return [s for s in STAGES if not ((mode == "short" and s in LONG) or (mode == "long" and s in SHORT))]
 
@@ -73,7 +73,7 @@ class Studio:
             except Exception as e:
                 j = self.job(jid); j.log("ERROR: " + str(e)); j.log(traceback.format_exc()[-1500:])
                 n = int(j.state.get("auto_retries", 0))
-                rendering = j.state.get("stage") in ("charts", "voice", "captions", "presenter", "motion", "stills", "assemble", "short_stock", "short_voice", "short_render")
+                rendering = j.state.get("stage") in ("charts", "voice", "captions", "presenter", "motion", "stills", "assemble", "broll", "short_stock", "short_voice", "short_render")
                 if rendering and n < 3 and jid not in self.cancel:
                     j.save(status="queued", error="", auto_retries=n + 1)
                     j.log(f"Retrying automatically in 60s (attempt {n + 1} of 3); finished work is kept")
@@ -145,8 +145,16 @@ class Studio:
                             log(f"Captions {sec['id']}: {len(caps)} lines, {sum(1 for c in caps if c.get('emoji_png'))} icons")
                 elif st == "presenter":
                     if s.get("presenter", False): _need_wangp(wg); render.do_presenter(j.dir, plan, cfg, wg, log, stop)
-                elif st == "motion": _need_wangp(wg); render.do_motion(j.dir, plan, cfg, wg, log, stop); j.save_plan(plan)
-                elif st == "stills": _need_wangp(wg); render.do_stills(j.dir, plan, cfg, wg, log, stop)
+                elif st == "broll":
+                    if cfg.get("long_broll", True):
+                        from . import footage
+                        footage.long_broll(j.dir, plan, cfg, log, stop); j.save_plan(plan)
+                elif st == "motion":
+                    if any(v["type"] == "motion" and not v.get("stock") for x in plan["sections"] for v in x["visuals"]): _need_wangp(wg)
+                    render.do_motion(j.dir, plan, cfg, wg, log, stop); j.save_plan(plan)
+                elif st == "stills":
+                    if any(v["type"] == "still" and not v.get("stock") for x in plan["sections"] for v in x["visuals"]): _need_wangp(wg)
+                    render.do_stills(j.dir, plan, cfg, wg, log, stop)
                 elif st == "assemble":
                     meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
                     parts = assemble.build(j.dir, plan, log, stop, use_presenter=s.get("presenter", False), use_captions=s.get("captions", True)); final = assemble.finalize(j.dir, plan, parts, meta, log)

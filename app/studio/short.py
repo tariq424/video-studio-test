@@ -41,34 +41,17 @@ For each beat also give:
   Vary the kinds across beats. Keep all graphic text short. Quotes and stats name the person in full ("who"/"sub").
   A stat must be a real quantity from the notes (a percentage, multiple, count, amount): never a model version, year or name.
   The number counts up on screen, so "prefix"/"suffix" are only symbols or units ("$", ">", "%", "x", "B"), never numbers or ranges.
-- "queries": 2 stock-video search phrases (2-4 words each) for what to SHOW while this beat plays: concrete and filmable,
-  e.g. "server room lights", "doctor reading scan", "city traffic night aerial", "students library". No abstract words
-  ("AI", "future", "concept", "technology"), no brand names, no famous people, nothing that is mostly text or a screen.
+- "queries": 2 stock-video search phrases (3-5 words each) for what to SHOW while this beat plays. Be specific and visual:
+  subject + action + setting, people doing things where possible, e.g. "hands signing contract close-up", "trader watching
+  stock screens", "surgeon in operating room", "students walking campus". No abstract words ("AI", "future", "concept",
+  "technology", "innovation"), no brand names, no famous people, nothing that is mostly text.
 
 Also give "title" (max 60 chars, YouTube title), "tag" (max 28 chars, small label shown at the top, e.g. "MOONSHOTS #293 · CONDENSED"),
-and "description" (2-3 sentences for YouTube that credit {channel} and the original).
+"description" (2-3 sentences for YouTube that credit {channel} and the original), and "source_spoken": how a narrator would
+name the source in a sentence, e.g. "the Moonshots podcast, episode two ninety-three" or "a NotebookLM briefing on battery recycling".
 
 Reply with ONLY JSON:
-{{"title":"...","tag":"...","description":"...","beats":[{{"vo":"...","graphics":[{{"at":null,"g":{{...}}}},{{"at":"word","g":{{...}}}}],"queries":["...","..."]}}]}}"""
-
-VET = """These are 4 frames, in order, from one short stock video clip.
-Answer each question about what you actually see:
-1. "shows": does the clip show "{query}"? Answer "yes", "partly" (related scene or similar subject) or "no".
-2. "overlay_text": is there large readable text, a caption, title, logo or watermark overlaid on the video, or a clearly
-   visible brand name/logo on a product (like an advert)? (Small incidental text in the background does not count.) true or false.
-3. "same_scene": do all 4 frames come from the same continuous scene (no hard cut to something unrelated)? true or false.
-4. "looks_ok": is it clear, real footage (not blurry, glitchy, distorted or disturbing)? true or false.
-Reply with JSON only: {{"shows": "yes|partly|no", "overlay_text": false, "same_scene": true, "looks_ok": true, "seen": "10-20 words: what the clip shows (subject, setting, mood)"}}"""
-
-PICK = """You are the editor of a vertical YouTube Short. For each beat below you get the narration and a list of vetted
-stock clips (id + what the clip shows). Pick the clips that best support what is being SAID in that beat: same subject,
-setting or mood; literal matches are best, a fitting mood or metaphor is fine; avoid clips that would confuse a viewer
-(e.g. someone posing for the camera, an unrelated product, an empty room when the narration is about people).
-Pick exactly the number asked for each beat; if fewer fit, pick fewer. Never use the same clip id twice.
-Also pick one unused clip with a calm, general look for the closing end card ("end").
-Reply with ONLY JSON: {{"b0": ["id", "id"], "b1": ["id"], ..., "end": ["id"]}}
-
-{beats}"""
+{{"title":"...","tag":"...","description":"...","source_spoken":"...","beats":[{{"vo":"...","graphics":[{{"at":null,"g":{{...}}}},{{"at":"word","g":{{...}}}}],"queries":["...","..."]}}]}}"""
 
 def _log_none(m): pass
 
@@ -95,6 +78,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             log("  length still short after 3 tries; keeping the best version")
             j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=lambda x: None if x.get("beats") else (_ for _ in ()).throw(ValueError("no beats")))
         plan = {"title": (j.get("title") or title)[:90], "tag": (j.get("tag") or "CONDENSED")[:32].upper(),
+                "source_spoken": (j.get("source_spoken") or title)[:120],
                 "description": j.get("description", ""), "mode": mode, "sections": []}
         for i, b in enumerate(j["beats"]):
             gs = [g for g in (b.get("graphics") or []) if isinstance(g, dict) and isinstance(g.get("g"), dict) and g["g"].get("kind") in KINDS][:2]
@@ -109,182 +93,36 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
     n = sum(len(x["vo"].split()) for x in plan["sections"])
     if n > words * 1.12: log(f"  NOTE: script is {n} words (target {words}); trim it in review or it will be sped up to fit 3:00")
     # closing call-to-action beat
+    src_name = plan.get("source_spoken") or title
     if mode == "both":
-        cta_vo = "Want the full story? The complete breakdown is linked below."
+        cta_vo = f"That was a short summary of {src_name}. The full breakdown is linked below."
         cta = {"kind": "cta", "badge": "FULL BREAKDOWN", "title": long_title or plan["title"], "line": "Watch it, linked below"}
     else:
-        cta_vo = "Follow for more breakdowns like this. The original is credited below."
-        cta = {"kind": "cta", "badge": "SOURCE", "title": title[:80], "line": "Credits below"}
+        cta_vo = f"That was a short summary of {src_name}. Follow for more."
+        cta = {"kind": "cta", "badge": "SUMMARIZED FROM", "title": title[:80], "line": "Original linked below" if meta.get("webpage_url") else "Follow for more"}
     plan["sections"].append({"id": f"b{len(plan['sections'])}", "title": "Call to action", "vo": cta_vo, "queries": [], "cta": cta, "visuals": []})
     w = sum(len(s["vo"].split()) for s in plan["sections"])
     log(f"Short script ready: {len(plan['sections'])} beats, {w} words (~{w / cfg['wpm'] * 60 + GAP * len(plan['sections']) + TAIL:.0f}s)")
     return plan
 
 # ---------------------------------------------------------------- stock footage
-def _pexels_key():
-    env = config.ROOT / ".env"
-    if env.exists():
-        for l in env.read_text(encoding="utf-8").splitlines():
-            if l.startswith("PEXELS_API_KEY="): return l.split("=", 1)[1].strip().strip("\"'")
-    return ""
-
-def _search(key, q, log):
-    for attempt in range(3):
-        r = requests.get("https://api.pexels.com/videos/search", headers={"Authorization": key},
-                         params={"query": q, "orientation": "portrait", "per_page": 10, "size": "medium"}, timeout=30)
-        if r.status_code == 429: log("  Pexels rate limit; waiting 60s"); time.sleep(60); continue
-        if r.status_code != 200: log(f"  Pexels search '{q}' failed: HTTP {r.status_code}"); return []
-        out = []
-        for v in r.json().get("videos", []):
-            files = [f for f in v.get("video_files", []) if f.get("width") and f.get("height") and f["height"] > f["width"] and f["height"] >= 1280]
-            pics = [p["picture"] for p in sorted(v.get("video_pictures", []), key=lambda p: p.get("nr", 0))]
-            if not files or v.get("duration", 0) < 6 or len(pics) < 4: continue
-            f = sorted(files, key=lambda f: abs(f["height"] - 1920))[0]
-            out.append({"id": str(v["id"]), "query": q, "dur": v["duration"], "file": f["link"], "page": v["url"],
-                        "author": v["user"]["name"], "author_url": v["user"].get("url", ""), "pics": pics})
-        return out
-    return []
-
-def _sheet(pics, out):
-    from PIL import Image
-    idx = [round(i * (len(pics) - 1) / 3) for i in range(4)]
-    ims = []
-    for i in idx:
-        r = requests.get(pics[i], timeout=30); r.raise_for_status()
-        im = Image.open(io.BytesIO(r.content)).convert("RGB"); im.thumbnail((360, 640)); ims.append(im)
-    w = sum(i.width for i in ims) + 12 * 3; h = max(i.height for i in ims)
-    sheet = Image.new("RGB", (w, h), (0, 0, 0)); x = 0
-    for im in ims: sheet.paste(im, (x, 0)); x += im.width + 12
-    sheet.save(out, "JPEG", quality=85)
-
-def _vision(cfg, image, prompt):
-    prov = cfg.get("vet_provider", "local")
-    if prov == "local":
-        url = cfg.get("ollama_url", "http://127.0.0.1:11434").rstrip("/"); model = cfg.get("vet_model", "qwen2.5vl:7b")
-        b64 = base64.b64encode(Path(image).read_bytes()).decode()
-        r = requests.post(url + "/api/chat", timeout=300, json={"model": model, "stream": False, "keep_alive": "5m",
-            "messages": [{"role": "user", "content": prompt, "images": [b64]}], "options": {"temperature": 0.1, "num_predict": 200}})
-        if r.status_code != 200: raise RuntimeError(f"Ollama vision error {r.status_code}: {r.text[:200]}")
-        return r.json()["message"]["content"]
-    from .llm import vision
-    c = dict(cfg); c["qa_provider"] = prov
-    return vision(c, image, prompt)
-
-def _ensure_vet_model(cfg, log):
-    if cfg.get("vet_provider", "local") != "local": return
-    url = cfg.get("ollama_url", "http://127.0.0.1:11434").rstrip("/"); model = cfg.get("vet_model", "qwen2.5vl:7b")
-    try: tags = requests.get(url + "/api/tags", timeout=5).json()
-    except Exception: raise RuntimeError("Clip vetting uses Ollama on this PC, but Ollama isn't running. Start Ollama, then press Resume (or pick another vetting AI in Settings).")
-    if not any(m.get("name", "").split(":")[0] == model.split(":")[0] and m.get("name", "").endswith(model.split(":")[-1]) for m in tags.get("models", [])):
-        log(f"  downloading the clip-vetting model {model} into Ollama (one time, ~6 GB)...")
-        r = requests.post(url + "/api/pull", json={"model": model, "stream": False}, timeout=7200)
-        if r.status_code != 200: raise RuntimeError(f"Ollama pull failed: {r.text[:300]}")
-
-def _unload_vet(cfg):
-    if cfg.get("vet_provider", "local") != "local": return
-    try: requests.post(cfg.get("ollama_url", "http://127.0.0.1:11434").rstrip("/") + "/api/generate",
-                       json={"model": cfg.get("vet_model", "qwen2.5vl:7b"), "keep_alive": 0}, timeout=30)
-    except Exception: pass
-
-def _score(cfg, cand, vo, sheet, log):
-    sc, prob, _ = _vet(cfg, cand, sheet, log); return sc, prob
-
-def _vet(cfg, cand, sheet, log):
-    """0-10 from simple factual answers (small local vision models judge facts well, 'fit' poorly)."""
-    from PIL import Image, ImageStat
-    if sum(ImageStat.Stat(Image.open(sheet).convert("L")).mean) < 28: return 2, "too dark", ""
-    if cfg.get("vet_provider", "local") == "off": return 6, "", cand["query"]
-    try: t = _vision(cfg, sheet, VET.format(query=cand["query"]))
-    except Exception as e: log(f"  vetting error ({str(e)[:100]})"); return 5, "unchecked", cand["query"]
-    try: j = parse_json(t)
-    except Exception: return 5, "unparsed", cand["query"]
-    yes = lambda k, d: str(j.get(k, d)).strip().lower() in ("true", "yes", "1")
-    shows = str(j.get("shows", "")).strip().lower()
-    sc = {"yes": 8, "partly": 6}.get(shows, 2)
-    probs = []
-    if yes("overlay_text", False): sc = min(sc, 1); probs.append("text/logo overlay")
-    if not yes("same_scene", True): sc = min(sc, 3); probs.append("scene cut")
-    if not yes("looks_ok", True): sc = min(sc, 3); probs.append("poor footage")
-    if shows not in ("yes", "partly"): probs.append(f"doesn't show '{cand['query']}' (shows: {str(j.get('seen', ''))[:60]})")
-    return sc, ", ".join(probs), str(j.get("seen") or cand["query"])[:160]
-
-KEYS = ("id", "query", "dur", "file", "page", "author", "author_url", "score", "seen")
-
 def do_stock(job, plan, cfg, log, stop):
-    """1) search Pexels per beat; 2) vision model describes each candidate and drops text/logo overlays, cuts, dark or bad
-    footage; 3) the script AI picks the best-fitting clips per beat from those descriptions; 4) download + normalise."""
-    d = job / "short" / "stock"; (d / "sheets").mkdir(parents=True, exist_ok=True); (d / "clips").mkdir(exist_ok=True)
-    pickf, poolf = d / "pick.json", d / "pool.json"
-    pick = json.loads(pickf.read_text(encoding="utf-8")) if pickf.exists() else {}
-    pool = json.loads(poolf.read_text(encoding="utf-8")) if poolf.exists() else {}
-    beats = [s for s in plan["sections"] if not s.get("cta")]
-    cta = next((s for s in plan["sections"] if s.get("cta")), None)
-    need = {s["id"]: max(2, min(3, math.ceil((len(s["vo"].split()) / cfg["wpm"] * 60 + GAP) / 6.0))) for s in beats}
-    todo = [s for s in beats if s["id"] not in pick]
-    if todo:
-        key = _pexels_key()
-        if not key: raise RuntimeError("No PEXELS_API_KEY in the project .env file (free key from pexels.com/api).")
-        _ensure_vet_model(cfg, log)
-        seen_ids = {c["id"] for v in pool.values() for c in v} | {c["id"] for v in pick.values() for c in v}
-        try:
-            for s in todo:
-                if s["id"] in pool: continue
-                if stop(): raise RuntimeError("cancelled")
-                lists = [_search(key, q, log) for q in s["queries"]]
-                cands = []
-                for i in range(max(map(len, lists), default=0)):   # interleave queries, best Pexels matches first
-                    for l in lists:
-                        if i < len(l) and l[i]["id"] not in seen_ids: seen_ids.add(l[i]["id"]); cands.append(l[i])
-                ok, checked = [], 0
-                for c in cands[:12]:
-                    if len(ok) >= need[s["id"]] + 3: break
-                    sh = d / "sheets" / f"{c['id']}.jpg"
-                    try:
-                        if not sh.exists(): _sheet(c["pics"], sh)
-                    except Exception as e: log(f"  preview for {c['id']} failed ({e})"); continue
-                    sc, prob, seen = _vet(cfg, c, sh, log); checked += 1; c["score"], c["seen"] = sc, seen
-                    if sc >= 5: ok.append(c)
-                    else: log(f"  {s['id']}: dropped clip {c['id']} ({prob or 'off-topic'})")
-                pool[s["id"]] = [{k: c.get(k) for k in KEYS} for c in ok]
-                poolf.write_text(json.dumps(pool, indent=1), encoding="utf-8")
-                log(f"  {s['id']}: {len(ok)} usable clips out of {checked} checked ({', '.join(s['queries'])})")
-        finally:
-            _unload_vet(cfg)
-        # editor pass: the script AI matches clip descriptions to the narration
-        listing = "\n\n".join(f"BEAT {s['id']} (pick {need[s['id']]}): \"{s['vo']}\"\n" + "\n".join(f"  {c['id']}: {c['seen']}" for c in pool.get(s["id"], []))
-                              for s in todo)
-        others = [c for v in pool.values() for c in v]
-        choice = {}
-        try:
-            with LLM(cfg, log, stop) as llm:
-                log(f"  choosing the best-fitting clips with {llm.name}...")
-                choice = llm.chat_json("You are a precise video editor.", PICK.format(beats=listing), max_tokens=2000)
-        except Exception as e: log(f"  clip choice by AI failed ({str(e)[:100]}); using vetting order")
-        byid = {c["id"]: c for c in others}; used = {c["id"] for v in pick.values() for c in v}
-        for s in todo:
-            ids = [i for i in (choice.get(s["id"]) or []) if isinstance(i, str) and i in byid and i not in used][:need[s["id"]]]
-            if len(ids) < 2:   # fallback / top-up from this beat's own vetted clips
-                ids += [c["id"] for c in sorted(pool.get(s["id"], []), key=lambda c: -c["score"]) if c["id"] not in used and c["id"] not in ids][:need[s["id"]] - len(ids)]
-            pick[s["id"]] = [byid[i] for i in ids]; used.update(ids)
-            log(f"  {s['id']}: using {', '.join(byid[i]['seen'][:50] for i in ids) or 'no clip (will reuse others)'}")
-        if cta and cta["id"] not in pick:
-            e = [i for i in (choice.get("end") or []) if i in byid and i not in used][:1]
-            if not e: e = [c["id"] for c in sorted(others, key=lambda c: -c["score"]) if c["id"] not in used][:1]
-            pick[cta["id"]] = [byid[i] for i in e] or pick[beats[0]["id"]][:1]
-        pickf.write_text(json.dumps(pick, indent=1), encoding="utf-8")
-    # download + normalise to 1080x1920, 30 fps, no audio, max 10 s
-    for b, cs in pick.items():
-        for c in cs:
-            raw = d / "clips" / f"{c['id']}_raw.mp4"; out = d / "clips" / f"{c['id']}.mp4"
-            if media.ok(out): continue
-            if not (raw.exists() and raw.stat().st_size > 100000):
-                r = requests.get(c["file"], timeout=180, headers={"User-Agent": "Mozilla/5.0"}); r.raise_for_status(); raw.write_bytes(r.content)
-            media.ff("-ss", "0.2", "-i", raw, "-t", f"{min(10.0, c['dur'] - 0.4):.2f}", "-an",
-                     "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,format=yuv420p",
-                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", out)
-            raw.unlink(missing_ok=True)
-    n = sum(len(v) for v in pick.values()); empty = [b for b, v in pick.items() if not v]
-    log(f"Stock footage: {n} clips ready" + (f"; no usable clip for {', '.join(empty)} (will reuse others)" if empty else ""))
+    """Pexels + Pixabay (+ NASA for space beats): ranked by meaning, checked by the vision model, cut at high quality."""
+    from . import footage
+    d = job / "short" / "stock"
+    slots, need = [], {}
+    for s in plan["sections"]:
+        if s.get("cta"):
+            slots.append({"id": s["id"], "text": "calm, general background for the closing end card", "queries": ["city skyline dusk aerial", "night sky stars timelapse"]})
+            need[s["id"]] = 1
+        else:
+            secs = len(s["vo"].split()) / cfg["wpm"] * 60 + GAP
+            slots.append({"id": s["id"], "text": s["vo"], "queries": s["queries"]})
+            need[s["id"]] = max(2, min(3, math.ceil(secs / 6.0)))
+    picked = footage.fill(cfg, slots, "portrait", need, d, log, stop, want_long_side=2560, max_secs=10.0, state_file=d / "footage.json", fallback=True)
+    (d / "pick.json").write_text(json.dumps(picked, indent=1), encoding="utf-8")
+    n = sum(len(v) for v in picked.values()); short_ = [k for k, v in picked.items() if len(v) < need[k]]
+    log(f"Stock footage: {n} clips ready" + (f"; fewer than wanted for {', '.join(short_)} (others will be reused)" if short_ else ""))
 
 # ---------------------------------------------------------------- narration + timings
 def do_voice(job, plan, cfg, wg, log, stop):
@@ -322,14 +160,16 @@ def build(job, plan, cfg, log):
         last = i == len(secs) - 1
         d = (tm[s["id"]]["dur"] + (TAIL if last else GAP)) / speed
         words = [[w, round(a / speed, 3), round(b / speed, 3)] for w, a, b in tm[s["id"]]["words"]]
-        clips = pick.get(s["id"]) or [pool[(i * 3) % len(pool)]] if pool else []
+        clips = (pick.get(s["id"]) or [pool[(i * 3) % len(pool)]]) if pool else []
         bgs = []
         for k, c in enumerate(clips):
             src = sd / "stock" / "clips" / f"{c['id']}.mp4"
             if not src.exists(): continue
             dst = pub / "media" / "stock" / f"{c['id']}.mp4"
             if not dst.exists(): shutil.copy2(src, dst)
-            bgs.append({"src": f"media/stock/{c['id']}.mp4", "type": "video", "from": round(k * d / len(clips), 3)})
+            bg = {"src": f"media/stock/{c['id']}.mp4", "type": "video", "from": round(k * d / len(clips), 3)}
+            if c.get("orient") == "landscape": bg["fit"] = "frame"
+            bgs.append(bg)
         # graphics: first at the beat start, the second when its word is spoken
         gfx = []
         if s.get("cta"): gfx = [{"at": 0.2, "g": s["cta"]}]
@@ -369,7 +209,7 @@ def do_render(job, plan, cfg, meta, log, stop):
     safe = re.sub(r"[^A-Za-z0-9]+", "_", plan["title"]).strip("_")[:60] or "short"
     out = out_dir / f"{safe}_short.mp4"; tmp = out_dir / "_short_rendering.mp4"
     cmd = [_npx(), "remotion", "render", "src/Root.tsx", "Teaser", str(tmp), f"--public-dir={job / 'short' / 'public'}",
-           f"--concurrency={cfg.get('short_concurrency', '75%')}", "--log=info"]
+           f"--concurrency={cfg.get('short_concurrency', '75%')}", "--jpeg-quality=95", "--crf=16", "--log=info"]
     log(f"Rendering the Short with Remotion ({total:.0f}s of video)...")
     p = subprocess.Popen(cmd, cwd=rdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
     last, t0 = "", time.time()
@@ -381,18 +221,15 @@ def do_render(job, plan, cfg, meta, log, stop):
     if p.wait() != 0: raise RuntimeError("Remotion render failed: " + last[:300])
     if out.exists(): out.unlink()
     tmp.rename(out)
-    # YouTube description with credits
+    # YouTube description: credit the source we summarised; stock libraries need no credit (NASA asks for a courtesy credit)
     pick = json.loads((job / "short" / "stock" / "pick.json").read_text(encoding="utf-8"))
-    seen, credits = set(), []
-    for cs in pick.values():
-        for c in cs:
-            if c["id"] in seen: continue
-            seen.add(c["id"]); credits.append(f"- {c['author']} ({c['page']})")
+    srcs = {c.get("src", "Pexels") for cs in pick.values() for c in cs}
     src = meta.get("webpage_url") or ""
     desc = [plan["title"], "", plan.get("description", ""), ""]
     if plan.get("mode") == "both": desc += ["Full breakdown: <PASTE LONG VIDEO LINK HERE>", ""]
-    desc += [f"Original: {meta.get('title', '')}" + (f" - {meta.get('channel')}" if meta.get("channel") else "") + (f"\n{src}" if src else ""), "",
-             "Stock footage from Pexels (free to use):", *credits, "", "#Shorts"]
+    desc += ["Summarized from: " + meta.get("title", "") + (f" - {meta.get('channel')}" if meta.get("channel") else "") + (f"\n{src}" if src else ""), ""]
+    if "NASA" in srcs: desc += ["Space footage courtesy of NASA.", ""]
+    desc += ["#Shorts"]
     (out_dir / "youtube_short_description.txt").write_text("\n".join(desc), encoding="utf-8")
     log(f"Short finished: {out} ({media.dur(out):.0f}s)")
     return out
