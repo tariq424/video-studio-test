@@ -138,7 +138,7 @@ def _vision(cfg, image, prompt):
     if prov == "local":
         url = cfg.get("ollama_url", "http://127.0.0.1:11434").rstrip("/"); model = cfg.get("vet_model", "qwen2.5vl:7b")
         b64 = base64.b64encode(Path(image).read_bytes()).decode()
-        r = requests.post(url + "/api/chat", timeout=300, json={"model": model, "stream": False, "keep_alive": "5m", "think": False,
+        r = requests.post(url + "/api/chat", timeout=300, json={"model": model, "stream": False, "keep_alive": "5m",
             "messages": [{"role": "user", "content": prompt, "images": [b64]}], "options": {"temperature": 0.1, "num_predict": 200}})
         if r.status_code != 200: raise RuntimeError(f"Ollama vision error {r.status_code}: {r.text[:200]}")
         return r.json()["message"]["content"]
