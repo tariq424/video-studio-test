@@ -54,10 +54,11 @@ Stages that don't apply to the chosen mode are skipped (`stages_for(mode)`). Ren
 3. **short_stock.**
    - Searches Pexels for portrait clips of at least 6 s.
    - Builds a 4-frame contact sheet from each clip's preview pictures, so nothing is downloaded before vetting.
-   - A vision model scores each clip 0–10 and rejects text or logos, scene cuts and nonsense.
-   - Setting `vet_provider`: `local` uses Ollama `qwen2.5vl:7b`, downloaded automatically the first time; alternatives are `zai`, `claude` and `off`.
-   - Keeps 2–3 clips per beat, then downloads them and trims them to 1080×1920, 30 fps, at most 10 s.
-   - Picks are saved in `short/stock/pick.json` and clips in `short/stock/clips/`.
+   - A vision model **describes** each clip and drops ones with overlaid text or brand logos, scene cuts, poor quality or very dark footage. Setting `vet_provider`: `local` uses Ollama `qwen2.5vl:7b`; alternatives are `zai`, `claude` and `off`.
+   - The **script AI** (DeepSeek) then picks 2–3 clips per beat by matching those descriptions to the narration, with no repeats, plus one spare for the end card. A small vision model is good at describing clips but bad at judging fit; the test run proved it, first rejecting every clip and then accepting every clip.
+   - Downloads the picks and trims them to 1080×1920, 30 fps, at most 10 s.
+   - Files: `short/stock/pool.json` (vetted candidates), `pick.json` (chosen clips), `clips/`, and `sheets/` (contact sheets, for checking picks by eye).
+   - Still check the picks by eye before rendering. Removing an entry from `pick.json` makes the next Resume re-pick that beat.
 4. **short_voice.** WanGP TTS (`qwen3_tts_base`, cloned narrator voice) per beat; word timings from faster-whisper, saved in `short/timings.json`.
 5. **short_render.**
    - Builds `short/public/teaser.json`, `voice.wav` (loudness -14 LUFS) and the media folder.
@@ -86,6 +87,13 @@ React/TypeScript, Remotion 4.0.531. `npm install` and the Chrome headless shell 
 - The F: copy is the working copy.
 - When an AI edits the code, it commits and pushes to `tariq424/video-studio`.
 - **Verify every copy to F: with a checksum** (`md5sum`). A file-copy tool once silently wrote an older version.
+
+## Test result (Oct 1 2026)
+- **Job:** `F:\videos\video_studio\jobs\20261001_083509`, the Moonshots AMA #293 as a Short only.
+- **Output:** `output\AI_Is_Already_Uploading_Minds_Moonshots_AMA_in_3_Min_short.mp4`, 2:56 long, with 27 clips.
+- **Fixed by hand:** the script was trimmed from 451 to 425 words, and "Dennis" was corrected to Demis Hassabis.
+- **Clip picks:** these were corrected by hand. The new AI picking (described above) had not yet run on a full job.
+- **Render:** about 7 min on the PC with Remotion. Narration took about 9 min on the GPU.
 
 ## Open items
 - Upload the Moonshots long video, and put its link in the Short descriptions.
