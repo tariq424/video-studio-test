@@ -5,8 +5,8 @@ APP = Path(__file__).resolve().parent.parent
 ROOT = APP.parent
 CFG = ROOT / "settings.json"
 DEFAULTS = {
-    "script_provider": "zai",
-    "qa_provider": "zai",
+    "script_provider": "deepseek",
+    "qa_provider": "off",
     "anthropic_api_key": "",
     "zai_api_key": "",
     "zai_base_url": "https://api.z.ai/api/anthropic",
@@ -22,7 +22,10 @@ DEFAULTS = {
     "qa_model": "claude-sonnet-5",
     "wangp_mcp": "http://127.0.0.1:42004/mcp/",
     "ffmpeg_dir": "C:/pinokio/api/wan.git/app/ffmpeg_bins",
-    "jobs_dir": r"F:\videos\explainer_studio\jobs",   # outputs stay on F:\videos
+    "jobs_dir": r"F:\videos\video_studio\jobs",   # outputs stay on F:\videos
+    "vet_provider": "local",          # stock-clip vetting: local (Ollama vision) | zai | claude | off
+    "vet_model": "qwen2.5vl:7b",
+    "short_concurrency": "75%",
     "voice_ref_wav": str(ROOT / "assets" / "voice_ref_baritone.wav"),
     "voice_ref_text": "Every few months, someone announces that artificial intelligence is about to change everything. Some say it will end work as we know it. Others say it is mostly hype. Stanford economist Chad Jones has spent years building models to answer a simpler question.",
     "presenter_image": str(ROOT / "assets" / "presenter.jpg"),
@@ -38,7 +41,7 @@ DEFAULTS = {
 
 SECRETS = ("anthropic_api_key", "zai_api_key", "deepseek_api_key")
 
-VAULT = "ExplainerStudio"
+VAULT = "ExplainerStudio"   # shared with Explainer Studio so saved keys carry over
 
 def _kr():
     try:

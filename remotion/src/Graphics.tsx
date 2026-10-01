@@ -133,16 +133,17 @@ const Timeline: React.FC<Extract<Graphic, { kind: "timeline" }>> = ({ title, ste
   );
 };
 
-const CTA: React.FC<Extract<Graphic, { kind: "cta" }>> = ({ thumb, title, line }) => {
+const CTA: React.FC<Extract<Graphic, { kind: "cta" }>> = ({ thumb, title, line, badge }) => {
   const { f, fps, t } = useT();
   const s = pop(f, fps);
   const bob = Math.sin(t * 5) * 14;
   return (
     <Band>
       <div style={{ textAlign: "center", transform: `scale(${0.85 + 0.15 * s})`, opacity: s }}>
-        <div style={{ fontFamily: BODY, fontWeight: 800, fontSize: 36, color: "#111", background: C.gold, display: "inline-block", borderRadius: 999, padding: "10px 28px", marginBottom: 26 }}>FULL 13-MIN BREAKDOWN</div>
-        <div style={{ position: "relative", width: 900, height: 506, borderRadius: 28, overflow: "hidden", border: `4px solid ${C.gold}`, boxShadow: "0 30px 90px rgba(0,0,0,0.6)" }}>
-          <Img src={staticFile(thumb)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        {badge ? <div style={{ fontFamily: BODY, fontWeight: 800, fontSize: 36, color: "#111", background: C.gold, display: "inline-block", borderRadius: 999, padding: "10px 28px", marginBottom: 26 }}>{badge}</div> : null}
+        <div style={{ position: "relative", width: 900, height: 506, borderRadius: 28, overflow: "hidden", border: `4px solid ${C.gold}`, boxShadow: "0 30px 90px rgba(0,0,0,0.6)",
+          background: `linear-gradient(135deg, #16213a 0%, #0b0f17 60%, #2a1d05 100%)` }}>
+          {thumb ? <Img src={staticFile(thumb)} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
           <AbsoluteFill style={{ background: "linear-gradient(180deg, rgba(0,0,0,0) 30%, rgba(0,0,0,0.85) 100%)" }} />
           <div style={{ position: "absolute", left: "50%", top: "42%", transform: "translate(-50%,-50%)", width: 150, height: 150, borderRadius: 99, background: C.red, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <div style={{ width: 0, height: 0, borderTop: "34px solid transparent", borderBottom: "34px solid transparent", borderLeft: `56px solid white`, marginLeft: 12 }} />

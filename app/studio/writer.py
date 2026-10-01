@@ -160,6 +160,26 @@ def _split(text, n):
     k = max(1, math.ceil(len(w) / n)); size = math.ceil(len(w) / k)
     return [" ".join(w[max(0, i * size - 100):(i + 1) * size]) for i in range(k)]
 
+def make_notes(llm, meta, transcript, words, log, stop=None, workdir=None):
+    """Boil the source down to substantive bullet notes (cached in workdir/notes.txt so long + short share them)."""
+    cache = workdir / "notes.txt" if workdir else None
+    if cache and cache.exists() and len(cache.read_text(encoding="utf-8").split()) > 100:
+        log("  using notes already made for this source"); return cache.read_text(encoding="utf-8")
+    title, channel = meta.get("title") or "the episode", meta.get("channel") or meta.get("uploader") or "the host"
+    chunks = _split(transcript, llm.chunk_words)
+    note_budget = max(150, min(600, int(words * 1.6 / len(chunks))))
+    notes = []
+    for i, ch in enumerate(chunks, 1):
+        if stop and stop(): raise RuntimeError("stopped")
+        log(f"  notes {i}/{len(chunks)}")
+        notes.append(llm.chat(SYSTEM, NOTES.format(i=i, n=len(chunks), title=title, channel=channel, people=(meta.get("description") or "")[:1200],
+                                                  max_words=note_budget, chunk=ch), max_tokens=4000).strip())
+    if sum(len(n.split()) for n in notes) < 60 * len(notes):
+        raise RuntimeError("The AI returned (nearly) empty notes; stopping so the script isn't invented. Check the model/key.")
+    notes_txt = "\n\n".join(f"[Part {i}]\n{n}" for i, n in enumerate(notes, 1))
+    if workdir: (workdir / "notes.txt").write_text(notes_txt, encoding="utf-8")
+    return notes_txt
+
 def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
     words = int(minutes * cfg["wpm"])
     spv = cfg["seconds_per_visual"]
@@ -167,18 +187,7 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
     with LLM(cfg, log, stop) as llm:
         log(f"Writing script with {llm.name} (target {words} words)...")
         # 1. notes
-        chunks = _split(transcript, llm.chunk_words)
-        note_budget = max(150, min(600, int(words * 1.6 / len(chunks))))
-        notes = []
-        for i, ch in enumerate(chunks, 1):
-            if stop and stop(): raise RuntimeError("stopped")
-            log(f"  notes {i}/{len(chunks)}")
-            notes.append(llm.chat(SYSTEM, NOTES.format(i=i, n=len(chunks), title=title, channel=channel, people=(meta.get("description") or "")[:1200],
-                                                      max_words=note_budget, chunk=ch), max_tokens=4000).strip())
-        if sum(len(n.split()) for n in notes) < 60 * len(notes):
-            raise RuntimeError("The AI returned (nearly) empty notes; stopping so the script isn't invented. Check the model/key.")
-        notes_txt = "\n\n".join(f"[Part {i}]\n{n}" for i, n in enumerate(notes, 1))
-        if workdir: (workdir / "notes.txt").write_text(notes_txt, encoding="utf-8")
+        notes_txt = make_notes(llm, meta, transcript, words, log, stop, workdir)
         # 2. outline
         nsec = max(4, round(minutes * 0.6))
         def chk(o):

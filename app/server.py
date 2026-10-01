@@ -1,10 +1,10 @@
-"""Explainer Studio: paste a YouTube link, get a narrated 1080p explainer video. Runs locally."""
+"""Video Studio: YouTube link, audio file (e.g. NotebookLM) or text in -> long explainer and/or a 2-3 min vertical Short out. Runs locally."""
 import os, sys, json, socket
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory, abort
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from studio import config
-from studio.pipeline import Studio, STAGES
+from studio.pipeline import Studio, STAGES, stages_for
 from studio.wangp import WanGP
 
 app = Flask(__name__, static_folder="static"); studio = Studio()
@@ -49,9 +49,17 @@ def jobs(): return jsonify(studio.list())
 
 @app.post("/api/jobs")
 def create():
-    b = request.json or {}
-    if not b.get("url") and not b.get("transcript"): abort(400)
-    return jsonify(id=studio.create(b.get("url", ""), b.get("minutes", 15), b.get("presenter", False), b.get("auto_approve", False), b.get("transcript", ""), b.get("provider", ""), b.get("captions", True)))
+    from studio.sources import kind_of
+    if request.files:   # multipart form with an uploaded audio/document file
+        b = {k: v for k, v in request.form.items()}; f = request.files.get("file")
+        for k in ("presenter", "auto_approve", "captions"): b[k] = b.get(k) in ("true", "1", "on")
+    else: b = request.json or {}; f = None
+    if f is not None and f.filename and not kind_of(f.filename): return jsonify(error="Unsupported file type. Use audio (.mp3 .m4a .wav ...) or .txt .md .pdf .docx"), 400
+    if not b.get("url") and not b.get("transcript") and not (f and f.filename): return jsonify(error="Give a YouTube link, a file, or paste some text."), 400
+    jid = studio.create(b.get("url", "").strip(), b.get("minutes", 15), b.get("presenter", False), b.get("auto_approve", False), b.get("transcript", ""),
+                        b.get("provider", ""), b.get("captions", True), b.get("mode", "both"), float(b.get("short_secs", 165) or 165),
+                        f if (f and f.filename) else None, f.filename if f else "", b.get("src_title", ""), b.get("src_credit", ""))
+    return jsonify(id=jid)
 
 @app.get("/api/jobs/<jid>")
 def job(jid):
@@ -59,6 +67,9 @@ def job(jid):
     if not j.dir.exists(): abort(404)
     s = j.state; s["id"] = jid
     lp = j.dir / "log.txt"; s["log"] = lp.read_text(encoding="utf-8").splitlines()[-60:] if lp.exists() else []
+    s["stages"] = stages_for(s.get("mode", "long"))
+    sp = j.short_plan()
+    if sp: s["short_summary"] = {"title": sp["title"], "beats": len(sp["sections"]), "words": sum(len(x["vo"].split()) for x in sp["sections"])}
     pl = j.plan()
     if pl: s["plan_summary"] = {"title": pl["title"], "sections": [{"id": x["id"], "title": x["title"], "words": len(x["vo"].split()), "visuals": len(x["visuals"])} for x in pl["sections"]]}
     return jsonify(s)
@@ -69,6 +80,17 @@ def get_plan(jid): return jsonify(studio.job(jid).plan() or {})
 def put_plan(jid):
     from studio.writer import normalize
     studio.job(jid).save_plan(normalize(request.json)); studio.job(jid).log("Script edited in the web page"); return jsonify(ok=True)
+
+@app.get("/api/jobs/<jid>/short_plan")
+def get_short_plan(jid): return jsonify(studio.job(jid).short_plan() or {})
+@app.put("/api/jobs/<jid>/short_plan")
+def put_short_plan(jid):
+    p = studio.job(jid).short_plan(); new = request.json or {}
+    if not p: abort(404)
+    p["title"] = new.get("title", p["title"])
+    for a, b in zip(p["sections"], new.get("sections", [])):
+        if isinstance(b.get("vo"), str) and b["vo"].strip(): a["vo"] = " ".join(b["vo"].split())
+    studio.job(jid).save_short_plan(p); studio.job(jid).log("Short script edited in the web page"); return jsonify(ok=True)
 
 @app.post("/api/jobs/<jid>/<action>")
 def act(jid, action):
@@ -88,5 +110,5 @@ def free_port(p):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT") or free_port(7870))
-    print(f"Explainer Studio running on http://127.0.0.1:{port}", flush=True)
+    print(f"Video Studio running on http://127.0.0.1:{port}", flush=True)
     app.run(host="127.0.0.1", port=port, debug=False, threaded=True)

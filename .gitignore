@@ -16,6 +16,7 @@ shorts/
 *.mp3
 *.png
 *.jpg
-remotion_*/public/
+remotion/public/
 pinokio/logs/
 pinokio/installed.flag
+remotion/out/

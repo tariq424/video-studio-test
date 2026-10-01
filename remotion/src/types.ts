@@ -7,7 +7,7 @@ export type Graphic =
   | { kind: "stat"; value: number; decimals?: number; prefix?: string; suffix: string; label: string; sub?: string }
   | { kind: "icons"; title: string; items: { icon: string; label: string }[] }
   | { kind: "timeline"; title: string; steps: { when: string; label: string }[] }
-  | { kind: "cta"; thumb: string; title: string; line: string };
+  | { kind: "cta"; thumb?: string; title: string; line: string; badge?: string };
 
 export type Bg = { src: string; type: "image" | "video"; from: number; fit?: "cover" | "frame" }; // from = seconds into beat
 

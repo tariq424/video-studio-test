@@ -1,10 +1,14 @@
 """Job queue: one job renders at a time (single GPU). Each stage is resumable."""
 import json, threading, time, traceback, re, shutil, datetime, queue
 from pathlib import Path
-from . import config, transcript, writer, render, assemble, media
+from . import config, transcript, writer, render, assemble, media, sources, short
 from .wangp import WanGP
 
-STAGES = ["transcript", "script", "review", "charts", "voice", "captions", "presenter", "motion", "stills", "assemble"]
+STAGES = ["transcript", "script", "short_script", "review", "short_stock", "short_voice", "short_render",
+          "charts", "voice", "captions", "presenter", "motion", "stills", "assemble"]
+LONG = {"script", "charts", "voice", "captions", "presenter", "motion", "stills", "assemble"}
+SHORT = {"short_script", "short_stock", "short_voice", "short_render"}
+def stages_for(mode): return [s for s in STAGES if not ((mode == "short" and s in LONG) or (mode == "long" and s in SHORT))]
 
 class Job:
     def __init__(self, path): self.dir = Path(path)
@@ -21,6 +25,10 @@ class Job:
     def plan(self):
         p = self.dir / "plan.json"; return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
     def save_plan(self, plan): (self.dir / "plan.json").write_text(json.dumps(plan, indent=1), encoding="utf-8")
+    def short_plan(self):
+        p = self.dir / "short" / "plan.json"; return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+    def save_short_plan(self, plan):
+        (self.dir / "short").mkdir(exist_ok=True); (self.dir / "short" / "plan.json").write_text(json.dumps(plan, indent=1), encoding="utf-8")
 
 class Studio:
     def __init__(self):
@@ -35,13 +43,20 @@ class Studio:
             if d.is_dir() and (d / "state.json").exists(): s = Job(d).state; s["id"] = d.name; out.append(s)
         return out
 
-    def create(self, url, minutes, presenter=False, auto_approve=False, transcript_text="", provider="", captions=True):
+    def create(self, url, minutes, presenter=False, auto_approve=False, transcript_text="", provider="", captions=True,
+               mode="both", short_secs=165, upload=None, upload_name="", src_title="", src_credit=""):
         jid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         j = self.job(jid); j.dir.mkdir(parents=True); (j.dir / "src").mkdir()
-        if transcript_text.strip(): (j.dir / "src" / "transcript_manual.txt").write_text(transcript_text, encoding="utf-8")
-        j.save(url=url, minutes=float(minutes), presenter=bool(presenter), captions=bool(captions), auto_approve=bool(auto_approve), provider=provider or "", status="queued",
-               stage="transcript", done=[], title="", created=time.time())
-        j.log(f"Job created for {url} (target {minutes} min)"); self.q.put(jid); return jid
+        up = ""
+        if upload is not None:
+            up = re.sub(r"[^A-Za-z0-9._ -]+", "_", upload_name or "upload")[:80]; upload.save(str(j.dir / "src" / up))
+        elif transcript_text.strip():
+            (j.dir / "src" / ("transcript_manual.txt" if url else "pasted.txt")).write_text(transcript_text, encoding="utf-8")
+        j.save(url=url, minutes=float(minutes), presenter=bool(presenter), captions=bool(captions), auto_approve=bool(auto_approve), provider=provider or "",
+               mode=mode if mode in ("long", "short", "both") else "both", short_secs=max(120.0, min(176.0, float(short_secs))),
+               upload=up, src_title=src_title, src_credit=src_credit, status="queued", stage="transcript", done=[], title="", created=time.time())
+        what = url or (f"file {up}" if up else "pasted text")
+        j.log(f"Job created for {what} (output: {mode}; long {minutes} min, short {short_secs:.0f}s)"); self.q.put(jid); return jid
 
     def approve(self, jid):
         j = self.job(jid); s = j.state
@@ -58,7 +73,7 @@ class Studio:
             except Exception as e:
                 j = self.job(jid); j.log("ERROR: " + str(e)); j.log(traceback.format_exc()[-1500:])
                 n = int(j.state.get("auto_retries", 0))
-                rendering = j.state.get("stage") in ("charts", "voice", "captions", "presenter", "motion", "stills", "assemble")
+                rendering = j.state.get("stage") in ("charts", "voice", "captions", "presenter", "motion", "stills", "assemble", "short_stock", "short_voice", "short_render")
                 if rendering and n < 3 and jid not in self.cancel:
                     j.save(status="queued", error="", auto_retries=n + 1)
                     j.log(f"Retrying automatically in 60s (attempt {n + 1} of 3); finished work is kept")
@@ -72,13 +87,17 @@ class Studio:
         stop = lambda: jid in self.cancel
         wg = WanGP(cfg["wangp_mcp"]); log = j.log
         j.save(status="running", error="")
-        for st in STAGES:
+        mode = s.get("mode", "long")
+        for st in stages_for(mode):
             if st in j.state.get("done", []): continue
             if stop(): j.save(status="stopped"); log("Stopped"); self.cancel.discard(jid); return
             j.save(stage=st); log(f"== {st} ==")
             if st == "transcript":
                 man = j.dir / "src" / "transcript_manual.txt"
-                if man.exists():
+                if not s.get("url"):
+                    up = j.dir / "src" / s["upload"] if s.get("upload") else None
+                    meta, text = sources.load(j.dir / "src", up, s.get("src_title", ""), s.get("src_credit", ""), log)
+                elif man.exists():
                     text = man.read_text(encoding="utf-8"); meta = {"title": "Pasted transcript", "webpage_url": s.get("url", "")}
                     try: meta, _ = transcript.fetch(s["url"], j.dir / "src", log) if s.get("url") else (meta, "")
                     except Exception as e: log(f"  (metadata fetch failed: {e})")
@@ -95,6 +114,21 @@ class Studio:
                 meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
                 text = (j.dir / "src" / "transcript.txt").read_text(encoding="utf-8")
                 plan = writer.write_plan(cfg, meta, text, s["minutes"], log, stop, j.dir / "src"); j.save_plan(plan)
+            elif st == "short_script":
+                if s.get("provider"): cfg["script_provider"] = s["provider"]
+                meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
+                text = (j.dir / "src" / "transcript.txt").read_text(encoding="utf-8")
+                lp = j.plan()
+                sp = short.write_short(cfg, meta, text, s.get("short_secs", 165), mode, lp["title"] if lp else "", log, stop, j.dir / "src")
+                j.save_short_plan(sp)
+                if not lp: j.save(title=sp["title"])
+            elif st in ("short_stock", "short_voice", "short_render"):
+                sp = j.short_plan()
+                if st == "short_stock": short.do_stock(j.dir, sp, cfg, log, stop)
+                elif st == "short_voice": _need_wangp(wg); short.do_voice(j.dir, sp, cfg, wg, log, stop)
+                else:
+                    meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
+                    out = short.do_render(j.dir, sp, cfg, meta, log, stop); j.save(short_output=str(out))
             elif st == "review":
                 if not s.get("auto_approve"):
                     j.save(status="awaiting_review"); log("Script ready for review. Edit if you like, then press Approve."); return
