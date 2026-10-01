@@ -235,7 +235,9 @@ def verify(cfg, c, sheet_path, log):
     if yes("overlay_text", False): return False, "text/logo overlay", seen
     if not yes("same_scene", True): return False, "scene cut", seen
     if not yes("looks_ok", True): return False, "poor footage", seen
-    if str(j.get("shows", "")).strip().lower() == "no": return False, f"doesn't show '{c['query']}' ({seen[:60]})", seen
+    # relevance is judged by the ranking step (which sees the narration); the vision model's literal "shows the search
+    # phrase?" answer was too strict in tests (rejected soldiers for "soldiers watching radar"), so it is only recorded
+    c["shows"] = str(j.get("shows", "")).strip().lower()
     return True, "", seen
 
 # ------------------------------------------------------------------ fetch

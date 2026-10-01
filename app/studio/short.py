@@ -143,6 +143,12 @@ def do_voice(job, plan, cfg, wg, log, stop):
 # ---------------------------------------------------------------- build + render
 def _norm(w): return re.sub(r"[^a-z0-9]", "", str(w).lower())
 
+_lens = {}
+def _clip_len(sd, c):
+    p = sd / "stock" / "clips" / f"{c['id']}.mp4"
+    if p not in _lens: _lens[p] = media.dur(p) if p.exists() else 0.0
+    return _lens[p]
+
 def build(job, plan, cfg, log):
     sd = job / "short"; pub = sd / "public"; (pub / "media" / "stock").mkdir(parents=True, exist_ok=True)
     tm = json.loads((sd / "timings.json").read_text(encoding="utf-8"))
@@ -160,14 +166,22 @@ def build(job, plan, cfg, log):
         last = i == len(secs) - 1
         d = (tm[s["id"]]["dur"] + (TAIL if last else GAP)) / speed
         words = [[w, round(a / speed, 3), round(b / speed, 3)] for w, a, b in tm[s["id"]]["words"]]
-        clips = (pick.get(s["id"]) or [pool[(i * 3) % len(pool)]]) if pool else []
+        clips = list(pick.get(s["id"]) or [])
+        # top up from other beats' clips until the footage covers the beat (clips play at 0.85x speed)
+        def cap(cs): return sum(_clip_len(sd, c) / 0.85 for c in cs)
+        k = 0
+        while pool and cap(clips) < d + 0.3 and k < len(pool):
+            c = pool[(i * 3 + k) % len(pool)]; k += 1
+            if all(c["id"] != x["id"] for x in clips): clips.append(c)
         bgs = []
-        for k, c in enumerate(clips):
+        clips = [c for c in clips if _clip_len(sd, c) > 0]
+        caps = [_clip_len(sd, c) / 0.85 for c in clips]; tot = sum(caps) or 1.0; t0 = 0.0
+        for k, c in enumerate(clips):   # each clip gets screen time in proportion to its length, so none runs out early
             src = sd / "stock" / "clips" / f"{c['id']}.mp4"
-            if not src.exists(): continue
             dst = pub / "media" / "stock" / f"{c['id']}.mp4"
             if not dst.exists(): shutil.copy2(src, dst)
-            bg = {"src": f"media/stock/{c['id']}.mp4", "type": "video", "from": round(k * d / len(clips), 3)}
+            bg = {"src": f"media/stock/{c['id']}.mp4", "type": "video", "from": round(t0, 3)}
+            t0 += d * caps[k] / tot if tot >= d else min(caps[k], d - t0)
             if c.get("orient") == "landscape": bg["fit"] = "frame"
             bgs.append(bg)
         # graphics: first at the beat start, the second when its word is spoken

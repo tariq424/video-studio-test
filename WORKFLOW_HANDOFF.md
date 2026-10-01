@@ -33,7 +33,14 @@ Inputs 2 and 3 take an optional title and credit. Code: `app/studio/sources.py`.
 - **Both:** the Short's end card then points to the full breakdown ("linked below").
 
 ## Pipeline stages (`app/studio/pipeline.py`)
-Full order: `transcript → script (long) → short_script → review → short_stock → short_voice → short_render → charts → voice → captions → presenter → motion → stills → assemble`.
+Full order: `transcript → script (long) → short_script → review → short_stock → short_voice → short_render → charts → voice → captions → broll → presenter → motion → stills → assemble`.
+
+**Long-video B-roll** (`broll` stage, `footage.long_broll`). Every AI still or motion visual first tries real landscape stock footage:
+1. The script AI turns each image prompt into search phrases.
+2. Clips are found and checked with the same search, ranking and checking as for Shorts.
+3. The clip is saved in `broll/clips/` and recorded as `v["stock"]`.
+
+Only visuals with no good match are rendered on the GPU by WanGP. In assembly a stock clip is slowed down up to 1.4x, then holds its last frame, to fill its slot. Turn this off with `long_broll: false` in `settings.json`.
 
 Stages that don't apply to the chosen mode are skipped (`stages_for(mode)`). Rendering stages retry automatically, 3 times, 60 s apart.
 
@@ -51,19 +58,30 @@ Stages that don't apply to the chosen mode are skipped (`stages_for(mode)`). Ren
    - one idea per beat;
    - real stats only (not version numbers);
    - names spelled correctly.
-3. **short_stock.**
-   - Searches Pexels for portrait clips of at least 6 s.
-   - Builds a 4-frame contact sheet from each clip's preview pictures, so nothing is downloaded before vetting.
-   - A vision model **describes** each clip and drops ones with overlaid text or brand logos, scene cuts, poor quality or very dark footage. Setting `vet_provider`: `local` uses Ollama `qwen2.5vl:7b`; alternatives are `zai`, `claude` and `off`.
-   - The **script AI** (DeepSeek) then picks 2–3 clips per beat by matching those descriptions to the narration, with no repeats, plus one spare for the end card. A small vision model is good at describing clips but bad at judging fit; the test run proved it, first rejecting every clip and then accepting every clip.
-   - Downloads the picks and trims them to 1080×1920, 30 fps, at most 10 s.
-   - Files: `short/stock/pool.json` (vetted candidates), `pick.json` (chosen clips), `clips/`, and `sheets/` (contact sheets, for checking picks by eye).
-   - Still check the picks by eye before rendering. Removing an entry from `pick.json` makes the next Resume re-pick that beat.
+3. **short_stock.** Uses the shared module `app/studio/footage.py`, which long videos use too.
+   - **Sources:**
+     - Pexels, portrait; it prefers the sharper 1440×2560 or 2160 files.
+     - Pixabay: portrait, or 4K landscape centre-cropped to vertical with no upscaling.
+     - NASA Image & Video Library, only when a beat mentions space or rockets. NASA clips are landscape and use the frame layout.
+   - **Keys:** `PEXELS_API_KEY` and `PIXABAY_API_KEY` in the project `.env`; NASA needs none. Check them at `http://127.0.0.1:42006/api/test_footage?q=...&orient=portrait|landscape`.
+   - **Selection:**
+     1. The script AI ranks candidates by meaning from each library's own description (Pexels page title, Pixabay tags, NASA title). This uses no GPU.
+     2. The vision model checks only the top-ranked clips for overlaid text or brand logos, scene cuts, darkness or blur. It does not judge relevance; it was too literal at that in tests.
+     3. If nothing passes, Shorts fall back to the library's own top results.
+   - **Cutting:** only the needed seconds are cut straight from the source URL at CRF 14, with no full download.
+   - **Top-up:** in the Short build, beats with too little footage are topped up from other beats' clips, and each clip gets screen time in proportion to its length.
+   - **Files:**
+     - `short/stock/footage.json`: search cache, rankings and picks, used to resume a job.
+     - `short/stock/pick.json`: the clips used.
+     - `clips/` and `sheets/`: the clips, and the 4-frame preview sheets for checking picks by eye.
+   - Removing a beat from `footage.json` → `picked` makes it re-pick on Resume.
 4. **short_voice.** WanGP TTS (`qwen3_tts_base`, cloned narrator voice) per beat; word timings from faster-whisper, saved in `short/timings.json`.
 5. **short_render.**
    - Builds `short/public/teaser.json`, `voice.wav` (loudness -14 LUFS) and the media folder.
    - Runs `npx remotion render src/Root.tsx Teaser` in `remotion/` with `--public-dir` set to the job's `short/public`.
-   - Writes `output/<title>_short.mp4` and `output/youtube_short_description.txt` (source credit plus Pexels credits; if the mode is Both, paste the long video's link into its placeholder).
+   - Writes `output/<title>_short.mp4` (Remotion JPEG quality 95, CRF 16, gentle 0–4% zoom for sharpness).
+   - Writes `output/youtube_short_description.txt`: "Summarized from: <source>" plus its link, and "Space footage courtesy of NASA" if NASA clips were used. Stock libraries need no credit. If the mode is Both, paste the long video's link into its placeholder.
+   - The closing line says "That was a short summary of <source>". No footage from the source is ever used, only its ideas, which are credited.
 
 ### Remotion template (`remotion/`)
 React/TypeScript, Remotion 4.0.531. `npm install` and the Chrome headless shell are installed by Pinokio Install.
