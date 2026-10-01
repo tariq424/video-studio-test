@@ -2,6 +2,8 @@
 
 This guide lets any AI assistant (ChatGPT, etc.) or a human continue this project. Paste or upload this file at the start of a new chat.
 
+**The latest copy is always in the repo at `F:\code\video-studio\WORKFLOW_HANDOFF.md`.** A Google Doc copy ("Video Studio — Workflow Handoff", https://docs.google.com/document/d/1Lq8OdLu6XxxhxbXI9G_R5Q4URhVOq4TkKe4balVO1sU) may lag behind it.
+
 Video Studio is a fork of Explainer Studio (`F:\code\explainer-studio`, github `tariq424/explainer-studio`). That repo is frozen; new work happens here.
 
 - **Code:** `F:\code\video-studio`, a private GitHub repo at `tariq424/video-studio`. The copy on F: is the working copy; GitHub is kept in sync with it.
@@ -12,9 +14,9 @@ Video Studio is a fork of Explainer Studio (`F:\code\explainer-studio`, github `
 - **Everything on F:.** Videos go in `F:\videos`. C: is for system files only; Ollama's model store on C: is the one accepted exception.
 - **Never print, paste or type API keys.**
   - LLM keys live in Windows Credential Manager under the service name `ExplainerStudio`, shared with the old app. Enter them only in the app's Settings page.
-  - The Pexels key is in the project's `.env`, which git ignores. Scripts read it at runtime; never display it.
+  - The Pexels and Pixabay keys are in the project's `.env`, which git ignores. Scripts read them at runtime; never display them.
 - **No deletions** without explicit approval. Rename old versions instead (for example `_v2.mp4`).
-- **No footage from YouTube or podcasts.** Use only Pexels stock (free for commercial use, credited anyway), our own AI clips and stills, and our own graphics.
+- **No footage from YouTube or podcasts.** Use only free stock (Pexels, Pixabay, NASA), our own AI clips and stills, and our own graphics. We summarize the source's ideas and credit the source: in the closing line, on the end card and in the description.
 - **Communication:** direct and terse, with honest assessments.
 - **Review scripts before showing them.** Fix names, facts and length yourself, using the transcript as the reference, and only ask the owner about what can't be fixed automatically.
 
@@ -80,8 +82,8 @@ Stages that don't apply to the chosen mode are skipped (`stages_for(mode)`). Ren
    - Builds `short/public/teaser.json`, `voice.wav` (loudness -14 LUFS) and the media folder.
    - Runs `npx remotion render src/Root.tsx Teaser` in `remotion/` with `--public-dir` set to the job's `short/public`.
    - Writes `output/<title>_short.mp4` (Remotion JPEG quality 95, CRF 16, gentle 0–4% zoom for sharpness).
-   - Writes `output/youtube_short_description.txt`: "Summarized from: <source>" plus its link, and "Space footage courtesy of NASA" if NASA clips were used. Stock libraries need no credit. If the mode is Both, paste the long video's link into its placeholder.
-   - The closing line says "That was a short summary of <source>". No footage from the source is ever used, only its ideas, which are credited.
+   - Writes `output/youtube_short_description.txt`: "Summarized from: [source]" plus its link, and "Space footage courtesy of NASA" if NASA clips were used. Stock libraries need no credit. If the mode is Both, paste the long video's link into its placeholder.
+   - The closing line says "That was a short summary of [source]". No footage from the source is ever used, only its ideas, which are credited.
 
 ### Remotion template (`remotion/`)
 React/TypeScript, Remotion 4.0.531. `npm install` and the Chrome headless shell are installed by Pinokio Install.
@@ -90,6 +92,32 @@ React/TypeScript, Remotion 4.0.531. `npm install` and the Chrome headless shell 
 - `Background.tsx`: stock clips are cover-fit with a slow zoom at 0.85× speed; landscape clips use `fit:"frame"`; stills scroll.
 - `Captions.tsx`: karaoke captions, up to 6 words, 46 px, at y=1390. The space between words must stay **inside** the span.
 - `Graphics.tsx`: the graphic types plus the CTA end card (optional thumbnail and badge).
+
+## What runs where (and what it costs)
+Making a video from the app uses **no Claude resources**.
+| Step | Runs on | Cost |
+|---|---|---|
+| Transcript (YouTube captions, or Whisper for audio files) | PC CPU/GPU | free |
+| Script writing, fact-check, footage ranking | **DeepSeek API** (`deepseek-v4-pro`) | a few cents per video |
+| Stock-clip checking | PC GPU (Ollama `qwen2.5vl:7b`) | free |
+| Footage | Pexels, Pixabay, NASA | free |
+| Narration (cloned voice) | PC GPU (WanGP `qwen3_tts_base`) | free |
+| Short render | PC CPU (Remotion) | free |
+| Long-video AI stills and clips, only where no stock fits | PC GPU (WanGP) | free |
+
+Claude is used only if "Claude" is picked as the Script AI (that needs an Anthropic API key, which isn't set up), or when you ask an AI assistant in chat to review or change things.
+
+**Typical Short timings (Oct 2026):** script about 2 min, footage about 5 min, narration about 9 min (GPU), render about 7–8 min (CPU). That's roughly 25 minutes in total.
+
+## Reviewing a script before approving it
+This is the human or AI step the app can't do for itself:
+- **Length.** About 400–410 words for a Short. The narrator speaks at about 142 words per minute, and Shorts must stay under 3:00.
+- **Hook.** It's in plain words.
+- **One idea per beat.**
+- **Stat graphics.** They must show real quantities: no version numbers, no "1.0x", and no ranges as a single number (use a text card instead).
+- **Quotes.** Only words that were actually said go in quote cards; a paraphrase becomes a headline card.
+- **Names.** Spelled correctly; captions often mishear them, for example "Dennis" for Demis Hassabis.
+- **Fact-check questions.** Answer any the app flags at the top of the review page.
 
 ## Hardware and tools
 - **PC:** Windows, RTX 5060 Ti 16 GB. Pinokio at `http://localhost:42000`; a script runs when you open `http://localhost:42000/api/video-studio/<script>.js`.
@@ -106,13 +134,22 @@ React/TypeScript, Remotion 4.0.531. `npm install` and the Chrome headless shell 
 - When an AI edits the code, it commits and pushes to `tariq424/video-studio`.
 - **Verify every copy to F: with a checksum** (`md5sum`). A file-copy tool once silently wrote an older version.
 
-## Test result (Oct 1 2026)
-- **Job:** `F:\videos\video_studio\jobs\20261001_083509`, the Moonshots AMA #293 as a Short only.
-- **Output:** `output\AI_Is_Already_Uploading_Minds_Moonshots_AMA_in_3_Min_short.mp4`, 2:56 long, with 27 clips.
-- **Fixed by hand:** the script was trimmed from 451 to 425 words, and "Dennis" was corrected to Demis Hassabis.
-- **Clip picks:** these were corrected by hand. The new AI picking (described above) had not yet run on a full job.
-- **Render:** about 7 min on the PC with Remotion. Narration took about 9 min on the GPU.
+## Test results (Oct 1 2026)
+- **Test 1:** job `F:\videos\video_studio\jobs\20261001_083509`, Moonshots AMA #293, Short only, 2:56. Made before the multi-source footage. Clips were picked by hand and the script was trimmed by hand.
+- **Test 2 (current pipeline):** job `F:\videos\video_studio\jobs\20261001_150550`. Output: `output\AI_Mind_Uploads_Abundance_Risk_Moonshots_AMA_in_3_Min_short.mp4`, 2:55.
+  - Includes the multi-source footage, sharper rendering, "That was a short summary of..." ending, "SUMMARIZED FROM" end card and hard cuts between beats.
+  - `_v1.mp4` in the same folder is the render from before the hard-cut and borrowing fixes.
+  - The script was edited before approval: trimmed from 451 to 410 words, and two misleading stat graphics fixed.
+  - One weak beat (the arms race) got generic field footage.
+- **Fixed after test 2, so new jobs only:**
+  - Vision checks no longer reject clips on a too-literal reading of the search phrase.
+  - Scripts are sized to the narrator's measured pace (`voice_wpm` 142).
+- **Not yet tested end to end:** long-video B-roll (the `broll` stage).
 
 ## Open items
+- Run a long video to test the `broll` stage, then check how many AI visuals got replaced and what that did to render time.
+- Possible improvements:
+  - a "my clips" folder per job, for hero shots made by hand in CapCut (Seedance), used before stock footage;
+  - Internet Archive public-domain footage as an option for historical topics;
+  - batching the narration (fewer, longer voice calls) to roughly halve the 9-minute voice step.
 - Upload the Moonshots long video, and put its link in the Short descriptions.
-- Optional: B-roll for long videos from the same Pexels search plus vetting, which would cut WanGP render time.
