@@ -54,7 +54,7 @@ class WanGP:
             return {"ok": False, "err": str(r)[:400]}
         jid = r["job_id"]; last = None; lc = time.time(); errs = 0
         while True:
-            time.sleep(8)
+            time.sleep(3)
             if stop():
                 self.call("wangp_cancel_job", {"job_id": jid}); return {"ok": False, "err": "cancelled"}
             j = self.call("wangp_get_job", {"job_id": jid, "event_limit": 1})

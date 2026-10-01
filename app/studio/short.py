@@ -125,17 +125,64 @@ def do_stock(job, plan, cfg, log, stop):
     log(f"Stock footage: {n} clips ready" + (f"; fewer than wanted for {', '.join(short_)} (others will be reused)" if short_ else ""))
 
 # ---------------------------------------------------------------- narration + timings
+BATCH_WORDS = 115   # ~48 s of speech per TTS call: each WanGP call costs ~32 s of fixed overhead, so fewer, longer calls
+
+def _batches(sections, limit=BATCH_WORDS):
+    out, cur, n = [], [], 0
+    for s in sections:
+        w = len(s["vo"].split())
+        if cur and n + w > limit: out.append(cur); cur, n = [], 0
+        cur.append(s); n += w
+    if cur: out.append(cur)
+    return out
+
 def do_voice(job, plan, cfg, wg, log, stop):
-    from . import render, captions
-    sd = job / "short"
-    render.do_voice(sd, plan, cfg, wg, log, stop)
+    """Narration in a few long TTS calls (several beats each), then split back into one wav per beat at the pauses
+    between beats, using whisper word timings on the batch audio. Writes voice/<beat>.wav and timings.json."""
+    import unicodedata
+    from . import captions
+    sd = job / "short"; vd = sd / "voice"; vd.mkdir(parents=True, exist_ok=True)
     tf = sd / "timings.json"
     t = json.loads(tf.read_text(encoding="utf-8")) if tf.exists() else {}
-    for s in plan["sections"]:
-        if s["id"] in t: continue
-        wav = sd / "voice" / f"{s['id']}.wav"
-        wt = captions.word_times(wav, s["vo"])
-        t[s["id"]] = {"dur": media.dur(wav), "words": [[w, round(a, 3), round(b, 3)] for w, a, b in wt]}
+    todo = [s for s in plan["sections"] if s["id"] not in t]
+    groups = _batches(todo)
+    if groups: log(f"Narration: {len(todo)} beats in {len(groups)} voice call(s)")
+    seed = 9100
+    for gi, grp in enumerate(groups):
+        if stop(): raise RuntimeError("cancelled")
+        text = " ".join(s["vo"] for s in grp)
+        ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()   # WanGP mangles non-ASCII
+        bw = vd / f"batch_{grp[0]['id']}.wav"
+        if not media.ok(bw):
+            r = None
+            for attempt in range(3):
+                seed += 1
+                r = wg.gen({"model_type": cfg["tts_model"], "prompt": ascii_text, "audio_prompt_type": "A", "audio_guide": cfg["voice_ref_wav"],
+                            "alt_prompt": cfg["voice_ref_text"], "model_mode": "english", "duration_seconds": 60,
+                            "temperature": 0.7, "top_k": 50, "seed": seed + attempt * 77}, log, f"voice {grp[0]['id']}-{grp[-1]['id']}", stop=stop)
+                if not r["ok"]: raise RuntimeError(f"narration failed: {r['err']}")
+                try: wps = len(text.split()) / max(media.dur(r["file"]), 0.1)
+                except Exception: wps = 0
+                if 1.7 <= wps <= 3.8: break
+                log(f"  voice batch {gi + 1}: odd pace ({wps:.1f} words/s), re-rendering")
+            media.ff("-i", r["file"], "-ar", 48000, "-ac", 2, bw)
+        # split at the middle of the pause between beats
+        wt = captions.word_times(bw, text)
+        D = media.dur(bw); k = 0; spans = []
+        for s in grp:
+            n = len(s["vo"].split()); spans.append((k, k + n)); k += n
+        cuts = [0.0]
+        for i in range(1, len(grp)):
+            end_prev = wt[spans[i - 1][1] - 1][2]; start_next = wt[spans[i][0]][1]
+            cuts.append(max(cuts[-1] + 0.5, (end_prev + start_next) / 2))
+        cuts.append(D)
+        for i, s in enumerate(grp):
+            a, b = cuts[i], cuts[i + 1]
+            out = vd / f"{s['id']}.wav"
+            media.ff("-ss", f"{a:.3f}", "-t", f"{b - a:.3f}", "-i", bw, "-ar", 48000, "-ac", 2, out)
+            words = [[w, round(max(0.0, x - a), 3), round(max(0.0, y - a), 3)] for w, x, y in wt[spans[i][0]:spans[i][1]]]
+            t[s["id"]] = {"dur": round(b - a, 3), "words": words}
+            log(f"Narration {s['id']}: {b - a:.1f}s")
         tf.write_text(json.dumps(t, indent=1), encoding="utf-8")
     total = sum(v["dur"] + GAP for v in t.values()) + TAIL
     log(f"Short narration: {total:.0f}s in total")
@@ -225,7 +272,7 @@ def do_render(job, plan, cfg, meta, log, stop):
     safe = re.sub(r"[^A-Za-z0-9]+", "_", plan["title"]).strip("_")[:60] or "short"
     out = out_dir / f"{safe}_short.mp4"; tmp = out_dir / "_short_rendering.mp4"
     cmd = [_npx(), "remotion", "render", "src/Root.tsx", "Teaser", str(tmp), f"--public-dir={job / 'short' / 'public'}",
-           f"--concurrency={cfg.get('short_concurrency', '75%')}", "--jpeg-quality=95", "--crf=16", "--log=info"]
+           f"--concurrency={cfg.get('short_concurrency', '100%')}", "--jpeg-quality=95", "--crf=16", "--log=info"]
     log(f"Rendering the Short with Remotion ({total:.0f}s of video)...")
     p = subprocess.Popen(cmd, cwd=rdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
     last, t0 = "", time.time()

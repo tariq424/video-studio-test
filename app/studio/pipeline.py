@@ -124,7 +124,20 @@ class Studio:
                 if not lp: j.save(title=sp["title"])
             elif st in ("short_stock", "short_voice", "short_render"):
                 sp = j.short_plan()
-                if st == "short_stock": short.do_stock(j.dir, sp, cfg, log, stop)
+                if st == "short_stock":
+                    if "short_voice" not in j.state.get("done", []) and wg.alive():
+                        # footage (network + DeepSeek + a little GPU) and narration (GPU) run side by side
+                        errs = []
+                        def _stock():
+                            try: short.do_stock(j.dir, sp, cfg, log, stop)
+                            except Exception as e: errs.append(e)
+                        th = threading.Thread(target=_stock, daemon=True); th.start()
+                        log("Footage and narration run in parallel")
+                        try: short.do_voice(j.dir, sp, cfg, wg, log, stop)
+                        finally: th.join()   # never leave footage running into a retry
+                        d = j.state.get("done", []); d.append("short_voice"); j.save(done=d)
+                        if errs: raise errs[0]
+                    else: short.do_stock(j.dir, sp, cfg, log, stop)
                 elif st == "short_voice": _need_wangp(wg); short.do_voice(j.dir, sp, cfg, wg, log, stop)
                 else:
                     meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
