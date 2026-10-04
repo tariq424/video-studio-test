@@ -8,7 +8,7 @@ Video Studio is a fork of Explainer Studio (`F:\code\explainer-studio`, github `
 
 - **Code:** `F:\code\video-studio`, a private GitHub repo at `tariq424/video-studio`. The copy on F: is the working copy; GitHub is kept in sync with it.
 - **Outputs:** `F:\videos\video_studio\jobs\<job id>\`. A job's videos are in its `output\` folder.
-- **UI:** `http://127.0.0.1:42006`. Start it from Pinokio → **Video Studio** → Start (launcher scripts in `C:\pinokio\api\video-studio`, with copies in `pinokio/` in the repo).
+- **UI:** `http://127.0.0.1:42003` (the port can change on restart; see Hardware and tools). Start it from Pinokio → **Video Studio** → Start (launcher scripts in `C:\pinokio\api\video-studio`, with copies in `pinokio/` in the repo).
 
 ## Ground rules (owner: Tariq)
 - **Everything on F:.** Videos go in `F:\videos`. C: is for system files only; Ollama's model store on C: is the one accepted exception.
@@ -35,7 +35,7 @@ Inputs 2 and 3 take an optional title and credit. Code: `app/studio/sources.py`.
 - **Both:** the Short's end card then points to the full breakdown ("linked below").
 
 ## Pipeline stages (`app/studio/pipeline.py`)
-Full order: `transcript → script (long) → short_script → review → short_stock → short_voice → short_render → charts → voice → captions → broll → presenter → motion → stills → assemble`.
+Full order: `transcript → script (long) → short_script → review → short_stock → short_voice → short_fallback → short_render → charts → voice → captions → broll → presenter → motion → stills → assemble`.
 
 **Long-video B-roll** (`broll` stage, `footage.long_broll`). Every AI still or motion visual first tries real landscape stock footage:
 1. The script AI turns each image prompt into search phrases.
@@ -43,6 +43,16 @@ Full order: `transcript → script (long) → short_script → review → short_
 3. The clip is saved in `broll/clips/` and recorded as `v["stock"]`.
 
 Only visuals with no good match are rendered on the GPU by WanGP. In assembly a stock clip is slowed down up to 1.4x, then holds its last frame, to fill its slot. Turn this off with `long_broll: false` in `settings.json`.
+
+Locked visuals (see **Subject lock** below) never take a generic clip: if no clip shows the subject, WanGP renders an AI still or motion clip instead. After `write_plan`, `short.verify_quotes` turns any quote card whose words aren't in the transcript into a headline card.
+
+### Subject lock and brand rejection (`footage.py`, Oct 2026)
+Built after a flydubai Short showed a Qatar Airways wing and a Turkish Airlines jet, and a Mitsubishi Outlander video showed Toyotas and Mercedes.
+- **Subject lock.** When a beat or visual is about an identifiable entity (a named airline's aircraft, a car make/model, a named person, a product), the script AI sets `subject: {name, brand}` (Short beats in `SHORT`; long visuals in the `QUERIES` prompt, which also puts the make/model in the search phrases).
+- **Reference photo.** `footage.reference()` fetches a photo of the subject from the Wikimedia Commons API (no key; Google has no free image API and scraping it breaks their terms). Cached in `refs/<slug>.jpg`.
+- **Strict check.** For locked slots, `verify()` shows the vision model the reference photo next to the clip's frames (`STRICT` prompt). The clip is used only if it shows the same subject; when the subject has a brand, the brand must be visible in the frames or named in the library description. Library top-results fallback and borrowing other beats' clips are off for locked slots.
+- **Brand rejection, all slots.** Any visible brand, airline livery or logo that isn't the subject's rejects the clip.
+- **Fallback for locked Short beats with no match** (`short_fallback` stage, `short.do_fallback`, writes `short/fallback.json`): first the beat's route map if the script gave one (`backdrop.kind == "map"`), then AI stills from WanGP (`still_prompt`, 1088×1920) turned into 2.5D parallax layers (`depth.py`, Depth Anything V2 Small ONNX on the CPU, downloaded once to `models/`), else a headline card. If WanGP is down, beats get the map or headline card. Each fallback visual covers about 7 s.
 
 Stages that don't apply to the chosen mode are skipped (`stages_for(mode)`). Rendering stages retry automatically, 3 times, 60 s apart.
 
@@ -54,7 +64,7 @@ Stages that don't apply to the chosen mode are skipped (`stages_for(mode)`). Ren
    - `writer.fact_check` checks the narration and graphics against the transcript.
    - The end-card beat is added automatically.
    - The plan is saved in `short/plan.json`.
-2. **review.** The owner approves in the UI ("Edit Short script" is available). Before that, the AI should do its own once-over:
+2. **review.** **Skipped by default** (the "Skip script review" box is ticked). Untick it to read and edit the script first. Setting "When review is skipped, still pause if the fact-check raises questions" (`pause_on_questions`, off by default) pauses only when the fact-check has questions; otherwise the questions are written to the log. When reviewing, check:
    - total length about 400–430 words for 2:45;
    - hook in plain words;
    - one idea per beat;
@@ -65,11 +75,11 @@ Stages that don't apply to the chosen mode are skipped (`stages_for(mode)`). Ren
      - Pexels, portrait; it prefers the sharper 1440×2560 or 2160 files.
      - Pixabay: portrait, or 4K landscape centre-cropped to vertical with no upscaling.
      - NASA Image & Video Library, only when a beat mentions space or rockets. NASA clips are landscape and use the frame layout.
-   - **Keys:** `PEXELS_API_KEY` and `PIXABAY_API_KEY` in the project `.env`; NASA needs none. Check them at `http://127.0.0.1:42006/api/test_footage?q=...&orient=portrait|landscape`.
+   - **Keys:** `PEXELS_API_KEY` and `PIXABAY_API_KEY` in the project `.env`; NASA needs none. Check them at `http://127.0.0.1:<port>/api/test_footage?q=...&orient=portrait|landscape`.
    - **Selection:**
      1. The script AI ranks candidates by meaning from each library's own description (Pexels page title, Pixabay tags, NASA title). This uses no GPU.
      2. The vision model checks only the top-ranked clips for overlaid text or brand logos, scene cuts, darkness or blur. It does not judge relevance; it was too literal at that in tests.
-     3. If nothing passes, Shorts fall back to the library's own top results.
+     3. If nothing passes, unlocked beats fall back to the library's own top results; locked beats get fallback visuals instead (see Subject lock).
    - **Cutting:** only the needed seconds are cut straight from the source URL at CRF 14, with no full download.
    - **Top-up:** in the Short build, beats with too little footage are topped up from other beats' clips, and each clip gets screen time in proportion to its length.
    - **Files:**
@@ -78,7 +88,8 @@ Stages that don't apply to the chosen mode are skipped (`stages_for(mode)`). Ren
      - `clips/` and `sheets/`: the clips, and the 4-frame preview sheets for checking picks by eye.
    - Removing a beat from `footage.json` → `picked` makes it re-pick on Resume.
 4. **short_voice.** WanGP TTS (`qwen3_tts_base`, cloned narrator voice) per beat; word timings from faster-whisper, saved in `short/timings.json`.
-5. **short_render.**
+5. **short_fallback.** Map, AI-still (2.5D) or headline visuals for locked beats without matching footage (see Subject lock).
+6. **short_render.**
    - Builds `short/public/teaser.json`, `voice.wav` (loudness -14 LUFS) and the media folder.
    - Runs `npx remotion render src/Root.tsx Teaser` in `remotion/` with `--public-dir` set to the job's `short/public`.
    - Writes `output/<title>_short.mp4` (Remotion JPEG quality 95, CRF 16, gentle 0–4% zoom for sharpness).
@@ -92,6 +103,9 @@ React/TypeScript, Remotion 4.0.531. `npm install` and the Chrome headless shell 
 - `Background.tsx`: stock clips are cover-fit with a slow zoom at 0.85× speed; landscape clips use `fit:"frame"`; stills scroll.
 - `Captions.tsx`: karaoke captions, up to 6 words, 46 px, at y=1390. The space between words must stay **inside** the span.
 - `Graphics.tsx`: the graphic types plus the CTA end card (optional thumbnail and badge).
+- `Backdrops.tsx`: full-screen fallback backgrounds. `MapBackdrop` (d3-geo + Natural Earth 1:50m via `world-atlas`, offline) draws the route origin → actual landing in gold with a plane, the planned destination dashed; `HeadlineBackdrop`; `LayersBackdrop` (2.5D parallax on depth layers).
+- Backgrounds are one continuous layer across beats, each shot overlapping the next by 0.4 s, so there is no dark frame at beat changes.
+- New npm deps (Oct 2026): `d3-geo`, `topojson-client`, `world-atlas` (all pure JS).
 
 ## What runs where (and what it costs)
 Making a video from the app uses **no Claude resources**.
@@ -124,6 +138,7 @@ This is the human or AI step the app can't do for itself:
 
 ## Hardware and tools
 - **PC:** Windows, RTX 5060 Ti 16 GB. Pinokio at `http://localhost:42000`; a script runs when you open `http://localhost:42000/api/video-studio/<script>.js`.
+- **The app's port can change** when Pinokio restarts (42006 before Oct 4, then 42003). The start.js page prints the current one ("Video Studio running on ...").
 - **WanGP:** MCP at `http://127.0.0.1:42004/mcp/`. Models:
   - `flux2_klein_9b` for stills;
   - `ltx2_distilled` for motion, **landscape 1280×720 only**, because vertical output burns in gibberish text;
@@ -158,5 +173,5 @@ This is the human or AI step the app can't do for itself:
   - a "my clips" folder per job, for hero shots made by hand in CapCut (Seedance), used before stock footage;
   - Internet Archive public-domain footage as an option for historical topics;
   - word timings with whisper on the GPU instead of the CPU, to save about 30–60 s;
-  - a stronger brand-logo check: a phone advert with a visible "vivo" logo got past the vision model twice.
+  - brand rejection is now in the vision check; watch whether small logos still get past `qwen2.5vl:7b`.
 - Upload the Moonshots long video, and put its link in the Short descriptions.
