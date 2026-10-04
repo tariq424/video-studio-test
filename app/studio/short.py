@@ -44,16 +44,76 @@ For each beat also give:
 - "queries": 2 stock-video search phrases (3-5 words each) for what to SHOW while this beat plays. Be specific and visual:
   subject + action + setting, people doing things where possible, e.g. "hands signing contract close-up", "trader watching
   stock screens", "surgeon in operating room", "students walking campus". No abstract words ("AI", "future", "concept",
-  "technology", "innovation"), no brand names, no famous people, nothing that is mostly text.
+  "technology", "innovation"), no famous people, nothing that is mostly text. No brand names, EXCEPT when the beat has a
+  "subject": then include the subject's brand and model in the phrases (e.g. "flydubai plane landing", "flydubai boeing 737").
+- "subject": set it ONLY when viewers would expect to SEE one specific identifiable real thing during this beat - a particular
+  airline's aircraft, a car make and model, a named product, ship, building or landmark - as
+  {{"name": "flydubai Boeing 737", "brand": "flydubai"}} or {{"name": "Mitsubishi Outlander Sport", "brand": "Mitsubishi"}}.
+  Footage is then used only if it shows exactly that. Otherwise null. Never set a subject for a person.
+- "backdrop": a full-screen graphic shown when no footage fits this beat. If the beat is about places, a route or a journey, use a map:
+   {{"kind":"map","title":"2-5 words","points":[{{"name":"Dubai","lat":25.25,"lon":55.36,"role":"origin"}},{{"name":"Tel Aviv","lat":32.01,"lon":34.89,"role":"planned"}},{{"name":"Tabuk","lat":28.37,"lon":36.62,"role":"actual"}}]}}
+   (role: "origin", "planned" = intended destination shown dashed, "actual" = where it really went, "stop" = a place on the way,
+   "place" = just a location; real coordinates in decimal degrees). Otherwise a headline card:
+   {{"kind":"headline","kicker":"1-3 words","text":"4-9 words summing up the beat","sub":"optional 3-8 words"}}
+- "still_prompt": a 25-45 word prompt for an AI image that fits this beat, photorealistic, vertical framing, no text, no logos, no
+  readable signs, no real people's faces (describe generic people or objects). For a subject, describe it by shape and colours
+  without logos (e.g. "a white single-aisle passenger jet with a dark blue tail, landing at dusk").
 
 Also give "title" (max 60 chars, YouTube title), "tag" (max 28 chars, small label shown at the top, e.g. "MOONSHOTS #293 · CONDENSED"),
 "description" (2-3 sentences for YouTube that credit {channel} and the original), and "source_spoken": how a narrator would
 name the source in a sentence, e.g. "the Moonshots podcast, episode two ninety-three" or "a NotebookLM briefing on battery recycling".
 
 Reply with ONLY JSON:
-{{"title":"...","tag":"...","description":"...","source_spoken":"...","beats":[{{"vo":"...","graphics":[{{"at":null,"g":{{...}}}},{{"at":"word","g":{{...}}}}],"queries":["...","..."]}}]}}"""
+{{"title":"...","tag":"...","description":"...","source_spoken":"...","beats":[{{"vo":"...","graphics":[{{"at":null,"g":{{...}}}},{{"at":"word","g":{{...}}}}],"queries":["...","..."],"subject":null,"backdrop":{{...}},"still_prompt":"..."}}]}}"""
 
 def _log_none(m): pass
+
+def _clean_backdrop(bd, vo):
+    """Validate the script AI's fallback graphic; anything malformed becomes a headline card."""
+    if isinstance(bd, dict) and bd.get("kind") == "map":
+        pts = []
+        for p in bd.get("points") or []:
+            try:
+                lat, lon = float(p["lat"]), float(p["lon"])
+                if -85 <= lat <= 85 and -180 <= lon <= 180:
+                    pts.append({"name": str(p.get("name", ""))[:28], "lat": lat, "lon": lon,
+                                "role": p.get("role") if p.get("role") in ("origin", "planned", "actual", "stop", "place") else "place"})
+            except Exception: continue
+        if len(pts) >= 1: return {"kind": "map", "title": str(bd.get("title", ""))[:40], "points": pts[:6]}
+    if isinstance(bd, dict) and bd.get("kind") == "headline" and bd.get("text"):
+        return {"kind": "headline", "kicker": str(bd.get("kicker", ""))[:24], "text": str(bd["text"])[:80], "sub": str(bd.get("sub", ""))[:60]}
+    words = vo.split()
+    return {"kind": "headline", "kicker": "", "text": " ".join(words[:9]).rstrip(",.;") + ("..." if len(words) > 9 else ""), "sub": ""}
+
+def _quote_in_source(text, transcript_words):
+    """True if (nearly) all content words of a quote appear close together in the transcript."""
+    want = [re.sub(r"[^a-z0-9]", "", w.lower()) for w in text.split()]
+    want = [w for w in want if len(w) > 2]
+    if not want: return True
+    tw = [re.sub(r"[^a-z0-9]", "", w.lower()) for w in transcript_words]
+    span = max(12, len(want) * 3)
+    best = 0
+    idx = {}
+    for i, w in enumerate(tw): idx.setdefault(w, []).append(i)
+    for start in idx.get(want[0], []) + idx.get(want[-1], []):
+        win = set(tw[max(0, start - span):start + span])
+        best = max(best, sum(1 for w in want if w in win) / len(want))
+        if best >= 0.85: return True
+    return best >= 0.85
+
+def verify_quotes(plan, transcript, log):
+    """Quote cards must be words actually said. A quote that can't be found in the source becomes a headline card
+    (paraphrase) instead of being shown in quotation marks."""
+    tw = transcript.split()
+    for s in plan["sections"]:
+        for v in s.get("visuals", []):
+            g = v.get("chart") or {}
+            if g.get("kind") == "quote" and not _quote_in_source(g.get("text", ""), tw):
+                words = g.get("text", "").upper().split()
+                lines = [" ".join(words[i:i + 3]) for i in range(0, min(len(words), 9), 3)]
+                log(f"  quote not found in the source, shown as a headline instead: \"{g.get('text', '')[:70]}\"")
+                v["chart"] = {"kind": "hook", "lines": lines or ["KEY POINT"], "accent": len(lines) - 1}
+    return plan
 
 # ---------------------------------------------------------------- script
 def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir):
@@ -85,11 +145,15 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             for g in gs:   # a counting-up number can't carry a range like "$5-10B"
                 if g["g"]["kind"] == "stat" and re.search(r"\d", str(g["g"].get("prefix", "")) + str(g["g"].get("suffix", ""))):
                     g["g"]["kind"] = "hook"; g["g"]["lines"] = [f"{g['g'].get('prefix', '')}{g['g'].get('value', '')}{g['g'].get('suffix', '')}", str(g["g"].get("label", "")).upper()]; g["g"]["accent"] = 0
+            sj = b.get("subject") if isinstance(b.get("subject"), dict) and str(b["subject"].get("name", "")).strip() else None
             plan["sections"].append({"id": f"b{i}", "title": f"Beat {i + 1}", "vo": re.sub(r"\s+", " ", b["vo"]).strip(),
                                      "queries": [q for q in b.get("queries", []) if isinstance(q, str)][:3] or ["city skyline aerial"],
+                                     "subject": sj, "backdrop": _clean_backdrop(b.get("backdrop"), b["vo"]),
+                                     "still_prompt": str(b.get("still_prompt") or "")[:400],
                                      "visuals": [{"type": "chart", "chart": g["g"], "at": g.get("at")} for g in gs]})
         log("Checking the Short against the source (names, attributions, numbers)...")
         plan = fact_check(llm, plan, meta, transcript, log, stop)
+    plan = verify_quotes(plan, transcript, log)
     n = sum(len(x["vo"].split()) for x in plan["sections"])
     if n > words * 1.12: log(f"  NOTE: script is {n} words (target {words}); trim it in review or it will be sped up to fit 3:00")
     # closing call-to-action beat

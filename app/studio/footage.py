@@ -127,6 +127,14 @@ RANK = """You are a video editor choosing stock footage. For each slot you get w
 show), plus candidate clips described by their library title or tags. Rank the candidates that would best support that moment:
 literal matches first, then fitting mood or metaphor. Skip clips that would confuse a viewer (unrelated products, people posing
 for the camera, tutorials, title cards). Prefer real footage of people, places and things over abstract animation.
+Coherence rules:
+- Never pick a clip whose description names a specific brand, airline, car make, company or product that is not the slot's subject
+  (e.g. a "turkish airlines plane" for a story about flydubai).
+- If a slot has SUBJECT: <name>, rank clips whose description names that subject first, then clips that could plausibly show it
+  (they will be checked visually against a reference photo); never clips that clearly show something else of the same kind
+  (another airline, another car model).
+- When the narration names a specific person, avoid close-ups of one person (viewers would think it is them); crowds, places,
+  hands and objects are fine.
 Give up to {k} ids per slot, best first; give fewer, or none, if nothing fits.
 Reply with ONLY JSON: {{"slot_id": ["id", "id"], ...}}
 
@@ -138,7 +146,7 @@ def rank(cfg, slots, k, log, stop):
     with LLM(cfg, log, stop) as llm:
         for i in range(0, len(slots), 12):
             batch = slots[i:i + 12]
-            txt = "\n\n".join(f"SLOT {s['id']}: {s['text'][:500]}\n" + "\n".join(f"  {c['id']}: {c['desc'][:120]}" for c in s["cands"][:24]) for s in batch)
+            txt = "\n\n".join(f"SLOT {s['id']}: {s['text'][:500]}" + (f"\nSUBJECT: {s['subject']['name']}" if s.get("subject") else "") + "\n" + "\n".join(f"  {c['id']}: {c['desc'][:120]}" for c in s["cands"][:24]) for s in batch)
             try: j = llm.chat_json("You are a precise video editor.", RANK.format(k=k, slots=txt), max_tokens=3000)
             except Exception as e: log(f"  ranking failed ({str(e)[:100]}); using library order"); j = {}
             for s in batch:
@@ -155,7 +163,21 @@ Answer each question about what you actually see:
    visible brand name/logo on a product (like an advert)? (Small incidental text in the background does not count.) true or false.
 3. "same_scene": do all 4 frames come from the same continuous scene (no hard cut to something unrelated)? true or false.
 4. "looks_ok": is it clear, real footage (not blurry, glitchy, distorted or disturbing)? true or false.
-Reply with JSON only: {{"shows": "yes|partly|no", "overlay_text": false, "same_scene": true, "looks_ok": true, "seen": "10-20 words: what the clip shows"}}"""
+5. "brands": every brand you can read or clearly recognise in the frames: airline names or tail logos, car makes or badges, company
+   or product logos (e.g. ["Qatar Airways"], ["Toyota"]). Empty list if none.
+Reply with JSON only: {{"shows": "yes|partly|no", "overlay_text": false, "same_scene": true, "looks_ok": true, "brands": [], "seen": "10-20 words: what the clip shows"}}"""
+
+STRICT = """The LEFT image is a reference photo of: {subject}.
+The RIGHT image shows 4 frames from a stock video clip.
+Answer about the RIGHT frames only:
+1. "brands": every brand you can read or clearly recognise: airline names or tail logos, car makes or badges, company or product
+   logos. Empty list if none.
+2. "same_subject": does the clip show {subject} itself - the same airline livery / the same make and model / the same product as
+   the reference (not just something of the same kind)? "yes", "no" or "unclear".
+3. "overlay_text": large text, captions or watermarks overlaid on the video? true or false.
+4. "same_scene": all 4 frames from one continuous scene? true or false.
+5. "looks_ok": clear, real footage (not blurry, glitchy or distorted)? true or false.
+Reply with JSON only: {{"brands": [], "same_subject": "yes|no|unclear", "overlay_text": false, "same_scene": true, "looks_ok": true, "seen": "10-20 words: what the clip shows"}}"""
 
 def _frames_from_video(url, out_dir, tag):
     """4 frames from a (small) preview video; returns image paths and duration."""
@@ -222,23 +244,85 @@ def unload_vet_model(cfg):
                        json={"model": cfg.get("vet_model", "qwen2.5vl:7b"), "keep_alive": 0}, timeout=30)
     except Exception: pass
 
-def verify(cfg, c, sheet_path, log):
-    """-> (ok, reason, seen). Hard checks only; relevance was already judged by the ranking step."""
+def _norm_brand(x): return re.sub(r"[^a-z0-9]", "", str(x).lower())
+
+def _brands(j):
+    b = j.get("brands") or []
+    if isinstance(b, str): b = [b]
+    return [str(x).strip() for x in b if str(x).strip() and _norm_brand(x) not in ("none", "no", "unknown", "na", "")]
+
+def verify(cfg, c, sheet_path, log, subject=None, ref=None):
+    """-> (ok, reason, seen). Generic slots: hard checks + no visible third-party brand.
+    Subject-locked slots: the clip must positively match the subject (brand evidence and the vision model agreeing with a reference photo)."""
     from PIL import Image, ImageStat
     if sum(ImageStat.Stat(Image.open(sheet_path).convert("L")).mean) < 28: return False, "too dark", ""
     if sharpness(sheet_path) < 6: return False, "soft/blurry", ""
-    if cfg.get("vet_provider", "local") == "off": return True, "", c["desc"]
-    try: j = parse_json(_vision(cfg, sheet_path, VET.format(query=c["query"])))
-    except Exception as e: log(f"  vision check unavailable ({str(e)[:80]}); accepting {c['id']}"); return True, "", c["desc"]
+    if cfg.get("vet_provider", "local") == "off":
+        return (not subject), ("subject can't be confirmed with vetting off" if subject else ""), c["desc"]
+    img = sheet_path
+    if subject and ref:
+        img = side_by_side(ref, sheet_path, sheet_path.with_name(sheet_path.stem + "_vs.jpg"))
+    prompt = STRICT.format(subject=subject["name"]) if (subject and ref) else VET.format(query=subject["name"] if subject else c["query"])
+    try: j = parse_json(_vision(cfg, img, prompt))
+    except Exception as e:
+        if subject: return False, f"vision check unavailable ({str(e)[:60]}); subject can't be confirmed", c["desc"]
+        log(f"  vision check unavailable ({str(e)[:80]}); accepting {c['id']}"); return True, "", c["desc"]
     yes = lambda k, d: str(j.get(k, d)).strip().lower() in ("true", "yes", "1")
     seen = str(j.get("seen") or c["desc"])[:160]
     if yes("overlay_text", False): return False, "text/logo overlay", seen
     if not yes("same_scene", True): return False, "scene cut", seen
     if not yes("looks_ok", True): return False, "poor footage", seen
-    # relevance is judged by the ranking step (which sees the narration); the vision model's literal "shows the search
-    # phrase?" answer was too strict in tests (rejected soldiers for "soldiers watching radar"), so it is only recorded
-    c["shows"] = str(j.get("shows", "")).strip().lower()
+    brands = _brands(j); key = _norm_brand((subject or {}).get("brand", ""))
+    other = [b for b in brands if not (key and (key in _norm_brand(b) or _norm_brand(b) in key))]
+    if other: return False, f"shows another brand ({', '.join(other)[:60]})", seen
+    if subject:
+        evidence = bool(key) and (any(key in _norm_brand(b) for b in brands) or key in _norm_brand(c.get("desc", "")))
+        same = str(j.get("same_subject", j.get("shows", ""))).strip().lower()
+        if same == "no": return False, f"not {subject['name']}", seen
+        if key and not evidence: return False, f"no visible sign of {subject.get('brand')}", seen
+        if not key and same != "yes": return False, f"not confirmed as {subject['name']}", seen
+    c["shows"] = str(j.get("shows", j.get("same_subject", ""))).strip().lower()
     return True, "", seen
+
+def side_by_side(ref, sheet_path, out):
+    """Reference photo (left) next to the clip's 4-frame sheet (right), one image for the vision model."""
+    from PIL import Image, ImageDraw
+    if out.exists(): return out
+    a = Image.open(ref).convert("RGB"); b = Image.open(sheet_path).convert("RGB")
+    h = 480; a = a.resize((max(1, int(a.width * h / a.height)), h)); b = b.resize((max(1, int(b.width * h / b.height)), h))
+    im = Image.new("RGB", (a.width + b.width + 40, h + 40), (20, 20, 20)); d = ImageDraw.Draw(im)
+    im.paste(a, (0, 40)); im.paste(b, (a.width + 40, 40))
+    d.text((8, 10), "LEFT: reference photo", fill=(255, 220, 0)); d.text((a.width + 48, 10), "RIGHT: stock clip frames", fill=(255, 220, 0))
+    im.save(out, "JPEG", quality=88)
+    return out
+
+# ------------------------------------------------------------------ reference photos (Wikimedia Commons)
+def reference(subject, out_dir, log):
+    """A photo of the subject from Wikimedia Commons (free API, no key), cached per subject. None if nothing usable."""
+    name = subject.get("name", ""); slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")[:60]
+    out_dir.mkdir(parents=True, exist_ok=True); out = out_dir / f"{slug}.jpg"
+    if out.exists(): return out
+    if (out_dir / f"{slug}.none").exists(): return None
+    for q in (name, subject.get("brand", "")):
+        if not q: continue
+        r = _get("https://commons.wikimedia.org/w/api.php", log, {"action": "query", "format": "json", "generator": "search",
+                 "gsrsearch": f"{q} filetype:bitmap", "gsrnamespace": 6, "gsrlimit": 8, "prop": "imageinfo",
+                 "iiprop": "url|size|mime", "iiurlwidth": 900})
+        if not r or r.status_code != 200: continue
+        pages = sorted((r.json().get("query") or {}).get("pages", {}).values(), key=lambda p: p.get("index", 99))
+        for pg in pages:
+            ii = (pg.get("imageinfo") or [{}])[0]
+            if ii.get("mime") not in ("image/jpeg", "image/png") or (ii.get("width") or 0) < 600: continue
+            try:
+                img = requests.get(ii.get("thumburl") or ii["url"], headers=UA, timeout=60); img.raise_for_status()
+                from PIL import Image
+                Image.open(io.BytesIO(img.content)).convert("RGB").save(out, "JPEG", quality=90)
+                log(f"  reference photo for '{name}': {pg.get('title', '')[:80]}")
+                return out
+            except Exception: continue
+    (out_dir / f"{slug}.none").write_text("no usable Commons photo", encoding="utf-8")
+    log(f"  no reference photo found for '{name}'; matching on visible brand only")
+    return None
 
 # ------------------------------------------------------------------ fetch
 def fetch(c, out, max_secs):
@@ -272,31 +356,41 @@ def fill(cfg, slots, orient, need, out_dir, log, stop, want_long_side, max_secs,
     cands = {}
     for s in todo:
         if stop(): raise RuntimeError("cancelled")
-        cands[s["id"]] = search_slot(s["queries"], orient, s["text"], log, want_long_side, st["cache"])
+        qs = list(s["queries"])
+        sj = s.get("subject") or {}
+        if sj.get("name") and not any(sj["name"].lower() in q.lower() for q in qs): qs = [sj["name"]] + qs   # locked: search the subject itself too
+        cands[s["id"]] = search_slot(qs[:3], orient, s["text"], log, want_long_side, st["cache"])
     save()
     unranked = [s for s in todo if s["id"] not in st["ranked"]]
     if unranked:
         log(f"  ranking candidates by meaning...")
-        st["ranked"].update(rank(cfg, [{"id": s["id"], "text": s["text"], "cands": cands[s["id"]]} for s in unranked], 5, log, stop)); save()
+        st["ranked"].update(rank(cfg, [{"id": s["id"], "text": s["text"], "subject": s.get("subject"), "cands": cands[s["id"]]} for s in unranked], 5, log, stop)); save()
     used = {c["id"] for v in st["picked"].values() for c in v}
+    refs = {}
+    for s_ in todo:
+        sj = s_.get("subject")
+        if sj and sj.get("name") and sj["name"] not in refs: refs[sj["name"]] = reference(sj, out_dir / "refs", log)
     ensure_vet_model(cfg, log)
     try:
         for s in todo:
             if stop(): raise RuntimeError("cancelled")
             byid = {c["id"]: c for c in cands[s["id"]]}; got = []
             order = list(st["ranked"].get(s["id"], []))
-            if fallback: order += [c["id"] for c in cands[s["id"]][:6] if c["id"] not in order]   # Shorts: never leave a beat empty
+            sj = s.get("subject") if (s.get("subject") or {}).get("name") else None
+            if sj: order += [c["id"] for c in cands[s["id"]][:8] if c["id"] not in order]   # locked: check more, but each must match the subject
+            elif fallback: order += [c["id"] for c in cands[s["id"]][:6] if c["id"] not in order]   # Shorts: never leave a beat empty
             for cid in order:
                 if len(got) >= need[s["id"]]: break
                 c = byid.get(cid)
                 if not c or cid in used: continue
                 try: sh = sheet(c, out_dir / "sheets")
                 except Exception as e: log(f"  preview of {cid} failed ({str(e)[:60]})"); continue
-                ok, why, seen = verify(cfg, c, sh, log)
+                ok, why, seen = verify(cfg, c, sh, log, subject=sj, ref=refs.get(sj["name"]) if sj else None)
                 if not ok: log(f"  {s['id']}: skipped {c['src']} clip {cid} ({why})"); continue
                 c["seen"] = seen; got.append({k: c.get(k) for k in ("id", "src", "orient", "query", "dur", "w", "h", "file", "page", "author", "desc", "seen")}); used.add(cid)
             st["picked"][s["id"]] = got; save()
-            log(f"  {s['id']}: {len(got)}/{need[s['id']]} clip(s): " + "; ".join(f"{g['src']}: {g['seen'][:45]}" for g in got) if got else f"  {s['id']}: nothing suitable")
+            lock = f" [subject: {sj['name']}]" if sj else ""
+            log(f"  {s['id']}{lock}: {len(got)}/{need[s['id']]} clip(s): " + "; ".join(f"{g['src']}: {g['seen'][:45]}" for g in got) if got else f"  {s['id']}{lock}: nothing suitable")
     finally:
         unload_vet_model(cfg)
     # download (only the seconds we need)
@@ -310,8 +404,12 @@ def fill(cfg, slots, orient, need, out_dir, log, stop, want_long_side, max_secs,
 # ------------------------------------------------------------------ long videos: stock B-roll instead of GPU stills/motion
 QUERIES = """For each shot below (an image prompt written for an AI generator, plus the narration it illustrates), write 2 stock-video
 search phrases (3-5 words each) that would find REAL footage showing the same thing: subject + action + setting, people doing
-things where possible. No abstract words ("AI", "future", "concept", "technology"), no brand names, no famous people.
-Reply with ONLY JSON: {{"shot_id": ["phrase", "phrase"], ...}}
+things where possible. No abstract words ("AI", "future", "concept", "technology"), no famous people.
+If the shot is about a specific identifiable thing viewers would expect to see (a particular airline's plane, a car make and model,
+a named product or landmark), set "subject" to it with its "brand" (e.g. {{"name": "flydubai Boeing 737", "brand": "flydubai"}},
+{{"name": "Mitsubishi Outlander Sport", "brand": "Mitsubishi"}}) and put the brand and model in the search phrases. Otherwise
+"subject" is null and phrases use no brand names. Never set a subject for a person.
+Reply with ONLY JSON: {{"shot_id": {{"q": ["phrase", "phrase"], "subject": null}}, ...}}
 
 {shots}"""
 
@@ -330,10 +428,16 @@ def long_broll(job, plan, cfg, log, stop):
                 try: j = llm.chat_json("You are a precise video researcher.", QUERIES.format(shots=txt), max_tokens=2500)
                 except Exception as e: log(f"  search phrases failed ({str(e)[:80]})"); j = {}
                 for s, v in batch:
-                    q = [x for x in (j.get(v["id"]) or []) if isinstance(x, str)][:2]
-                    qs[v["id"]] = q or [" ".join(v["prompt"].split()[:5])]
+                    e = j.get(v["id"]); e = {"q": e} if isinstance(e, list) else (e if isinstance(e, dict) else {})
+                    q = [x for x in (e.get("q") or []) if isinstance(x, str)][:2]
+                    sj = e.get("subject") if isinstance(e.get("subject"), dict) and e["subject"].get("name") else None
+                    qs[v["id"]] = {"q": q or [" ".join(v["prompt"].split()[:5])], "subject": sj}
         qf.write_text(json.dumps(qs, indent=1), encoding="utf-8")
-    slots = [{"id": v["id"], "text": f"Shot: {v['prompt'][:300]} Narration: {s['vo'][:250]}", "queries": qs[v["id"]]} for s, v in vis]
+    norm = lambda e: e if isinstance(e, dict) else {"q": e, "subject": None}   # older jobs stored a plain list
+    slots = [{"id": v["id"], "text": f"Shot: {v['prompt'][:300]} Narration: {s['vo'][:250]}", "queries": norm(qs[v["id"]])["q"],
+              "subject": norm(qs[v["id"]]).get("subject")} for s, v in vis]
+    locked = sum(1 for x in slots if x.get("subject"))
+    if locked: log(f"  {locked} shot(s) locked to a specific subject (e.g. {next(x['subject']['name'] for x in slots if x.get('subject'))}); they use real footage only on a confirmed match, otherwise an AI still")
     picked = fill(cfg, slots, "landscape", {v["id"]: 1 for _, v in vis}, d, log, stop, want_long_side=1920, max_secs=12.0, state_file=d / "footage.json")
     n = 0
     for s, v in vis:

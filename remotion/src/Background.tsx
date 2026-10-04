@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, Img, OffthreadVideo, interpolate, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
 import { Bg } from "./types";
+import { MapBackdrop, HeadlineBackdrop, LayersBackdrop } from "./Backdrops";
 
 // Stills are wide (16:9) in a tall frame, so we SCROLL across them to reveal the whole scene.
 // Videos play slightly slowed so a 5 s clip fills ~6 s.
@@ -13,6 +14,8 @@ export const Shot: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur,
   // first shot of a beat cuts in hard (a fade there dips to black between beats); later shots crossfade over the previous one
   const fadeIn = bg.from === 0 ? 1 : interpolate(t, [0, 0.35], [0, 1], { extrapolateRight: "clamp" });
   const shade = "linear-gradient(180deg, rgba(5,8,14,0.45) 0%, rgba(5,8,14,0) 18%, rgba(5,8,14,0) 62%, rgba(5,8,14,0.7) 100%)";
+  if (bg.type === "graphic") return bg.g.kind === "map" ? <MapBackdrop g={bg.g} dur={dur} /> : <HeadlineBackdrop g={bg.g as any} dur={dur} />;
+  if (bg.type === "layers") return <LayersBackdrop layers={bg.layers} dur={dur} seed={seed} />;
   if (bg.type === "video" && bg.fit === "frame") {
     // landscape clip shown whole, over a blurred enlarged copy of itself
     const z = interpolate(p, [0, 1], [1.0, 1.03]);

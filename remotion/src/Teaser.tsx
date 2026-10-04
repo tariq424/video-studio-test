@@ -34,11 +34,11 @@ export const Teaser: React.FC<TeaserProps> = ({ audio, total, tag, beats }) => {
   return (
     <AbsoluteFill style={{ background: C.bg }}>
       {beats.map((b, bi) => (
-        <Sequence key={b.id} from={fr(b.start)} durationInFrames={fr(b.dur)} name={b.id}>
+        <Sequence key={b.id} from={fr(b.start)} durationInFrames={fr(b.dur)} name={b.id} premountFor={fps}>
           {b.bgs.map((bg, i) => {
             const end = i + 1 < b.bgs.length ? b.bgs[i + 1].from : b.dur;
             return (
-              <Sequence key={i} from={fr(bg.from)} durationInFrames={fr(end - bg.from + 0.3)}>
+              <Sequence key={i} from={fr(bg.from)} durationInFrames={fr(end - bg.from + 0.3)} premountFor={fps}>
                 <Shot bg={bg} dur={end - bg.from} seed={bi * 3 + i} />
               </Sequence>
             );

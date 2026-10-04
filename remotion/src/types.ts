@@ -9,7 +9,12 @@ export type Graphic =
   | { kind: "timeline"; title: string; steps: { when: string; label: string }[] }
   | { kind: "cta"; thumb?: string; title: string; line: string; badge?: string; play?: boolean; arrow?: boolean };
 
-export type Bg = { src: string; type: "image" | "video"; from: number; fit?: "cover" | "frame" }; // from = seconds into beat
+import type { Backdrop } from "./Backdrops";
+// from = seconds into beat. "layers": AI still split into depth layers (2.5D). "graphic": full-screen map/headline backdrop.
+export type Bg =
+  | { src: string; type: "image" | "video"; from: number; fit?: "cover" | "frame" }
+  | { type: "layers"; layers: string[]; from: number }
+  | { type: "graphic"; g: Backdrop; from: number };
 
 export type Beat = {
   id: string;
