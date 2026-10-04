@@ -92,7 +92,7 @@ class Studio:
     def _run(self, jid):
         j = self.job(jid); s = j.state; cfg = config.load(); self.current = jid
         stop = lambda: jid in self.cancel
-        wg = WanGP(cfg["wangp_mcp"]); log = j.log
+        wg = WanGP(cfg); log = j.log
         j.save(status="running", error="")
         mode = s.get("mode", "long")
         for st in stages_for(mode):

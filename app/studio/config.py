@@ -20,7 +20,8 @@ DEFAULTS = {
     "ollama_model": "qwen3:14b",
     "script_model": "claude-opus-5-5",
     "qa_model": "claude-sonnet-5",
-    "wangp_mcp": "http://127.0.0.1:42004/mcp/",
+    "wangp_mcp": "",                 # blank = find WanGP automatically (Pinokio picks its MCP port at start-up)
+    "wangp_dir": "C:/pinokio/api/wan.git",
     "ffmpeg_dir": "C:/pinokio/api/wan.git/app/ffmpeg_bins",
     "jobs_dir": r"F:\videos\video_studio\jobs",   # outputs stay on F:\videos
     "vet_provider": "local",          # stock-clip vetting: local (Ollama vision) | zai | claude | off

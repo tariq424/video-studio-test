@@ -1,9 +1,52 @@
-"""Minimal client for WanGP's local MCP server (streamable HTTP)."""
-import json, time, requests
+"""Minimal client for WanGP's local MCP server (streamable HTTP).
+The MCP port is picked by Pinokio at start-up and can change, so the URL is found automatically:
+1) the "WanGP MCP URL" setting, if filled in; 2) the address WanGP's Pinokio launcher last printed
+("Uvicorn running on ..."); 3) the usual ports 8000 and 42004."""
+import json, re, time, requests
+from pathlib import Path
+
+_found = {"url": None, "t": 0.0}
+
+def _from_pinokio_log(cfg):
+    d = Path(cfg.get("wangp_dir") or "C:/pinokio/api/wan.git") / "logs" / "api" / "start.js"
+    urls = []
+    for name in ("latest", "events"):
+        try: txt = (d / name).read_text(encoding="utf-8", errors="ignore")[-200000:]
+        except Exception: continue
+        for m in re.findall(r"Uvicorn running on (http://[0-9.]+:\d+)", txt): urls.append(m)
+        for m in re.findall(r'"mcp_url":\s*"(http://[0-9.]+:\d+/mcp/?)"', txt): urls.append(m)
+    out = []
+    for u in reversed(urls):   # newest first
+        u = u if u.rstrip("/").endswith("/mcp") else u.rstrip("/") + "/mcp"
+        if u not in out: out.append(u)
+    return out
+
+def _probe(url):
+    try:
+        r = requests.post(url, headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
+                          data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26",
+                          "capabilities": {}, "clientInfo": {"name": "video-studio", "version": "1"}}}), timeout=4)
+        return r.status_code < 400 and bool(r.headers.get("mcp-session-id") or "jsonrpc" in r.text)
+    except Exception: return False
+
+def find_url(cfg, fresh=False):
+    """Return a WanGP MCP URL that answers, or the best guess if none does."""
+    if not fresh and _found["url"] and time.time() - _found["t"] < 30: return _found["url"]
+    cands = [cfg["wangp_mcp"]] if cfg.get("wangp_mcp") else []
+    cands += _from_pinokio_log(cfg) + ["http://127.0.0.1:8000/mcp", "http://127.0.0.1:42004/mcp/"]
+    seen = []
+    for u in cands:
+        if u in seen: continue
+        seen.append(u)
+        if _probe(u): _found.update(url=u, t=time.time()); return u
+    _found.update(url=None, t=0.0)
+    return seen[0]
 
 class WanGP:
-    def __init__(self, url):
-        self.url = url; self.sid = None
+    def __init__(self, url_or_cfg):
+        """Pass the settings dict (preferred: the URL is found automatically) or a fixed URL."""
+        self.cfg = url_or_cfg if isinstance(url_or_cfg, dict) else None
+        self.url = None if self.cfg else url_or_cfg; self.sid = None
 
     def _post(self, body, timeout=120):
         h = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
@@ -14,6 +57,7 @@ class WanGP:
 
     def init(self):
         self.sid = None
+        if self.cfg: self.url = find_url(self.cfg, fresh=self.url is not None)
         r = self._post({"jsonrpc": "2.0", "id": 1, "method": "initialize",
                         "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "explainer-studio", "version": "1"}}})
         r.raise_for_status()
