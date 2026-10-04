@@ -1,6 +1,7 @@
 """Get a YouTube video's metadata + transcript.
-1) one English caption track, fetched directly with retries (avoids yt-dlp's multi-track requests that trigger HTTP 429)
-2) fallback: download the audio only and transcribe locally with faster-whisper on the GPU."""
+1) one English caption track, fetched directly (avoids yt-dlp's multi-track requests that trigger HTTP 429)
+2) fallback when the video has no captions: download the audio only and transcribe locally with faster-whisper.
+If YouTube blocks or rate-limits us, stop at once with a clear error (no retries, no audio download)."""
 import json, re, time, glob
 from pathlib import Path
 import requests
@@ -25,19 +26,28 @@ def _pick_track(info):
                 if f.get("ext") == "json3": return f["url"], lang
     return None, None
 
+BLOCKED = ("YouTube is blocking or rate-limiting requests from this PC ({why}). Stopped without retrying. "
+           "Try again later, or paste the transcript into a new job.")
+
+def _blocked(e):
+    m = str(e).lower()
+    return any(k in m for k in ("429", "too many requests", "sign in to confirm", "403", "forbidden", "rate"))
+
 def _fetch_caption(url, log):
-    for i, wait in enumerate([0, 20, 60, 150]):
-        if wait: log(f"  captions rate-limited, retrying in {wait}s"); time.sleep(wait)
-        r = requests.get(url, headers=UA, timeout=60)
-        if r.status_code == 200 and r.text.strip().startswith("{"): return r.json()
-        if r.status_code not in (429, 403, 503): break
+    r = requests.get(url, headers=UA, timeout=60)
+    if r.status_code == 200 and r.text.strip().startswith("{"): return r.json()
+    if r.status_code in (429, 403, 503): raise RuntimeError(BLOCKED.format(why=f"HTTP {r.status_code} on captions"))
     return None
 
 def _whisper(url, outdir, log):
     import yt_dlp
     log("  falling back to local speech-to-text (downloading audio only)...")
     opts = {"format": "bestaudio[ext=m4a]/bestaudio", "outtmpl": str(outdir / "audio.%(ext)s"), "quiet": True, "no_warnings": True}
-    with yt_dlp.YoutubeDL(opts) as y: y.extract_info(url, download=True)
+    try:
+        with yt_dlp.YoutubeDL(opts) as y: y.extract_info(url, download=True)
+    except Exception as e:
+        if _blocked(e): raise RuntimeError(BLOCKED.format(why=str(e)[:120]))
+        raise
     audio = sorted(glob.glob(str(outdir / "audio.*")))[0]
     try:
         from faster_whisper import WhisperModel
@@ -59,8 +69,12 @@ def _whisper(url, outdir, log):
 def fetch(url, outdir, log):
     import yt_dlp
     outdir = Path(outdir); outdir.mkdir(parents=True, exist_ok=True)
-    with yt_dlp.YoutubeDL({"skip_download": True, "quiet": True, "no_warnings": True}) as y:
-        info = y.extract_info(url, download=False)
+    try:
+        with yt_dlp.YoutubeDL({"skip_download": True, "quiet": True, "no_warnings": True}) as y:
+            info = y.extract_info(url, download=False)
+    except Exception as e:
+        if _blocked(e): raise RuntimeError(BLOCKED.format(why=str(e)[:120]))
+        raise
     meta = {k: info.get(k) for k in ["id", "title", "channel", "uploader", "upload_date", "duration", "webpage_url", "description"]}
     meta["chapters"] = [{"title": c.get("title"), "start": c.get("start_time")} for c in (info.get("chapters") or [])]
     (outdir / "meta.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
