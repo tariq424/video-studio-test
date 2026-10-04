@@ -33,6 +33,13 @@ class Job:
 class Studio:
     def __init__(self):
         self.q = queue.Queue(); self.current = None; self.cancel = set()
+        try:   # jobs cut off by an app restart or PC reboot: show them as stopped (press Resume) instead of a stale "running"
+            for d in self.jobs_dir().iterdir():
+                if d.is_dir() and (d / "state.json").exists():
+                    j = Job(d)
+                    if j.state.get("status") in ("running", "queued"):
+                        j.save(status="stopped"); j.log("Interrupted (the app or PC restarted). Press Resume to continue; finished work is kept.")
+        except Exception: pass
         threading.Thread(target=self._worker, daemon=True).start()
 
     def jobs_dir(self): d = Path(config.load()["jobs_dir"]); d.mkdir(parents=True, exist_ok=True); return d
