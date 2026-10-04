@@ -181,12 +181,83 @@ def do_stock(job, plan, cfg, log, stop):
             need[s["id"]] = 1
         else:
             secs = len(s["vo"].split()) / cfg.get("voice_wpm", 142) * 60 + GAP
-            slots.append({"id": s["id"], "text": s["vo"], "queries": s["queries"]})
+            slots.append({"id": s["id"], "text": s["vo"], "queries": s["queries"], "subject": s.get("subject")})
             need[s["id"]] = max(2, min(3, math.ceil(secs / 6.0)))
     picked = footage.fill(cfg, slots, "portrait", need, d, log, stop, want_long_side=2560, max_secs=10.0, state_file=d / "footage.json", fallback=True)
     (d / "pick.json").write_text(json.dumps(picked, indent=1), encoding="utf-8")
     n = sum(len(v) for v in picked.values()); short_ = [k for k, v in picked.items() if len(v) < need[k]]
-    log(f"Stock footage: {n} clips ready" + (f"; fewer than wanted for {', '.join(short_)} (others will be reused)" if short_ else ""))
+    log(f"Stock footage: {n} clips ready" + (f"; fewer than wanted for {', '.join(short_)}" if short_ else ""))
+
+# ---------------------------------------------------------------- fallback visuals (no matching footage)
+FB_SECS = 7.0   # screen time one fallback visual covers
+
+def _needs(plan, tm, pick, sd, cfg):
+    """Beats whose footage doesn't cover them and that may not borrow other beats' clips: subject-locked beats, or any beat
+    when there is no footage at all. -> {beat_id: number of fallback visuals}"""
+    pool = [c for v in pick.values() for c in v]
+    out = {}
+    for s in plan["sections"]:
+        if s.get("cta") or s["id"] not in tm: continue
+        have = sum(_clip_len(sd, c) / 0.85 for c in pick.get(s["id"], []))
+        rem = tm[s["id"]]["dur"] + GAP - have
+        if rem > 0.5 and (s.get("subject") or not pool):
+            out[s["id"]] = max(1, min(3, math.ceil(rem / FB_SECS)))
+    return out
+
+def depth_free(img, prefix):
+    """Single-layer fallback when depth estimation is unavailable: the still, cropped to the frame."""
+    from PIL import Image
+    im = Image.open(img).convert("RGB"); W, H = 1080, 1920; r = max(W / im.width, H / im.height)
+    im = im.resize((int(im.width * r + 0.5), int(im.height * r + 0.5)))
+    x0, y0 = (im.width - W) // 2, (im.height - H) // 2
+    p = Path(f"{prefix}_L0.jpg"); im.crop((x0, y0, x0 + W, y0 + H)).save(p, quality=92)
+    return [p]
+
+def do_fallback(job, plan, cfg, wg, log, stop):
+    """For beats with no matching footage: the script's map backdrop (geography), AI stills with 2.5D depth motion,
+    or the headline card. Writes short/fallback.json = {beat: [bg items]}."""
+    from . import render, depth
+    sd = job / "short"; fd = sd / "fallback"; fd.mkdir(parents=True, exist_ok=True)
+    tm = json.loads((sd / "timings.json").read_text(encoding="utf-8"))
+    pick = json.loads((sd / "stock" / "pick.json").read_text(encoding="utf-8"))
+    ff = sd / "fallback.json"; out = json.loads(ff.read_text(encoding="utf-8")) if ff.exists() else {}
+    needs = {k: v for k, v in _needs(plan, tm, pick, sd, cfg).items() if k not in out}
+    if not needs:
+        log("Fallback visuals: none needed"); ff.write_text(json.dumps(out, indent=1), encoding="utf-8"); return
+    gpu = wg.alive()
+    log(f"Fallback visuals for {len(needs)} beat(s) without matching footage: {', '.join(needs)}")
+    seed = 5100
+    for s in plan["sections"]:
+        if s["id"] not in needs: continue
+        if stop(): raise RuntimeError("cancelled")
+        n = needs[s["id"]]; items = []
+        bd = s.get("backdrop") or {"kind": "headline", "kicker": "", "text": s["vo"][:60], "sub": ""}
+        if bd.get("kind") == "map": items.append({"type": "graphic", "g": bd})
+        k = 0
+        while len(items) < n:
+            made = False
+            if gpu and s.get("still_prompt"):
+                seed += 1; img = fd / f"{s['id']}_{k}.jpg"
+                try:
+                    if not img.exists():
+                        r = wg.gen({"model_type": cfg["still_model"], "prompt": s["still_prompt"] + render.STYLE, "resolution": "1088x1920",
+                                    "num_inference_steps": 4, "seed": seed}, log, f"still {s['id']}_{k}", stop=stop)
+                        if r["ok"]: shutil.copy(r["file"], img)
+                    if img.exists():
+                        try: lay = depth.layers(img, fd / f"{s['id']}_{k}", log)
+                        except Exception as e:
+                            log(f"  depth layers failed ({str(e)[:80]}); still without parallax")
+                            lay = depth_free(img, fd / f"{s['id']}_{k}")
+                        items.append({"type": "layers", "layers": [str(p.relative_to(sd)).replace("\\", "/") for p in lay]}); made = True
+                except Exception as e: log(f"  AI still for {s['id']} failed ({str(e)[:100]})")
+            if not made:
+                items.append({"type": "graphic", "g": bd if bd.get("kind") == "headline" else {"kind": "headline", "kicker": "", "text": s["vo"][:70], "sub": ""}})
+                if not gpu or not s.get("still_prompt"): break
+            k += 1
+        out[s["id"]] = items
+        log(f"  {s['id']}: " + ", ".join("map" if i.get("g", {}).get("kind") == "map" else "headline" if i["type"] == "graphic" else "AI still (2.5D)" for i in items))
+        ff.write_text(json.dumps(out, indent=1), encoding="utf-8")
+
 
 # ---------------------------------------------------------------- narration + timings
 BATCH_WORDS = 115   # ~48 s of speech per TTS call: each WanGP call costs ~32 s of fixed overhead, so fewer, longer calls
@@ -272,6 +343,8 @@ def build(job, plan, cfg, log):
         if speed > 1.12: log(f"  WARNING: narration is {raw_total:.0f}s; even sped up it would exceed 3 minutes. Shorten the script."); speed = 1.12
         log(f"  narration {raw_total:.0f}s is over the Shorts limit; speeding it up {speed:.2f}x")
     pool = [c for v in pick.values() for c in v]
+    fbf = sd / "fallback.json"; fallback = json.loads(fbf.read_text(encoding="utf-8")) if fbf.exists() else {}
+    (pub / "media" / "fb").mkdir(parents=True, exist_ok=True)
     beats, parts, t = [], [], 0.0
     for i, s in enumerate(secs):
         last = i == len(secs) - 1
@@ -283,19 +356,32 @@ def build(job, plan, cfg, log):
         near = {c["id"] for j in (i - 1, i + 1) if 0 <= j < len(secs) for c in pick.get(secs[j]["id"], [])}
         borrow = [c for c in pool if c["id"] not in near] or pool   # never repeat a neighbouring beat's shot
         k = 0
+        if s.get("subject"): borrow = []   # subject-locked: never fill with other beats' footage (could be the wrong subject)
         while borrow and cap(clips) < d + 0.3 and k < len(borrow):
             c = borrow[(i * 5 + k) % len(borrow)]; k += 1
             if all(c["id"] != x["id"] for x in clips): clips.append(c)
         bgs = []
         clips = [c for c in clips if _clip_len(sd, c) > 0]
-        caps = [_clip_len(sd, c) / 0.85 for c in clips]; tot = sum(caps) or 1.0; t0 = 0.0
-        for k, c in enumerate(clips):   # each clip gets screen time in proportion to its length, so none runs out early
-            src = sd / "stock" / "clips" / f"{c['id']}.mp4"
-            dst = pub / "media" / "stock" / f"{c['id']}.mp4"
-            if not dst.exists(): shutil.copy2(src, dst)
-            bg = {"src": f"media/stock/{c['id']}.mp4", "type": "video", "from": round(t0, 3)}
-            t0 += d * caps[k] / tot if tot >= d else min(caps[k], d - t0)
-            if c.get("orient") == "landscape": bg["fit"] = "frame"
+        fb = fallback.get(s["id"], []) if cap(clips) < d - 0.5 else []
+        items = [("clip", c, _clip_len(sd, c) / 0.85) for c in clips] + [("fb", x, FB_SECS) for x in fb]
+        caps = [it[2] for it in items]; tot = sum(caps) or 1.0; t0 = 0.0
+        for k, (kind, c, cp) in enumerate(items):   # screen time in proportion to length, so no clip runs out early
+            if kind == "clip":
+                src = sd / "stock" / "clips" / f"{c['id']}.mp4"
+                dst = pub / "media" / "stock" / f"{c['id']}.mp4"
+                if not dst.exists(): shutil.copy2(src, dst)
+                bg = {"src": f"media/stock/{c['id']}.mp4", "type": "video", "from": round(t0, 3)}
+                if c.get("orient") == "landscape": bg["fit"] = "frame"
+            elif c["type"] == "layers":
+                srcs = []
+                for lp in c["layers"]:
+                    dst = pub / "media" / "fb" / Path(lp).name
+                    if not dst.exists(): shutil.copy2(sd / lp, dst)
+                    srcs.append(f"media/fb/{Path(lp).name}")
+                bg = {"type": "layers", "layers": srcs, "from": round(t0, 3)}
+            else:
+                bg = {"type": "graphic", "g": c["g"], "from": round(t0, 3)}
+            t0 += d * cp / tot if tot >= d else min(cp, d - t0)
             bgs.append(bg)
         # graphics: first at the beat start, the second when its word is spoken
         gfx = []
@@ -339,13 +425,15 @@ def do_render(job, plan, cfg, meta, log, stop):
            f"--concurrency={cfg.get('short_concurrency', '75%')}", "--jpeg-quality=95", "--crf=16", "--log=info"]
     log(f"Rendering the Short with Remotion ({total:.0f}s of video)...")
     p = subprocess.Popen(cmd, cwd=rdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
-    last, t0 = "", time.time()
+    last, t0, tail = "", time.time(), []
     for line in p.stdout:
         line = line.strip()
-        if line: last = line
+        if line: last = line; tail = (tail + [line])[-40:]
         if time.time() - t0 > 30 and last: log("  " + last[:160]); t0 = time.time()
         if stop(): p.kill(); raise RuntimeError("cancelled")
-    if p.wait() != 0: raise RuntimeError("Remotion render failed: " + last[:300])
+    if p.wait() != 0:
+        for l in tail[-15:]: log("  | " + l[:200])
+        raise RuntimeError("Remotion render failed: " + " / ".join(x for x in tail[-6:] if x)[:400])
     if out.exists(): out.unlink()
     tmp.rename(out)
     # YouTube description: credit the source we summarised; stock libraries need no credit (NASA asks for a courtesy credit)

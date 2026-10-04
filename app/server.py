@@ -66,11 +66,12 @@ def create():
     from studio.sources import kind_of
     if request.mimetype in ("multipart/form-data", "application/x-www-form-urlencoded"):   # web form (optionally with a file)
         b = {k: v for k, v in request.form.items()}; f = request.files.get("file")
-        for k in ("presenter", "auto_approve", "captions"): b[k] = b.get(k) in ("true", "1", "on")
+        b.setdefault("auto_approve", "true")   # script review is skipped unless the user ticks it off
+        for k in ("presenter", "auto_approve", "captions"): b[k] = b.get(k) in ("true", "1", "on", True)
     else: b = request.get_json(silent=True) or {}; f = None
     if f is not None and f.filename and not kind_of(f.filename): return jsonify(error="Unsupported file type. Use audio (.mp3 .m4a .wav ...) or .txt .md .pdf .docx"), 400
     if not b.get("url") and not b.get("transcript") and not (f and f.filename): return jsonify(error="Give a YouTube link, a file, or paste some text."), 400
-    jid = studio.create(b.get("url", "").strip(), b.get("minutes", 15), b.get("presenter", False), b.get("auto_approve", False), b.get("transcript", ""),
+    jid = studio.create(b.get("url", "").strip(), b.get("minutes", 15), b.get("presenter", False), b.get("auto_approve", True), b.get("transcript", ""),
                         b.get("provider", ""), b.get("captions", True), b.get("mode", "both"), float(b.get("short_secs", 165) or 165),
                         f if (f and f.filename) else None, f.filename if f else "", b.get("src_title", ""), b.get("src_credit", ""))
     return jsonify(id=jid)

@@ -4,10 +4,10 @@ from pathlib import Path
 from . import config, transcript, writer, render, assemble, media, sources, short
 from .wangp import WanGP
 
-STAGES = ["transcript", "script", "short_script", "review", "short_stock", "short_voice", "short_render",
+STAGES = ["transcript", "script", "short_script", "review", "short_stock", "short_voice", "short_fallback", "short_render",
           "charts", "voice", "captions", "broll", "presenter", "motion", "stills", "assemble"]
 LONG = {"script", "charts", "voice", "captions", "broll", "presenter", "motion", "stills", "assemble"}
-SHORT = {"short_script", "short_stock", "short_voice", "short_render"}
+SHORT = {"short_script", "short_stock", "short_voice", "short_fallback", "short_render"}
 def stages_for(mode): return [s for s in STAGES if not ((mode == "short" and s in LONG) or (mode == "long" and s in SHORT))]
 
 class Job:
@@ -73,7 +73,7 @@ class Studio:
             except Exception as e:
                 j = self.job(jid); j.log("ERROR: " + str(e)); j.log(traceback.format_exc()[-1500:])
                 n = int(j.state.get("auto_retries", 0))
-                rendering = j.state.get("stage") in ("charts", "voice", "captions", "presenter", "motion", "stills", "assemble", "broll", "short_stock", "short_voice", "short_render")
+                rendering = j.state.get("stage") in ("charts", "voice", "captions", "presenter", "motion", "stills", "assemble", "broll", "short_stock", "short_voice", "short_fallback", "short_render")
                 if rendering and n < 3 and jid not in self.cancel:
                     j.save(status="queued", error="", auto_retries=n + 1)
                     j.log(f"Retrying automatically in 60s (attempt {n + 1} of 3); finished work is kept")
@@ -113,7 +113,8 @@ class Studio:
                 if prov in ("zai", "deepseek") and not cfg.get(prov + "_api_key"): raise RuntimeError(f"Add your {prov} API key in Settings (or pick another Script AI).")
                 meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
                 text = (j.dir / "src" / "transcript.txt").read_text(encoding="utf-8")
-                plan = writer.write_plan(cfg, meta, text, s["minutes"], log, stop, j.dir / "src"); j.save_plan(plan)
+                plan = writer.write_plan(cfg, meta, text, s["minutes"], log, stop, j.dir / "src")
+                plan = short.verify_quotes(plan, text, log); j.save_plan(plan)
             elif st == "short_script":
                 if s.get("provider"): cfg["script_provider"] = s["provider"]
                 meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
@@ -122,7 +123,7 @@ class Studio:
                 sp = short.write_short(cfg, meta, text, s.get("short_secs", 165), mode, lp["title"] if lp else "", log, stop, j.dir / "src")
                 j.save_short_plan(sp)
                 if not lp: j.save(title=sp["title"])
-            elif st in ("short_stock", "short_voice", "short_render"):
+            elif st in ("short_stock", "short_voice", "short_fallback", "short_render"):
                 sp = j.short_plan()
                 if st == "short_stock":
                     if "short_voice" not in j.state.get("done", []) and wg.alive():
@@ -139,12 +140,20 @@ class Studio:
                         if errs: raise errs[0]
                     else: short.do_stock(j.dir, sp, cfg, log, stop)
                 elif st == "short_voice": _need_wangp(wg); short.do_voice(j.dir, sp, cfg, wg, log, stop)
+                elif st == "short_fallback":
+                    if not wg.alive(): log("WanGP is not running: fallback beats get map/headline graphics instead of AI stills")
+                    short.do_fallback(j.dir, sp, cfg, wg, log, stop)
                 else:
                     meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
                     out = short.do_render(j.dir, sp, cfg, meta, log, stop); j.save(short_output=str(out))
             elif st == "review":
-                if not s.get("auto_approve"):
+                qs = [q for p in (j.plan(), j.short_plan()) if p for q in p.get("questions", [])]
+                if not s.get("auto_approve", True):
                     j.save(status="awaiting_review"); log("Script ready for review. Edit if you like, then press Approve."); return
+                if qs and cfg.get("pause_on_questions", False):
+                    j.save(status="awaiting_review"); log(f"Fact-check raised {len(qs)} question(s); paused for review (setting: pause on fact-check questions)."); return
+                if qs: log(f"Fact-check raised {len(qs)} question(s); continuing (review is skipped by default):")
+                for q in qs[:8]: log("  ? " + q[:200])
             else:
                 plan = j.plan()
                 if st == "charts": render.do_charts(j.dir, plan, cfg, log)

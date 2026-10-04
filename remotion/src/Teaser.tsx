@@ -31,18 +31,19 @@ const Tag: React.FC<{ tag: string; hideFrom: number }> = ({ tag, hideFrom }) => 
 export const Teaser: React.FC<TeaserProps> = ({ audio, total, tag, beats }) => {
   const { fps } = useVideoConfig();
   const fr = (s: number) => Math.max(1, Math.round(s * fps));
+  const shots = beats.flatMap((b, bi) => b.bgs.map((bg, i) => ({ bg, start: b.start + bg.from, seed: bi * 3 + i,
+    dur: (i + 1 < b.bgs.length ? b.bgs[i + 1].from : b.dur) - bg.from })));
   return (
     <AbsoluteFill style={{ background: C.bg }}>
+      {/* footage: one continuous layer; each shot keeps playing 0.4 s under the next one, so a shot that isn't painted on its
+          first frame never shows the dark page background (that was a 1-frame flash at every beat change) */}
+      {shots.map((x, k) => (
+        <Sequence key={"bg" + k} from={fr(x.start)} durationInFrames={fr(x.dur + 0.4)} premountFor={fps}>
+          <Shot bg={x.bg} dur={x.dur} seed={x.seed} />
+        </Sequence>
+      ))}
       {beats.map((b, bi) => (
-        <Sequence key={b.id} from={fr(b.start)} durationInFrames={fr(b.dur)} name={b.id} premountFor={fps}>
-          {b.bgs.map((bg, i) => {
-            const end = i + 1 < b.bgs.length ? b.bgs[i + 1].from : b.dur;
-            return (
-              <Sequence key={i} from={fr(bg.from)} durationInFrames={fr(end - bg.from + 0.3)} premountFor={fps}>
-                <Shot bg={bg} dur={end - bg.from} seed={bi * 3 + i} />
-              </Sequence>
-            );
-          })}
+        <Sequence key={b.id} from={fr(b.start)} durationInFrames={fr(b.dur)} name={b.id}>
           {b.graphics.map((g, i) => {
             const nextAt = i + 1 < b.graphics.length ? b.graphics[i + 1].at : b.dur;
             const d = g.g.kind === "cta" ? nextAt - g.at : Math.min(nextAt - g.at, 4.6);   // graphics leave so the scenery shows
