@@ -17,6 +17,11 @@ export type Recon = {
   labels?: { text: string; sub?: string; row?: number; seat?: number }[];   // cabin: row 1-30, seat 0-5; people: index
   caption?: string;              // short line under the RECONSTRUCTION tag
   people?: number;               // people scene: how many figures
+  model?: "airliner" | "fighter"; // aircraft scenes: which 3D model
+  motion?: "cruise" | "dive";    // aircraft_flight: level cruise or a steep descent
+  altitude?: [number, number];   // HUD altimeter counting from -> to (feet), e.g. [30000, 15000]
+  squawk?: string[];             // HUD transponder codes shown in turn, e.g. ["7700", "7500"]
+  door?: "closed" | "open";      // cockpit_door: open shows an injured crew member (mannequin) in the doorway
 };
 
 const ease = (p: number) => (p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2);
@@ -118,6 +123,37 @@ const Airliner: React.FC<{ colors?: string[]; gear?: boolean }> = ({ colors, gea
   );
 };
 
+// ---------------------------------------------------------------- fighter jet (single-seat, ~16 m; generic, no markings)
+const Fighter: React.FC<{ colors?: string[] }> = ({ colors }) => {
+  const body = col(colors?.[0], "#7d8590"), dark = col(colors?.[1], "#4a5058");
+  const wing = useMemo(() => {   // delta wing, both sides in one shape (top view, x forward)
+    const s = new THREE.Shape(); s.moveTo(2.5, 0.9); s.lineTo(-3.2, 5.4); s.lineTo(-4.6, 5.4); s.lineTo(-4.8, 0.9);
+    s.lineTo(-4.8, -0.9); s.lineTo(-4.6, -5.4); s.lineTo(-3.2, -5.4); s.lineTo(2.5, -0.9); s.closePath();
+    const g = new THREE.ExtrudeGeometry(s, { depth: 0.18, bevelEnabled: false }); g.rotateX(Math.PI / 2); return g;
+  }, []);
+  const fin = useMemo(() => {
+    const s = new THREE.Shape(); s.moveTo(0, 0); s.lineTo(-1.6, 2.4); s.lineTo(-2.6, 2.4); s.lineTo(-2.8, 0); s.closePath();
+    return new THREE.ExtrudeGeometry(s, { depth: 0.12, bevelEnabled: false });
+  }, []);
+  return (
+    <group>
+      {/* fuselage + nose cone + intake shoulders */}
+      <mesh rotation={[0, 0, -Math.PI / 2]}><cylinderGeometry args={[0.85, 0.75, 11, 20]} /><Std c={body} r={0.6} m={0.3} /></mesh>
+      <mesh position={[7.6, 0, 0]} rotation={[0, 0, -Math.PI / 2]}><coneGeometry args={[0.85, 4.2, 20]} /><Std c={body} r={0.6} m={0.3} /></mesh>
+      {[0.95, -0.95].map((z) => <mesh key={z} position={[1.2, -0.1, z]}><boxGeometry args={[5.5, 1.1, 0.6]} /><Std c={body} r={0.6} m={0.3} /></mesh>)}
+      {/* canopy */}
+      <mesh position={[4.4, 0.75, 0]} scale={[2.2, 0.55, 0.6]}><sphereGeometry args={[1, 20, 14]} /><Std c="#2a3a4a" r={0.1} m={0.7} /></mesh>
+      <group position={[0, -0.2, 0]}><mesh geometry={wing}><Std c={body} r={0.6} m={0.3} side={THREE.DoubleSide} /></mesh></group>
+      {/* twin canted tails + tailplanes */}
+      {[0.75, -0.75].map((z) => <group key={z} position={[-3.0, 0.5, z]} rotation={[z > 0 ? 0.35 : -0.35, 0, 0]}><mesh geometry={fin}><Std c={dark} r={0.6} m={0.3} /></mesh></group>)}
+      {[1, -1].map((sgn) => <mesh key={sgn} position={[-5.0, 0, sgn * 2.0]}><boxGeometry args={[1.8, 0.12, 2.2]} /><Std c={body} /></mesh>)}
+      {/* exhaust with afterburner glow */}
+      <mesh position={[-5.6, 0, 0]} rotation={[0, 0, Math.PI / 2]}><cylinderGeometry args={[0.55, 0.6, 0.6, 18]} /><Std c="#2b2b2b" m={0.6} /></mesh>
+      <mesh position={[-6.3, 0, 0]} rotation={[0, 0, Math.PI / 2]}><coneGeometry args={[0.45, 1.6, 16]} /><Std c="#ffb347" e="#ff8a00" ei={2} op={0.7} /></mesh>
+    </group>
+  );
+};
+
 // ---------------------------------------------------------------- environments
 const Lights: React.FC<{ sky?: string; ground?: string; sun?: number }> = ({ sky = "#cfe3ff", ground = "#c9a77a", sun = 2.2 }) => (
   <>
@@ -196,7 +232,7 @@ const seatPos = (row: number, seat: number): [number, number, number] => {
   const x = [-1.55, -1.05, -0.55, 0.55, 1.05, 1.55][Math.max(0, Math.min(5, seat))];
   return [x, 0, -(row - 1) * PITCH];
 };
-const Cabin: React.FC<{ accent: string; labels?: Recon["labels"]; door?: boolean; t: number }> = ({ accent, labels, door, t }) => {
+const Cabin: React.FC<{ accent: string; labels?: Recon["labels"]; door?: boolean; open?: boolean; t: number }> = ({ accent, labels, door, open, t }) => {
   const hiSeats = new Set((labels || []).map((l) => `${l.row ?? 13}_${l.seat ?? 2}`));
   return (
     <group>
@@ -227,8 +263,16 @@ const Cabin: React.FC<{ accent: string; labels?: Recon["labels"]; door?: boolean
       }))}
       {/* front bulkhead + cockpit door */}
       <mesh position={[0, 1.4, -(ROWS + 1.5) * PITCH]}><boxGeometry args={[4.2, 2.9, 0.1]} /><Std c="#dfe2e7" /></mesh>
-      <mesh position={[0, 1.05, -(ROWS + 1.5) * PITCH + 0.06]}><boxGeometry args={[0.85, 1.95, 0.05]} /><Std c={door ? "#c9ccd2" : "#d6d9de"} r={0.5} m={0.3} /></mesh>
+      {/* cockpit door: closed in the bulkhead, or swung open into the cabin with the flight deck lit behind it */}
+      {door && open ? <>
+        <mesh position={[-0.42, 1.05, -(ROWS + 1.5) * PITCH + 0.45]} rotation={[0, -1.2, 0]}><boxGeometry args={[0.85, 1.95, 0.05]} /><Std c="#c9ccd2" r={0.5} m={0.3} /></mesh>
+        <mesh position={[0, 1.05, -(ROWS + 1.5) * PITCH + 0.03]}><planeGeometry args={[0.85, 1.95]} /><Std c="#ffd9a0" e="#ffcf80" ei={0.9} /></mesh>
+      </> : <mesh position={[0, 1.05, -(ROWS + 1.5) * PITCH + 0.06]}><boxGeometry args={[0.85, 1.95, 0.05]} /><Std c={door ? "#c9ccd2" : "#d6d9de"} r={0.5} m={0.3} /></mesh>}
       {door ? <mesh position={[0, 2.2, -(ROWS + 1.5) * PITCH + 0.1]}><boxGeometry args={[0.5, 0.12, 0.02]} /><Std c="#ff3b3b" e="#ff2020" ei={1 + Math.sin(t * 6) * 0.8} /></mesh> : null}
+      {door && open ? <group position={[0.9, 0.22, -(ROWS + 1.5) * PITCH + 0.75]} rotation={[0, 0, Math.PI / 2]}>
+        {/* injured crew member lying in the open doorway (faceless mannequin, highlighted) */}
+        <Mannequin pos={[0, 0, 0]} seated={false} hi="#e05252" />
+      </group> : null}
       {(labels || []).map((l, i) => {
         const [x, , z] = seatPos(l.row ?? 13, l.seat ?? 2);
         return <Label key={i} text={l.text} sub={l.sub ?? `Row ${l.row ?? 13}`} pos={[x, 1.85, z]} scale={0.8} />;
@@ -299,14 +343,23 @@ const SceneGraph: React.FC<{ r: Recon; t: number; p: number; tall: boolean }> = 
   const e = ease(p);
   switch (r.scene) {
     case "aircraft_flight": {
+      const fighter = r.model === "fighter", dive = r.motion === "dive";
       const a = -0.9 + e * 0.9;
-      const d = tall ? 62 : 48;
+      const d = (tall ? 62 : 48) * (fighter ? 0.55 : 1);
+      // dive: the nose drops to ~25 degrees and the aircraft sinks while the camera follows it down
+      const pitch = dive ? -interpolate(e, [0, 0.35, 1], [0, 0.42, 0.45]) : 0;
+      const sink = dive ? -interpolate(p, [0, 1], [0, 60]) : 0;
+      const bank = dive ? 0.12 * Math.sin(t * 0.7) : 0.04 * Math.sin(t * 0.6);
       return (<>
-        <color attach="background" args={["#7fb2ec"]} /><fog attach="fog" args={["#cfe2f7", 200, 1600]} />
+        <color attach="background" args={[dive ? "#6f9fd6" : "#7fb2ec"]} /><fog attach="fog" args={["#cfe2f7", 200, 1600]} />
         <Lights sky="#d6e8ff" ground="#ffffff" />
-        <Cam pos={[Math.cos(a) * d, 9 + e * 3, Math.sin(a) * d + 6]} look={[2, 0, 0]} fov={tall ? 55 : 40} />
-        <group rotation={[0.03 * Math.sin(t * 0.8), 0, 0.04 * Math.sin(t * 0.6)]} position={[0, Math.sin(t * 0.9) * 0.4, 0]}><Airliner colors={r.colors} gear={false} /></group>
-        <Clouds t={t} />
+        {dive ? <Cam pos={[6, sink + 3, tall ? 62 : 48]} look={[0, sink - 3, 0]} fov={tall ? 55 : 40} />   /* side view: the nose visibly drops */
+              : <Cam pos={[Math.cos(a) * d, 9 + e * 3, Math.sin(a) * d + 6]} look={[2, 0, 0]} fov={tall ? 55 : 40} />}
+        <group rotation={[0.03 * Math.sin(t * 0.8), 0, pitch + bank * 0.2]} position={[0, Math.sin(t * 0.9) * 0.4 + sink, 0]}>
+          <group rotation={[bank, 0, 0]}>{fighter ? <Fighter colors={r.colors} /> : <Airliner colors={r.colors} gear={false} />}</group>
+        </group>
+        {fighter ? <group position={[-14, 2 + sink, -12]} rotation={[0.05 * Math.sin(t), 0, 0]}><Fighter colors={r.colors} /></group> : null}
+        <group position={[0, dive ? -interpolate(p, [0, 1], [0, 40]) : 0, 0]}><Clouds t={t * (fighter ? 2.5 : 1)} /></group>
         {r.name ? <Label text={r.name} sub={r.labels?.[0]?.text} pos={[0, 9, 0]} scale={tall ? 5.5 : 4.2} /> : null}
       </>);
     }
@@ -317,7 +370,7 @@ const SceneGraph: React.FC<{ r: Recon; t: number; p: number; tall: boolean }> = 
         <color attach="background" args={["#e9c99a"]} /><fog attach="fog" args={["#efd6ae", 300, 2000]} />
         <Lights sky="#ffe8c4" ground="#c9a06a" sun={2.6} />
         <Cam pos={[x + (tall ? 38 : 55), tall ? 10 : 14, tall ? 44 : 55]} look={[x, y, 0]} fov={tall ? 56 : 38} />
-        <group position={[x, y, 0]} rotation={[0, 0, pitch]}><Airliner colors={r.colors} /></group>
+        <group position={[x, y, 0]} rotation={[0, 0, pitch]}>{r.model === "fighter" ? <Fighter colors={r.colors} /> : <Airliner colors={r.colors} />}</group>
         <Runway /><Desert />
         {r.name ? <Label text={r.name} sub={r.labels?.[0]?.text} pos={[x, y + 10, 0]} scale={tall ? 5.5 : 4.2} /> : null}
       </>);
@@ -340,14 +393,14 @@ const SceneGraph: React.FC<{ r: Recon; t: number; p: number; tall: boolean }> = 
     case "cockpit_door": {
       const door = r.scene === "cockpit_door";
       const target = r.labels?.[0]?.row ?? 13;
-      const z0 = door ? -16 : 3, z1 = door ? -(ROWS - 3) * PITCH : -(target - 1) * PITCH + 4.2;
+      const z0 = door ? -16 : 3, z1 = door ? -(ROWS - (r.door === "open" ? 6 : 3)) * PITCH : -(target - 1) * PITCH + 4.2;
       const z = interpolate(e, [0, 1], [z0, z1]);
       return (<>
         <color attach="background" args={["#d9dde3"]} /><fog attach="fog" args={["#d9dde3", 6, 30]} />
         <hemisphereLight args={["#ffffff", "#b6bcc6", 1.4]} /><directionalLight position={[0, 5, 2]} intensity={0.8} />
         <Cam pos={[0.35, 2.15, z]} look={[0, 1.1, z - 10]} fov={tall ? 70 : 58} />
-        <Cabin accent={accent} labels={r.labels} door={door} t={t} />
-        {door ? <Label text="Cockpit" sub="Door locked" pos={[0, 2.55, -(ROWS + 1.5) * PITCH + 0.2]} scale={0.6} accent={C.red} /> : null}
+        <Cabin accent={accent} labels={r.labels} door={door} open={r.door === "open"} t={t} />
+        {door ? <Label text="Cockpit" sub={r.door === "open" ? "Crew member injured" : "Door locked"} pos={[0, 2.55, -(ROWS + 1.5) * PITCH + 0.2]} scale={0.6} accent={C.red} /> : null}
       </>);
     }
     case "vehicle_road": {
@@ -403,6 +456,18 @@ export const ReconBackdrop: React.FC<{ g: Recon; dur: number }> = ({ g, dur }) =
         color: "rgba(255,255,255,0.92)", background: "rgba(10,12,18,0.55)", border: "1.5px solid rgba(255,255,255,0.35)", borderRadius: 8, padding: "8px 16px" }}>
         RECONSTRUCTION
       </div>
+      {g.altitude || g.squawk?.length ? (() => {
+        // cockpit-style readouts: altitude counting down, transponder codes in turn
+        const alt = g.altitude ? Math.round(interpolate(p, [0.05, 0.9], g.altitude, { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) / 100) * 100 : null;
+        const codes = g.squawk || []; const ci = codes.length ? Math.min(codes.length - 1, Math.floor(p * codes.length)) : -1;
+        const box: React.CSSProperties = { fontFamily: "'Courier New', monospace", fontWeight: 700, color: "#7CFF8A", background: "rgba(5,10,8,0.82)",
+          border: "2px solid rgba(124,255,138,0.6)", borderRadius: 10, padding: tall ? "14px 22px" : "10px 18px", fontSize: tall ? 44 : 34, lineHeight: 1.15 };
+        return <div style={{ position: "absolute", left: tall ? 40 : 48, top: tall ? 330 : 40, display: "flex", flexDirection: "column", gap: 14 }}>
+          {alt !== null ? <div style={box}><div style={{ fontSize: tall ? 22 : 18, opacity: 0.75 }}>ALTITUDE</div>{alt.toLocaleString("en-US")} ft</div> : null}
+          {ci >= 0 ? <div style={{ ...box, color: Math.floor(t * 2) % 2 ? "#ff5a5a" : "#ffd25a", borderColor: "rgba(255,90,90,0.7)" }}>
+            <div style={{ fontSize: tall ? 22 : 18, opacity: 0.75, color: "#ffd25a" }}>SQUAWK</div>{codes[ci]}</div> : null}
+        </div>;
+      })() : null}
       {g.caption ? <div style={{ position: "absolute", left: 0, right: 0, top: tall ? 1240 : undefined, bottom: tall ? undefined : 70, textAlign: "center" }}>
         <span style={{ fontFamily: HEAD, fontWeight: 900, fontSize: tall ? 40 : 36, color: "#111", background: C.gold, borderRadius: 999, padding: "10px 30px" }}>{g.caption}</span>
       </div> : null}

@@ -476,7 +476,9 @@ def long_broll(job, plan, cfg, log, stop):
             if nm not in pics:
                 try: pics[nm] = photos.find(cfg, v["subject"], d / "photos", log, want=10)
                 except Exception as e: log(f"  photo search failed ({str(e)[:100]})"); pics[nm] = []
-            pc = next((p for p in pics[nm] if p["id"] not in used), None)
+            bp = coherence.phase(v["prompt"] + " " + s["vo"])
+            pc = None if v["subject"].get("interior") else \
+                 next((p for p in pics[nm] if p["id"] not in used and coherence.phase_ok(bp, p.get("phase"))), None)
             if pc:   # a real, openly licensed photo of the subject, slowly zoomed/panned
                 out = d / "photo_clips" / f"{v['id']}.mp4"; out.parent.mkdir(exist_ok=True)
                 try:

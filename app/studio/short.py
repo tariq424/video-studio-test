@@ -253,14 +253,17 @@ def do_fallback(job, plan, cfg, wg, log, stop):
             from . import coherence, photos
             ents = json.loads((job / "entities.json").read_text(encoding="utf-8")) if (job / "entities.json").exists() else []
             cap = bd.get("text", "") if bd.get("kind") == "headline" else bd.get("title", "")
-            qtxt = " ".join(s["queries"])   # "passenger jet landing" is outside; "scared passengers in cabin" is inside
-            inside = re.search(r"\b(cockpit|flight deck|pilots?|captain)\b", qtxt, re.I) or \
-                     (coherence.INTERIOR.search(qtxt) and not coherence.EXTERIOR.search(qtxt) and not re.search(r"\b(jet|plane|airliner|aircraft)\b", qtxt, re.I))
-            try: pics = photos.find(cfg, s["subject"], sd / "photos", log, want=8)
-            except Exception as e: log(f"  photo search failed ({str(e)[:100]})"); pics = []
-            # the real subject comes first, even if the photo shows a different moment (the narration carries the action).
-            # A beat about what happened INSIDE (cockpit, cabin) opens on one real photo, then the cabin/cockpit reconstruction.
-            limit = min(n, len(items) + 1) if inside else n   # (not "cap": that name holds the caption text below)
+            qtxt = " ".join(s["queries"])
+            inside = s["subject"].get("interior") or re.search(r"\b(cockpit|flight deck|pilots?|captain)\b", qtxt, re.I)
+            bp = coherence.phase(s["vo"] + " " + qtxt)   # the moment the narration describes: in the air, landing, on the ground
+            pics = []
+            if not inside:   # inside the plane: the cabin/cockpit reconstruction (another airline's real cabin would be wrong)
+                try: pics = photos.find(cfg, s["subject"], sd / "photos", log, want=10)
+                except Exception as e: log(f"  photo search failed ({str(e)[:100]})")
+                fit = [pc for pc in pics if coherence.phase_ok(bp, pc.get("phase"))]
+                if pics and not fit: log(f"  {s['id']}: no photo shows the subject {bp or 'in this situation'} ({', '.join(sorted({pc.get('phase') or '?' for pc in pics}))} only); using the reconstruction")
+                pics = fit
+            limit = n
             used = {i.get("photo") for v in out.values() for i in v if i.get("photo")}
             for pc in pics:
                 if len(items) >= limit: break

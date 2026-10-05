@@ -97,38 +97,101 @@ def assign(ents, text):
             sc += 100 * bool(own)
         if sc > score: best, score = e, sc
     if best:
-        if score < 1000 and INTERIOR.search(text) and not EXTERIOR.search(text):
-            return None, [e["avoid"] for e in things if e["avoid"]]   # interior shot: no lock, but no exterior of such objects
-        return {"name": best["name"], "brand": best["brand"], "kind": best["kind"], "colors": best["colors"]}, []
+        sj = {"name": best["name"], "brand": best["brand"], "kind": best["kind"], "colors": best["colors"]}
+        if score < 1000 and INTERIOR.search(text) and not EXTERIOR.search(text) and \
+                not re.search(r"\b(jets?|planes?|airplanes?|airliners?|aircraft|cars?|suvs?|vehicles?|ships?|trains?)\b", text, re.I):
+            # inside the subject (its cabin, its cockpit): stock or AI interiors would be some other airline's cabin, so this is
+            # locked too and shown as the cabin/cockpit reconstruction
+            sj["interior"] = True
+        return sj, []
     return None, [e["avoid"] for e in things if e["avoid"]]
 
 SCENE_WORDS = [
     ("cockpit_door", r"\b(cockpit|flight deck|pilot|captain|co-?pilot|first officer|door)\b"),
     ("cabin", r"\b(cabin|passengers?|seat|seats|aisle|row|onboard|on board|crew|attendant)\b"),
-    ("aircraft_landing", r"\b(land|landing|landed|divert\w*|touch\w* down|approach|emergency)\b"),
-    ("aircraft_ground", r"\b(tarmac|parked|ground|airport|gate|stairs|police|security|stand|apron|evacuat\w*|boarded|detained)\b"),
+    ("aircraft_landing", r"\b(land|landing|landed|divert\w*|touch\w* down|approach)\b"),
+    ("aircraft_ground", r"\b(tarmac|parked|ground|airport|gate|stairs|police|security|stand|apron|evacuat\w*|boarded|detained|disembark\w*)\b"),
 ]
 
+# what moment of a flight a beat (or a photo) is about - so a parked plane isn't shown while the narration says it is diving
+PHASE_WORDS = [
+    ("ground", r"\b(parked|on the ground|tarmac|apron|gate|stand|disembark\w*|deplan\w*|evacuat\w*|police|detained|stairs|after (it )?landed|after landing|on arrival)\b"),
+    ("landing", r"\b(land(ed|ing)?|touch(ed)? down|final approach|diverted to|emergency landing|runway)\b"),
+    ("air", r"\b(descen\w*|dropp\w*|dive|diving|plunge\w*|altitude|feet|ft\b|signals?|squawk\w*|transponder|transmitt\w*|mid-?air|in flight|"
+            r"airspace|scrambled|intercept\w*|hijack\w*|cockpit fight|radar|climb\w*|cruis\w*|over (saudi|the sea|iraq|jordan))\b"),
+]
+
+def phase(text):
+    """'ground' | 'landing' | 'air' | '' (no particular moment)."""
+    t = text.lower()
+    for ph, rx in PHASE_WORDS:
+        if re.search(rx, t): return ph
+    return ""
+
+def phase_ok(beat_phase, photo_phase):
+    """May a photo taken in photo_phase illustrate a beat about beat_phase?"""
+    if not beat_phase: return True
+    ok = {"air": ("air",), "landing": ("landing", "air"), "ground": ("ground", "taxi", "landing")}
+    return (photo_phase or "") in ok.get(beat_phase, (photo_phase,))
+
+NUM_WORDS = {"ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17,
+             "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80,
+             "ninety": 90, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9}
+
+def _altitudes(text):
+    """Altitudes in feet mentioned in the narration, in order ('30,000 feet', 'thirty thousand feet', '15-16,000 feet')."""
+    out = []
+    for m in re.finditer(r"(\d{1,3}(?:,\d{3})+|\d{4,5})\s*(?:-\s*\d{1,3}(?:,\d{3})?\s*)?(?:feet|ft)\b", text, re.I):
+        out.append(int(m.group(1).replace(",", "")))
+    for m in re.finditer(r"\b((?:twenty|thirty|forty|fifty|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen)"
+                         r"(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?) thousand(?: feet)?\b", text, re.I):
+        out.append(sum(NUM_WORDS[w] for w in re.split(r"[- ]", m.group(1).lower())) * 1000)
+    return [a for a in out if 500 <= a <= 45000]
+
+def _squawks(text):
+    t = text.lower(); out = []
+    for code, rx in (("7700", r"7700|seven[- ]seven[- ]hundred|seventy[- ]seven hundred|seven seven zero zero"),
+                     ("7500", r"7500|seven[- ]five[- ]hundred|seventy[- ]five hundred|seven five zero zero"),
+                     ("7600", r"7600|seven[- ]six[- ]hundred|seventy[- ]six hundred|seven six zero zero")):
+        m = re.search(rx, t)
+        if m: out.append((m.start(), code))
+    return [c for _, c in sorted(out)]
+
 def recon(subject, ents, text, k=0, caption=""):
-    """A Recon spec (see remotion/src/Recon.tsx) for this shot. k varies the scene when a beat needs several."""
+    """A Recon spec (see remotion/src/Recon.tsx) for this shot. k varies the scene when a beat needs several.
+    The scene follows the moment the narration describes: a descent becomes a dive with the altimeter counting down, emergency
+    codes appear on a transponder readout, a cockpit attack shows the door open with an injured crew member."""
     kind = (subject or {}).get("kind")
     people = [e for e in ents if e["kind"] == "person"]
     if not subject and people: kind = "person"
-    military = re.search(r"\b(f-?\d+|fighter|military|combat|stealth|bomber|air force|jet fighter|drone|helicopter)\b",
-                         ((subject or {}).get("name", "") + " " + " ".join(next((e["category_words"] for e in ents if e["name"] == (subject or {}).get("name")), []))), re.I)
-    if kind == "aircraft" and military:
-        # the 3D kit only has an airliner model; drawing a fighter as an airliner would be wrong, so a headline card instead
-        w = text.split()
-        return {"kind": "headline", "kicker": (subject or {}).get("name", "")[:30], "text": caption or " ".join(w[:9]).rstrip(",.;") + ("..." if len(w) > 9 else ""), "sub": ""}
+    own = next((e for e in ents if e["name"] == (subject or {}).get("name")), {})
+    military = bool(re.search(r"\b(f-?\d+|fighter|military|combat|stealth|bomber|air force|jet fighter)\b",
+                              (subject or {}).get("name", "") + " " + " ".join(own.get("category_words", [])), re.I))
+    ph = phase(text)
+    alts, codes = _altitudes(text), _squawks(text)
     if kind == "aircraft":
-        hits = [s for s, rx in SCENE_WORDS if re.search(rx, text, re.I)]
-        order = hits + [s for s in ("aircraft_flight", "aircraft_landing", "aircraft_ground") if s not in hits]
+        if military: order = ["aircraft_flight", "aircraft_flight"]
+        else:
+            hits = [s for s, rx in SCENE_WORDS if re.search(rx, text, re.I)]
+            if ph == "air": hits = ["aircraft_flight"] + [h for h in hits if h in ("cockpit_door", "cabin")]   # in the air: never parked
+            elif ph == "landing": hits = [h for h in hits if h != "aircraft_ground"] or ["aircraft_landing"]
+            order = hits + [s for s in ("aircraft_flight", "aircraft_landing", "aircraft_ground") if s not in hits]
+            if ph == "air": order = [o for o in order if o not in ("aircraft_landing", "aircraft_ground")]
+            if ph == "ground": order = ["aircraft_ground"] + [o for o in order if o != "aircraft_ground"]
+            if (subject or {}).get("interior"):   # a shot inside the aircraft: cabin / cockpit only
+                order = [h for h in hits if h in ("cockpit_door", "cabin")] or ["cabin", "cockpit_door"]
         scene = order[k % len(order)]
     elif kind in ("vehicle",): scene = "vehicle_road"
     elif kind == "person": scene = "people"
     else: scene = "object"
     g = {"kind": "recon", "scene": scene, "name": (subject or {}).get("name", ""), "colors": (subject or {}).get("colors") or [],
          "caption": caption[:40]}
+    if military: g["model"] = "fighter"; g["colors"] = []
+    if scene == "aircraft_flight":
+        if re.search(r"\b(descen\w*|dropp\w*|dive|diving|plunge\w*|lost altitude|losing altitude)\b", text, re.I) or len(alts) >= 2:
+            g["motion"] = "dive"
+        if len(alts) >= 2: g["altitude"] = [max(alts[0], alts[1]), min(alts[0], alts[1])] if g.get("motion") == "dive" else alts[:2]
+        if codes: g["squawk"] = codes[:3]
     named = [p for p in people if p["name"].split()[0].lower() in text.lower() or (p["role"] and p["role"].split(",")[0].lower() in text.lower())]
     if scene == "cabin":
         seated = [p for p in (named or people) if p["row"]][:3]
@@ -139,4 +202,5 @@ def recon(subject, ents, text, k=0, caption=""):
         g["people"] = max(1, len(ppl)); g["name"] = ""
     elif scene == "cockpit_door":
         g["labels"] = []
+        if re.search(r"\b(blood\w*|injur\w*|stab\w*|attack\w*|wound\w*|kill\w*|door (was )?open\w*|opened)\b", text, re.I): g["door"] = "open"
     return g

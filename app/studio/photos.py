@@ -74,9 +74,11 @@ PHOTO = """This is a photo found by searching for: {subject}.
    as the main subject? "yes", "no" or "unclear". Judge only WHAT it is, not what it is doing: parked, taxiing, landing or
    flying are all fine.
 3. "watermark": is there a large watermark, caption, frame or text overlaid on the photo? true or false.
+5. "phase": what the aircraft or vehicle is doing: "air" (flying), "landing" (on approach or touching down), "takeoff",
+   "taxi" (moving on the ground), "ground" (parked or standing), or "other".
 4. "looks_ok": a clear, sharp, real photo of the real thing (not a drawing, scale model, simulator, screenshot, factory part or
    collage)? true or false.
-Reply with JSON only: {{"brands": [], "same_subject": "yes|no|unclear", "watermark": false, "looks_ok": true, "seen": "10-20 words"}}"""
+Reply with JSON only: {{"brands": [], "same_subject": "yes|no|unclear", "watermark": false, "looks_ok": true, "phase": "air|landing|takeoff|taxi|ground|other", "seen": "10-20 words"}}"""
 
 def _check(cfg, p, path, subject, log):
     from .footage import _vision, _brands, _norm_brand
@@ -102,6 +104,7 @@ def _check(cfg, p, path, subject, log):
     evidence = (not key) or key in meta or any(key in _norm_brand(b) for b in brands) or any(m and m in meta for m in models)
     if not evidence: return False, f"no sign of {subject.get('brand')}"
     if not key and same != "yes": return False, "subject not confirmed"
+    p["phase"] = str(j.get("phase") or "").strip().lower()
     return True, ""
 
 _last_dl = [0.0]
@@ -169,7 +172,7 @@ def find(cfg, subject, out_dir, log, want=4, keys=None):
         ok, why = _check(cfg, c, path, subject, log)
         if not ok: log(f"  photo skipped: {c['title'][:50]} ({why})"); continue
         c["path"] = str(path); got.append(c)
-        log(f"  photo OK: {c['title'][:60]} - {c['creator'][:40]}, {credit_license(c)} ({c['src']})")
+        log(f"  photo OK: {c['title'][:60]} - {c['creator'][:40]}, {credit_license(c)} ({c['src']}; {c.get('phase') or '?'})")
     if uniq:
         from .footage import unload_vet_model
         unload_vet_model(cfg)   # free the GPU for WanGP
