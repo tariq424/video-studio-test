@@ -489,7 +489,16 @@ def long_broll(job, plan, cfg, log, stop):
             try:
                 short.render_recon(g, out, 9.0, (1920, 1080), cfg, log, stop)
                 v["stock"] = str(out.relative_to(job)).replace("\\", "/"); v["stock_src"] = "reconstruction"; n += 1
-            except Exception as e: log(f"  reconstruction for {v['id']} failed ({str(e)[:120]}); it stays an AI visual")
+            except Exception as e:
+                # never hand a subject-locked shot to WanGP (an image model invents liveries/models): a drawn headline card instead
+                log(f"  reconstruction for {v['id']} failed ({str(e)[:120]}); using a headline card")
+                words = s["vo"].split(); text = " ".join(words[:10]).rstrip(",.;") + ("..." if len(words) > 10 else "")
+                out = d / "cards" / f"{v['id']}.mp4"
+                photos.headline_clip(text, v["subject"]["name"][:30], out, 9.0)   # if even this fails the job stops: no AI fallback
+                v["stock"] = str(out.relative_to(job)).replace("\\", "/"); v["stock_src"] = "headline"; n += 1
         log(f"  locked shots without footage: {sum(1 for _, v in miss if v.get('credit'))} real photo(s), "
-            f"{sum(1 for _, v in miss if v.get('stock_src') == 'reconstruction')} 3D reconstruction(s)")
+            f"{sum(1 for _, v in miss if v.get('stock_src') == 'reconstruction')} 3D reconstruction(s), "
+            f"{sum(1 for _, v in miss if v.get('stock_src') == 'headline')} headline card(s)")
+    bad = [v["id"] for _, v in vis if v.get("subject") and not v.get("stock")]
+    if bad: raise RuntimeError(f"subject-locked shots {', '.join(bad[:5])} have no visual; refusing to let the AI image model draw them")
     log(f"B-roll: {n} of {len(vis)} AI visuals replaced with real footage or reconstructions; {len(vis) - n} will be AI-rendered")

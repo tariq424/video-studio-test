@@ -69,7 +69,9 @@ Test of Oct 4 (job 20261004_164620) showed per-beat locks were not enough: only 
   visible, no other brand, no watermark). Short: shown whole over a blurred copy with an on-screen credit; long: 9 s slow zoom/pan
   clip with the credit burned in top-right for the whole clip. WanGP image-to-video is deliberately NOT used on these photos
   (garbled liveries; CC BY-SA derivative question). Every photo gets a credit line (title, author, licence, link) in the YouTube description. Each photo is used once per video.
-  Order for a locked shot: real photos -> 3D reconstruction (Short: the route map first if the beat has one).
+  Order for a locked shot: real photos -> 3D reconstruction (Short: the route map first if the beat has one). Long videos: if the
+  reconstruction render fails, a drawn headline card (`photos.headline_clip`); WanGP NEVER draws a subject-locked shot - if even the
+  card fails, the broll stage stops with an error rather than fall back to an AI image.
 - Photo-real AI stills are now only used for unlocked (generic) beats.
 - Oct 4 test (job 20261004_204512) fixes:
   - photo downloads are polite (1.5 s apart) and retried on 429/503 (Retry-After, else 5 s then 15 s); duplicates by title removed;

@@ -181,6 +181,42 @@ def short_credit(c):
     """On-screen credit (Shorts and long videos): 'Photo: creator / CC BY-SA 2.0'."""
     return f"Photo: {(c.get('creator') or 'unknown')[:40]} / {credit_license(c)}"
 
+def _font(size, bold=False):
+    from PIL import ImageFont
+    names = (("arialbd.ttf", "C:/Windows/Fonts/arialbd.ttf", "DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf") if bold else ()) + \
+            ("arial.ttf", "C:/Windows/Fonts/arial.ttf", "segoeui.ttf", "DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+    for f in names:
+        try: return ImageFont.truetype(f, size)
+        except Exception: continue
+    return ImageFont.load_default()
+
+def headline_clip(text, kicker, out, secs, size=(1920, 1080)):
+    """Last-resort visual for a subject-locked long-video shot: a dark headline card with a slow drift (drawn here, never by an
+    image model, so it can't show the wrong subject)."""
+    if media.ok(out): return out
+    from PIL import Image, ImageDraw
+    W, H = size; out = Path(out); out.parent.mkdir(parents=True, exist_ok=True)
+    im = Image.new("RGB", (W, H)); d = ImageDraw.Draw(im)
+    for y in range(H):   # dark blue -> near black gradient
+        t = y / H; d.line([(0, y), (W, y)], fill=(int(16 - 9 * t), int(26 - 16 * t), int(46 - 28 * t)))
+    for x in range(-H, W, 70): d.line([(x, H), (x + H, 0)], fill=(30, 40, 62), width=2)
+    words, lines, cur = text.split(), [], ""
+    f = _font(int(H * 0.075), True)
+    for w in words:
+        t = (cur + " " + w).strip()
+        if d.textlength(t, font=f) > W * 0.8 and cur: lines.append(cur); cur = w
+        else: cur = t
+    if cur: lines.append(cur)
+    lines = lines[:3]; lh = int(H * 0.095); y = H // 2 - len(lines) * lh // 2
+    if kicker:
+        kf = _font(int(H * 0.033), True); kw = d.textlength(kicker.upper(), font=kf)
+        d.rounded_rectangle([(W - kw) / 2 - 24, y - lh - 10, (W + kw) / 2 + 24, y - lh + int(H * 0.05)], radius=30, fill=(255, 200, 61))
+        d.text(((W - kw) / 2, y - lh - 2), kicker.upper(), font=kf, fill=(17, 17, 17))
+    for ln in lines:
+        d.text(((W - d.textlength(ln, font=f)) / 2, y), ln, font=f, fill=(255, 255, 255)); y += lh
+    png = out.with_suffix(".png"); im.save(png)
+    return kenburns(png, out, secs, size, 2)
+
 def _credit_png(text, out, scale=1.0):
     """The on-screen credit as a small semi-transparent label (PNG), drawn with PIL so ffmpeg needs no font setup."""
     from PIL import Image, ImageDraw, ImageFont
