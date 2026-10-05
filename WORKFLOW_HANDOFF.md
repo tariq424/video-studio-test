@@ -59,6 +59,13 @@ Test of Oct 4 (job 20261004_164620) showed per-beat locks were not enough: only 
   seats, cockpit door, SUV on a road, labelled mannequin people, generic object. Coloured with the subject's scheme, labelled
   "RECONSTRUCTION", never a logo or a face. Short: `do_fallback` adds them as backdrops. Long: `long_broll` renders 9 s clips
   (`short.render_recon`, composition `Recon`) and uses them as the shot's footage.
+- **Subject-locked shots never search the stock libraries** (Pexels/Pixabay/NASA are for generic scenes). They go to
+  `photos.py`: real openly licensed photos of the subject, from **Openverse** first (no key; aggregates Flickr, Commons and more;
+  anonymous limit 200 requests/day), then **Flickr** (only if `FLICKR_API_KEY` is in `.env`), then **Wikimedia Commons**.
+  Only CC0, Public Domain, CC BY and CC BY-SA (no NC, ND or GFDL). Each photo is vision-checked (subject's brand in its title/tags or
+  visible, no other brand, no watermark). Short: shown whole over a blurred copy with an on-screen credit; long: 9 s slow zoom/pan
+  clip. Every photo gets a credit line (title, author, licence, link) in the YouTube description. Each photo is used once per video.
+  Order for a locked shot: real photos -> 3D reconstruction (Short: the route map first if the beat has one).
 - Photo-real AI stills are now only used for unlocked (generic) beats.
 - Remotion WebGL: `--gl=angle` on Windows (GPU), `swangle` elsewhere; override with `remotion_gl` in settings.json. Software rendering
   is about 2 frames/s at 1080p, so the GPU matters for long videos.

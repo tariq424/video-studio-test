@@ -42,6 +42,21 @@ export const Shot: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur,
       </AbsoluteFill>
     );
   }
+  if (bg.type === "image" && bg.fit === "frame") {
+    // a real photo shown whole (sharp), over a blurred enlarged copy of itself, with a slow push-in; credit line at the bottom
+    const z = interpolate(p, [0, 1], [1.0, 1.07]);
+    return (
+      <AbsoluteFill style={{ opacity: fadeIn, overflow: "hidden", background: "#000" }}>
+        <Img src={staticFile(bg.src)} style={{ width: "100%", height: "100%", objectFit: "cover", filter: "blur(38px) brightness(0.5)", transform: "scale(1.15)" }} />
+        <AbsoluteFill style={{ alignItems: "center", justifyContent: "center" }}>
+          <Img src={staticFile(bg.src)} style={{ width: width, maxHeight: height * 0.62, objectFit: "contain", boxShadow: "0 30px 80px rgba(0,0,0,0.6)",
+            transform: `translateY(20px) scale(${z})` }} />
+        </AbsoluteFill>
+        {bg.credit ? <div style={{ position: "absolute", left: 40, right: 40, top: height * 0.5 + width * 0.36 + 40, textAlign: "center",
+          fontFamily: "Inter, sans-serif", fontWeight: 600, fontSize: 22, color: "rgba(255,255,255,0.7)" }}>{bg.credit}</div> : null}
+      </AbsoluteFill>
+    );
+  }
   const imgW = (height * 1920) / 1088;          // rendered width of a 16:9 still at full frame height
   const range = (imgW - width) * 0.85;           // how far we can scroll
   const leftToRight = seed % 2 === 0;

@@ -12,7 +12,7 @@ export type Graphic =
 import type { Backdrop } from "./Backdrops";
 // from = seconds into beat. "layers": AI still split into depth layers (2.5D). "graphic": full-screen map/headline backdrop.
 export type Bg =
-  | { src: string; type: "image" | "video"; from: number; fit?: "cover" | "frame" }
+  | { src: string; type: "image" | "video"; from: number; fit?: "cover" | "frame"; credit?: string }
   | { type: "layers"; layers: string[]; from: number }
   | { type: "graphic"; g: Backdrop; from: number };
 

@@ -448,8 +448,10 @@ def long_broll(job, plan, cfg, log, stop):
         slots.append({"id": v["id"], "text": f"Shot: {v['prompt'][:300]} Narration: {s['vo'][:250]}", "queries": q, "subject": sj, "avoid": avoid})
         v["subject"] = sj
     locked = sum(1 for x in slots if x.get("subject"))
-    if locked: log(f"  {locked} of {len(slots)} shot(s) locked to a story subject (e.g. {next(x['subject']['name'] for x in slots if x.get('subject'))}); they use real footage only on a confirmed match, otherwise a 3D reconstruction")
-    picked = fill(cfg, slots, "landscape", {v["id"]: 1 for _, v in vis}, d, log, stop, want_long_side=1920, max_secs=12.0, state_file=d / "footage.json")
+    if locked: log(f"  {locked} of {len(slots)} shot(s) locked to a story subject (e.g. {next(x['subject']['name'] for x in slots if x.get('subject'))}); they get real licensed photos of it, otherwise a 3D reconstruction")
+    # stock libraries only for generic shots; subject-locked shots go to real photos (Openverse/Flickr/Commons), then reconstructions
+    free = [x for x in slots if not x.get("subject")]
+    picked = fill(cfg, free, "landscape", {x["id"]: 1 for x in free}, d, log, stop, want_long_side=1920, max_secs=12.0, state_file=d / "footage.json") if free else {}
     n = 0
     for s, v in vis:
         c = (picked.get(v["id"]) or [None])[0]
@@ -458,16 +460,29 @@ def long_broll(job, plan, cfg, log, stop):
     # locked shots with no confirmed footage: 3D reconstruction clips (never a photo-real AI image of the wrong livery/model)
     miss = [(s, v) for s, v in vis if v.get("subject") and not v.get("stock")]
     if miss:
-        from . import short
-        k = {}
+        from . import short, photos
+        k = {}; pics = {}; used = set()
         for s, v in miss:
             if stop(): raise RuntimeError("cancelled")
             i = k.get(s["id"], 0); k[s["id"]] = i + 1
+            nm = v["subject"]["name"]
+            if nm not in pics:
+                try: pics[nm] = photos.find(cfg, v["subject"], d / "photos", log, want=10)
+                except Exception as e: log(f"  photo search failed ({str(e)[:100]})"); pics[nm] = []
+            pc = next((p for p in pics[nm] if p["id"] not in used), None)
+            if pc:   # a real, openly licensed photo of the subject, slowly zoomed/panned
+                out = d / "photo_clips" / f"{v['id']}.mp4"; out.parent.mkdir(exist_ok=True)
+                try:
+                    photos.kenburns(pc["path"], out, 9.0, (1920, 1080), i)
+                    v["stock"] = str(out.relative_to(job)).replace("\\", "/"); v["stock_src"] = pc["src"]; v["credit"] = photos.credit(pc)
+                    used.add(pc["id"]); n += 1; continue
+                except Exception as e: log(f"  photo clip for {v['id']} failed ({str(e)[:100]})")
             g = coherence.recon(v["subject"], ents, v["prompt"] + " " + s["vo"], i)
             out = d / "recon" / f"{v['id']}.mp4"
             try:
                 short.render_recon(g, out, 9.0, (1920, 1080), cfg, log, stop)
                 v["stock"] = str(out.relative_to(job)).replace("\\", "/"); v["stock_src"] = "reconstruction"; n += 1
             except Exception as e: log(f"  reconstruction for {v['id']} failed ({str(e)[:120]}); it stays an AI visual")
-        log(f"  {sum(1 for _, v in miss if v.get('stock'))} locked shot(s) shown as 3D reconstructions")
+        log(f"  locked shots without footage: {sum(1 for _, v in miss if v.get('credit'))} real photo(s), "
+            f"{sum(1 for _, v in miss if v.get('stock_src') == 'reconstruction')} 3D reconstruction(s)")
     log(f"B-roll: {n} of {len(vis)} AI visuals replaced with real footage or reconstructions; {len(vis) - n} will be AI-rendered")

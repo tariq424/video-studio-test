@@ -188,13 +188,17 @@ def do_stock(job, plan, cfg, log, stop):
         if s.get("cta"):
             slots.append({"id": s["id"], "text": "calm, general background for the closing end card", "queries": ["city skyline dusk aerial", "night sky stars timelapse"]})
             need[s["id"]] = 1
+        elif s.get("subject"):
+            continue   # locked to a specific subject: stock libraries don't have it; real photos / reconstruction come in short_fallback
         else:
             secs = len(s["vo"].split()) / cfg.get("voice_wpm", 142) * 60 + GAP
             slots.append({"id": s["id"], "text": s["vo"], "queries": s["queries"], "subject": s.get("subject"), "avoid": s.get("avoid") or []})
             need[s["id"]] = max(2, min(3, math.ceil(secs / 6.0)))
     picked = footage.fill(cfg, slots, "portrait", need, d, log, stop, want_long_side=2560, max_secs=10.0, state_file=d / "footage.json", fallback=True)
+    for s in plan["sections"]:
+        if s.get("subject") and not s.get("cta"): picked.setdefault(s["id"], [])
     (d / "pick.json").write_text(json.dumps(picked, indent=1), encoding="utf-8")
-    n = sum(len(v) for v in picked.values()); short_ = [k for k, v in picked.items() if len(v) < need[k]]
+    n = sum(len(v) for v in picked.values()); short_ = [k for k, v in picked.items() if len(v) < need.get(k, 0)]
     log(f"Stock footage: {n} clips ready" + (f"; fewer than wanted for {', '.join(short_)}" if short_ else ""))
 
 # ---------------------------------------------------------------- fallback visuals (no matching footage)
@@ -242,15 +246,26 @@ def do_fallback(job, plan, cfg, wg, log, stop):
         n = needs[s["id"]]; items = []
         bd = s.get("backdrop") or {"kind": "headline", "kicker": "", "text": s["vo"][:60], "sub": ""}
         if bd.get("kind") == "map": items.append({"type": "graphic", "g": bd})
-        if s.get("subject"):   # locked: a 3D reconstruction in the subject's colours (an AI photo would invent the livery/model)
-            from . import coherence
+        if s.get("subject"):   # locked: real licensed photos of the subject, then a 3D reconstruction (an AI image would invent the livery/model)
+            from . import coherence, photos
             ents = json.loads((job / "entities.json").read_text(encoding="utf-8")) if (job / "entities.json").exists() else []
             cap = bd.get("text", "") if bd.get("kind") == "headline" else bd.get("title", "")
+            try: pics = photos.find(cfg, s["subject"], sd / "photos", log, want=8)
+            except Exception as e: log(f"  photo search failed ({str(e)[:100]})"); pics = []
+            used = {i.get("photo") for v in out.values() for i in v if i.get("photo")}
+            for pc in pics:
+                if len(items) >= n: break
+                if pc["id"] in used: continue
+                dst = fd / f"{pc['id']}.jpg"
+                if not dst.exists(): shutil.copy2(pc["path"], dst)
+                # shown whole over a blurred copy: most photos are landscape, and cropping them to vertical would blur them
+                items.append({"type": "image", "src": str(dst.relative_to(sd)).replace("\\", "/"), "fit": "frame",
+                              "photo": pc["id"], "credit": photos.credit(pc), "short_credit": photos.short_credit(pc)}); used.add(pc["id"])
             k = 0
             while len(items) < n:
                 items.append({"type": "graphic", "g": coherence.recon(s["subject"], ents, s["vo"] + " " + " ".join(s["queries"]), k, cap if k == 0 else "")}); k += 1
             out[s["id"]] = items
-            log(f"  {s['id']}: " + ", ".join(i["g"]["kind"] + (f" ({i['g']['scene']})" if i["g"]["kind"] == "recon" else "") for i in items))
+            log(f"  {s['id']}: " + ", ".join("real photo" if i["type"] == "image" else i["g"]["kind"] + (f" ({i['g']['scene']})" if i["g"]["kind"] == "recon" else "") for i in items))
             ff.write_text(json.dumps(out, indent=1), encoding="utf-8")
             continue
         k = 0
@@ -392,6 +407,10 @@ def build(job, plan, cfg, log):
                 if not dst.exists(): shutil.copy2(src, dst)
                 bg = {"src": f"media/stock/{c['id']}.mp4", "type": "video", "from": round(t0, 3)}
                 if c.get("orient") == "landscape": bg["fit"] = "frame"
+            elif c["type"] == "image":
+                dst = pub / "media" / "fb" / Path(c["src"]).name
+                if not dst.exists(): shutil.copy2(sd / c["src"], dst)
+                bg = {"type": "image", "src": f"media/fb/{Path(c['src']).name}", "fit": "frame", "credit": c.get("short_credit", ""), "from": round(t0, 3)}
             elif c["type"] == "layers":
                 srcs = []
                 for lp in c["layers"]:
@@ -488,6 +507,9 @@ def do_render(job, plan, cfg, meta, log, stop):
     if plan.get("mode") == "both": desc += ["Full breakdown: <PASTE LONG VIDEO LINK HERE>", ""]
     desc += ["Summarized from: " + meta.get("title", "") + (f" - {meta.get('channel')}" if meta.get("channel") else "") + (f"\n{src}" if src else ""), ""]
     if "NASA" in srcs: desc += ["Space footage courtesy of NASA.", ""]
+    fbf = job / "short" / "fallback.json"
+    creds = sorted({i["credit"] for v in (json.loads(fbf.read_text(encoding="utf-8")) if fbf.exists() else {}).values() for i in v if i.get("credit")})
+    if creds: desc += creds + [""]
     desc += ["#Shorts"]
     (out_dir / "youtube_short_description.txt").write_text("\n".join(desc), encoding="utf-8")
     log(f"Short finished: {out} ({media.dur(out):.0f}s)")

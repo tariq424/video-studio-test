@@ -107,6 +107,8 @@ def finalize(job, plan, parts, meta, log):
     def mmss(x): return f"{int(x//60)}:{int(x%60):02}"
     desc = (plan.get("youtube_description") or "") + "\n\n" + "\n".join(f"{mmss(a)} {n}" for a, n in chap)
     desc += f"\n\nSource: \"{meta.get('title','')}\" — {meta.get('channel') or meta.get('uploader') or ''}\n{meta.get('webpage_url','')}\n"
+    creds = sorted({v["credit"] for s in plan["sections"] for v in s["visuals"] if v.get("credit")})
+    if creds: desc += "\n" + "\n".join(creds) + "\n"
     (o / "youtube_description.txt").write_text(desc, encoding="utf-8")
     log(f"FINAL: {final} ({media.dur(final)/60:.1f} min)")
     return final
