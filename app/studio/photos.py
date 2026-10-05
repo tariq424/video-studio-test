@@ -80,7 +80,11 @@ Reply with JSON only: {{"brands": [], "same_subject": "yes|no|unclear", "waterma
 def _check(cfg, p, path, subject, log):
     from .footage import _vision, _brands, _norm_brand
     key = _norm_brand(subject.get("brand", ""))
-    try: j = parse_json(_vision(cfg, path, PHOTO.format(subject=subject["name"])))
+    from PIL import Image
+    small = Path(path).with_name(Path(path).stem + "_vet.jpg")   # big originals (3-4k px) make the local vision model fail
+    if not small.exists():
+        im = Image.open(path).convert("RGB"); im.thumbnail((1280, 1280)); im.save(small, "JPEG", quality=88)
+    try: j = parse_json(_vision(cfg, small, PHOTO.format(subject=subject["name"])))
     except Exception as e: return False, f"vision check unavailable ({str(e)[:50]})"
     yes = lambda k, d: str(j.get(k, d)).strip().lower() in ("true", "yes", "1")
     if yes("watermark", False): return False, "watermark/text overlay"

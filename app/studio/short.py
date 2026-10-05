@@ -253,15 +253,17 @@ def do_fallback(job, plan, cfg, wg, log, stop):
             from . import coherence, photos
             ents = json.loads((job / "entities.json").read_text(encoding="utf-8")) if (job / "entities.json").exists() else []
             cap = bd.get("text", "") if bd.get("kind") == "headline" else bd.get("title", "")
-            inside = re.search(r"\b(cockpit|cabin|passengers?|seats?|aisle|crew|pilots?|captain)\b", " ".join(s["queries"]), re.I)
+            qtxt = " ".join(s["queries"])   # "passenger jet landing" is outside; "scared passengers in cabin" is inside
+            inside = re.search(r"\b(cockpit|flight deck|pilots?|captain)\b", qtxt, re.I) or \
+                     (coherence.INTERIOR.search(qtxt) and not coherence.EXTERIOR.search(qtxt) and not re.search(r"\b(jet|plane|airliner|aircraft)\b", qtxt, re.I))
             try: pics = photos.find(cfg, s["subject"], sd / "photos", log, want=8)
             except Exception as e: log(f"  photo search failed ({str(e)[:100]})"); pics = []
             # the real subject comes first, even if the photo shows a different moment (the narration carries the action).
             # A beat about what happened INSIDE (cockpit, cabin) opens on one real photo, then the cabin/cockpit reconstruction.
-            cap = min(n, len(items) + 1) if inside else n
+            limit = min(n, len(items) + 1) if inside else n   # (not "cap": that name holds the caption text below)
             used = {i.get("photo") for v in out.values() for i in v if i.get("photo")}
             for pc in pics:
-                if len(items) >= cap: break
+                if len(items) >= limit: break
                 if pc["id"] in used: continue
                 dst = fd / f"{pc['id']}.jpg"
                 if not dst.exists(): shutil.copy2(pc["path"], dst)
