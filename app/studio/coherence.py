@@ -115,11 +115,12 @@ SCENE_WORDS = [
 
 # what moment of a flight a beat (or a photo) is about - so a parked plane isn't shown while the narration says it is diving
 PHASE_WORDS = [
-    ("ground", r"\b(parked|on the ground|tarmac|apron|gate|stand|disembark\w*|deplan\w*|evacuat\w*|police|detained|stairs|after (it )?landed|after landing|on arrival)\b"),
-    ("landing", r"\b(land(ed|ing)?|touch(ed)? down|final approach|diverted to|emergency landing|runway)\b"),
+    ("ground", r"\b(parked|on the ground|tarmac|apron|gate|stand|disembark\w*|deplan\w*|evacuat\w*|police|detained|stairs|after (it )?landed|"
+               r"after landing|on arrival|kept on board|replacement (aircraft|plane)|exit the (aircraft|plane))\b"),
     ("air", r"\b(descen\w*|dropp\w*|dive|diving|plunge\w*|altitude|feet|ft\b|signals?|squawk\w*|transponder|transmitt\w*|mid-?air|in flight|"
             r"airspace|scrambled|intercept\w*|hijack\w*|cockpit fight|radar|climb\w*|cruis\w*|crash\w*|suicide|kill (him|her)self|"
             r"over (saudi|the sea|iraq|jordan))\b"),
+    ("landing", r"\b(landed|touch(ed)? down|final approach|emergency landing|made (a|an) \w* ?landing)\b"),
 ]
 
 def phase(text):
@@ -128,6 +129,21 @@ def phase(text):
     for ph, rx in PHASE_WORDS:
         if re.search(rx, t): return ph
     return ""
+
+def beat_phases(sections):
+    """Moment of every beat, from its NARRATION only (search phrases are noisy). A beat with no moment of its own (reactions,
+    speculation, background) inherits the moment the story is at, so a comment made after the landing doesn't show the plane
+    in the air, and vice versa."""
+    out, cur = {}, ""
+    strong_air = re.compile(r"\b(dropped|descended|dived|plunged|transmitted|squawked|scrambled|lost altitude|took off|was flying)\b", re.I)
+    for s in sections:
+        ph = phase(s.get("vo", ""))
+        # once the plane is on the ground, talk about what "could have" happened ("if it had crashed", "a hijacking") stays on the
+        # ground; only a beat that clearly narrates an in-air event again goes back to the air
+        if cur == "ground" and ph == "air" and not strong_air.search(s.get("vo", "")): ph = "ground"
+        if ph: cur = ph
+        out[s["id"]] = ph or cur
+    return out
 
 def phase_ok(beat_phase, photo_phase):
     """May a photo taken in photo_phase illustrate a beat about beat_phase?"""
@@ -162,7 +178,7 @@ def _squawks(text):
             if m: out.append((m.start(), code))
     return [c for _, c in sorted(out)]
 
-def recon(subject, ents, text, k=0, caption=""):
+def recon(subject, ents, text, k=0, caption="", moment=None):
     """A Recon spec (see remotion/src/Recon.tsx) for this shot. k varies the scene when a beat needs several.
     The scene follows the moment the narration describes: a descent becomes a dive with the altimeter counting down, emergency
     codes appear on a transponder readout, a cockpit attack shows the door open with an injured crew member."""
@@ -172,7 +188,7 @@ def recon(subject, ents, text, k=0, caption=""):
     own = next((e for e in ents if e["name"] == (subject or {}).get("name")), {})
     military = bool(re.search(r"\b(f-?\d+|fighter|military|combat|stealth|bomber|air force|jet fighter)\b",
                               (subject or {}).get("name", "") + " " + " ".join(own.get("category_words", [])), re.I))
-    ph = phase(text)
+    ph = phase(text) if moment is None else moment
     alts, codes = _altitudes(text), _squawks(text)
     if kind == "aircraft":
         if military: order = ["aircraft_flight", "aircraft_flight"]

@@ -169,7 +169,9 @@ Answer each question about what you actually see:
    Would a viewer find the clip a sensible illustration of that narration? Answer "no" if it shows a recognisable place,
    building or landmark that is not the one the narration is about (e.g. a famous parliament of another country), an unrelated
    event, or a mood that contradicts it (calm, routine, happy scenes while the narration describes an emergency, violence, fear
-   or a crisis). "yes" or "partly" otherwise.
+   or a crisis). Also answer "no" if the clip's main subject is one person who would be taken to BE someone the narration names
+   (a particular country's officials, agents, spokesperson, pilot or politician): a stranger must not stand in for a real
+   person or a real agency's staff. Places, documents, maps, screens and crowds are fine. "yes" or "partly" otherwise.
 Reply with JSON only: {{"shows": "yes|partly|no", "overlay_text": false, "same_scene": true, "looks_ok": true, "brands": [], "fits": "yes|partly|no", "seen": "10-20 words: what the clip shows"}}"""
 
 STRICT = """The LEFT image is a reference photo of: {subject}.
@@ -469,6 +471,7 @@ def long_broll(job, plan, cfg, log, stop):
     if miss:
         from . import short, photos
         k = {}; pics = {}; used = set()
+        phases = coherence.beat_phases(plan["sections"])
         for s, v in miss:
             if stop(): raise RuntimeError("cancelled")
             i = k.get(s["id"], 0); k[s["id"]] = i + 1
@@ -476,8 +479,8 @@ def long_broll(job, plan, cfg, log, stop):
             if nm not in pics:
                 try: pics[nm] = photos.find(cfg, v["subject"], d / "photos", log, want=10)
                 except Exception as e: log(f"  photo search failed ({str(e)[:100]})"); pics[nm] = []
-            bp = coherence.phase(v["prompt"] + " " + s["vo"])
-            pc = None if v["subject"].get("interior") else \
+            bp = phases.get(s["id"], "")
+            pc = None if v["subject"].get("interior") or bp == "air" else \
                  next((p for p in pics[nm] if p["id"] not in used and coherence.phase_ok(bp, p.get("phase"))), None)
             if pc:   # a real, openly licensed photo of the subject, slowly zoomed/panned
                 out = d / "photo_clips" / f"{v['id']}.mp4"; out.parent.mkdir(exist_ok=True)
@@ -486,7 +489,7 @@ def long_broll(job, plan, cfg, log, stop):
                     v["stock"] = str(out.relative_to(job)).replace("\\", "/"); v["stock_src"] = pc["src"]; v["credit"] = photos.credit(pc)
                     used.add(pc["id"]); n += 1; continue
                 except Exception as e: log(f"  photo clip for {v['id']} failed ({str(e)[:100]})")
-            g = coherence.recon(v["subject"], ents, v["prompt"] + " " + s["vo"], i)
+            g = coherence.recon(v["subject"], ents, s["vo"], i, moment=phases.get(s["id"], ""))
             out = d / "recon" / f"{v['id']}.mp4"
             if g.get("kind") == "headline":   # no 3D model for this kind of subject (e.g. a fighter jet): a drawn card
                 out = d / "cards" / f"{v['id']}.mp4"; photos.headline_clip(g["text"], g.get("kicker", ""), out, 9.0)

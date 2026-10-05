@@ -49,7 +49,9 @@ For each beat also give:
   "technology", "innovation"), no famous people, nothing that is mostly text. Match the MOOD and the PLACE of the beat: for an
   emergency, attack or crisis ask for tense, urgent scenes ("emergency lights flashing at night", "worried passengers holding
   armrests"), never routine or happy ones; for a named country ask for that country ("jerusalem city skyline", not "parliament
-  building"), or for something neutral if you can't (a map, a newsroom, a radar screen). No brand names, EXCEPT when the beat has a
+  building"), or for something neutral if you can't (a map, a newsroom, a radar screen). When the beat is about a named
+  government, agency or official, ask for places, documents or screens ("kremlin at night", "classified folder on desk"),
+  never for a person who would be taken to be that official or agent. No brand names, EXCEPT when the beat has a
   "subject": then include the subject's brand and model in the phrases (e.g. "flydubai plane landing", "flydubai boeing 737").
 - "subject": set it ONLY when viewers would expect to SEE one specific identifiable real thing during this beat - a particular
   airline's aircraft, a car make and model, a named product, ship, building or landmark - as
@@ -248,6 +250,8 @@ def do_fallback(job, plan, cfg, wg, log, stop):
     if not needs:
         log("Fallback visuals: none needed"); ff.write_text(json.dumps(out, indent=1), encoding="utf-8"); return
     gpu = wg.alive() if any(not s.get("subject") for s in plan["sections"] if s["id"] in needs) else False
+    from . import coherence
+    phases = coherence.beat_phases([x for x in plan["sections"] if not x.get("cta")])
     log(f"Fallback visuals for {len(needs)} beat(s) without matching footage: {', '.join(needs)}")
     seed = 5100
     for s in plan["sections"]:
@@ -262,9 +266,11 @@ def do_fallback(job, plan, cfg, wg, log, stop):
             cap = bd.get("text", "") if bd.get("kind") == "headline" else bd.get("title", "")
             qtxt = " ".join(s["queries"])
             inside = s["subject"].get("interior") or re.search(r"\b(cockpit|flight deck|pilots?|captain)\b", qtxt, re.I)
-            bp = coherence.phase(s["vo"] + " " + qtxt)   # the moment the narration describes: in the air, landing, on the ground
+            bp = phases.get(s["id"], "")   # the moment of the story this beat is at: in the air, landing, on the ground
             pics = []
-            if not inside:   # inside the plane: the cabin/cockpit reconstruction (another airline's real cabin would be wrong)
+            # inside the plane: the cabin/cockpit reconstruction (another airline's real cabin would be wrong).
+            # In the air: also the reconstruction - real photos show planes taking off or cruising calmly, never the emergency
+            if not inside and bp != "air":
                 try: pics = photos.find(cfg, s["subject"], sd / "photos", log, want=10)
                 except Exception as e: log(f"  photo search failed ({str(e)[:100]})")
                 fit = [pc for pc in pics if coherence.phase_ok(bp, pc.get("phase"))]
@@ -282,7 +288,7 @@ def do_fallback(job, plan, cfg, wg, log, stop):
                               "photo": pc["id"], "credit": photos.credit(pc), "short_credit": photos.short_credit(pc)}); used.add(pc["id"])
             k = 0
             while len(items) < n:
-                items.append({"type": "graphic", "g": coherence.recon(s["subject"], ents, s["vo"] + " " + " ".join(s["queries"]), k, cap if k == 0 else "")}); k += 1
+                items.append({"type": "graphic", "g": coherence.recon(s["subject"], ents, s["vo"], k, cap if k == 0 else "", moment=phases.get(s["id"], ""))}); k += 1
             out[s["id"]] = items
             log(f"  {s['id']}: " + ", ".join("real photo" if i["type"] == "image" else i["g"]["kind"] + (f" ({i['g']['scene']})" if i["g"]["kind"] == "recon" else "") for i in items))
             ff.write_text(json.dumps(out, indent=1), encoding="utf-8")
