@@ -23,6 +23,8 @@ Write {nb} beats that tell one story. Each beat is 30-48 words (about 11-17 seco
 YouTube Shorts are cut off at 3 minutes, so do not go over.
 - Beat 1 is the hook: one short line framing what this is (who is talking, about what), then the most surprising claim or number,
   in plain words (no jargon in the first sentence). No greetings, no "in this video".
+- Tell events in the order they happened. Once the story has moved on (e.g. the plane has landed), don't go back to an earlier
+  moment (what happened in the air) in a later beat; put background and reactions after the events, clearly as such.
 - Middle beats: the strongest points, ONE idea per beat (never two unrelated topics in one beat), concrete (numbers, names, examples).
   Attribute opinions and predictions to who said them (first name is fine in narration).
 - Last beat: the payoff / biggest takeaway, ending on a strong line.
@@ -145,6 +147,11 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                 "description": j.get("description", ""), "mode": mode, "sections": []}
         for i, b in enumerate(j["beats"]):
             gs = [g for g in (b.get("graphics") or []) if isinstance(g, dict) and isinstance(g.get("g"), dict) and g["g"].get("kind") in KINDS][:2]
+            for g in gs:   # a stat must be a single number; anything else ("30k to 15k") becomes a text card (it rendered as "NaN")
+                if g["g"]["kind"] == "stat":
+                    try: g["g"]["value"] = float(str(g["g"].get("value")).replace(",", ""))
+                    except (TypeError, ValueError):
+                        g["g"] = {"kind": "hook", "lines": [str(g["g"].get("value", ""))[:18].upper(), str(g["g"].get("label", ""))[:24].upper()], "accent": 0}
             for g in gs:   # a counting-up number can't carry a range like "$5-10B"
                 if g["g"]["kind"] == "stat" and re.search(r"\d", str(g["g"].get("prefix", "")) + str(g["g"].get("suffix", ""))):
                     g["g"]["kind"] = "hook"; g["g"]["lines"] = [f"{g['g'].get('prefix', '')}{g['g'].get('value', '')}{g['g'].get('suffix', '')}", str(g["g"].get("label", "")).upper()]; g["g"]["accent"] = 0

@@ -80,8 +80,16 @@ PHOTO = """This is a photo found by searching for: {subject}.
    collage)? true or false.
 Reply with JSON only: {{"brands": [], "same_subject": "yes|no|unclear", "watermark": false, "looks_ok": true, "phase": "air|landing|takeoff|taxi|ground|other", "seen": "10-20 words"}}"""
 
+NOT_REAL = re.compile(r"\b(simulator|simulation|model|replica|toy|diecast|die-cast|scale|lego|render(ing)?|mock-?up|cgi|production line|"
+                      r"factory|assembly|cutaway|drawing|illustration|painting|game|museum)\b", re.I)
+TITLE_PHASE = [("landing", r"\b(lands?|landing|final approach|on approach|touch(es|ing)? ?down|arriv\w*)\b"),
+               ("takeoff", r"\b(take ?-?off|taking off|departing|departure|rotat\w*|lined up)\b"),
+               ("taxi", r"\b(taxi\w*|pushback)\b"), ("ground", r"\b(parked|at the gate|on stand|apron|ramp|stairs)\b"),
+               ("air", r"\b(in flight|inflight|flying|airborne|overhead|cruis\w*|climb\w*)\b")]
+
 def _check(cfg, p, path, subject, log):
     from .footage import _vision, _brands, _norm_brand
+    if NOT_REAL.search(p["title"]): return False, "not a photo of the real thing (title)"
     key = _norm_brand(subject.get("brand", ""))
     from PIL import Image
     small = Path(path).with_name(Path(path).stem + "_vet.jpg")   # big originals (3-4k px) make the local vision model fail
@@ -101,10 +109,18 @@ def _check(cfg, p, path, subject, log):
     # brand in the title/tags or visible; or, for things with no visible brand (military aircraft...), the model designation
     # from the subject's name (e.g. "F-35") in the photo's title/tags
     models = [_norm_brand(t) for t in re.findall(r"[A-Za-z]*-?\d+[A-Za-z0-9-]*", subject["name"]) if re.search(r"\d", t)]
-    evidence = (not key) or key in meta or any(key in _norm_brand(b) for b in brands) or any(m and m in meta for m in models)
+    visible = bool(key) and any(key in _norm_brand(b) or _norm_brand(b) in key for b in brands)
+    military = bool(re.search(r"\b(f-?\d+|fighter|military|air force)\b", subject["name"], re.I))
+    if key and not military and not visible:
+        # the viewer must SEE it is the subject (livery/badge readable), not just the photo's title saying so -
+        # a front view of a white 737 could be any airline
+        return False, f"{subject.get('brand')} not visible in the photo"
+    evidence = (not key) or visible or key in meta or any(m and m in meta for m in models)
     if not evidence: return False, f"no sign of {subject.get('brand')}"
     if not key and same != "yes": return False, "subject not confirmed"
     p["phase"] = str(j.get("phase") or "").strip().lower()
+    for ph, rx in TITLE_PHASE:   # the photographer's title ("Lands at Dhaka", "Taxiing") beats the small vision model's guess
+        if re.search(rx, p["title"], re.I): p["phase"] = ph; break
     return True, ""
 
 _last_dl = [0.0]

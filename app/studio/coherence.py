@@ -118,7 +118,8 @@ PHASE_WORDS = [
     ("ground", r"\b(parked|on the ground|tarmac|apron|gate|stand|disembark\w*|deplan\w*|evacuat\w*|police|detained|stairs|after (it )?landed|after landing|on arrival)\b"),
     ("landing", r"\b(land(ed|ing)?|touch(ed)? down|final approach|diverted to|emergency landing|runway)\b"),
     ("air", r"\b(descen\w*|dropp\w*|dive|diving|plunge\w*|altitude|feet|ft\b|signals?|squawk\w*|transponder|transmitt\w*|mid-?air|in flight|"
-            r"airspace|scrambled|intercept\w*|hijack\w*|cockpit fight|radar|climb\w*|cruis\w*|over (saudi|the sea|iraq|jordan))\b"),
+            r"airspace|scrambled|intercept\w*|hijack\w*|cockpit fight|radar|climb\w*|cruis\w*|crash\w*|suicide|kill (him|her)self|"
+            r"over (saudi|the sea|iraq|jordan))\b"),
 ]
 
 def phase(text):
@@ -143,8 +144,8 @@ def _altitudes(text):
     out = []
     for m in re.finditer(r"(\d{1,3}(?:,\d{3})+|\d{4,5})\s*(?:-\s*\d{1,3}(?:,\d{3})?\s*)?(?:feet|ft)\b", text, re.I):
         out.append(int(m.group(1).replace(",", "")))
-    for m in re.finditer(r"\b((?:twenty|thirty|forty|fifty|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen)"
-                         r"(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?) thousand(?: feet)?\b", text, re.I):
+    for m in re.finditer(r"\b((?:twenty|thirty|forty|fifty|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|"
+                         r"one|two|three|four|five|six|seven|eight|nine)(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?) thousand\b", text, re.I):
         out.append(sum(NUM_WORDS[w] for w in re.split(r"[- ]", m.group(1).lower())) * 1000)
     return [a for a in out if 500 <= a <= 45000]
 
@@ -155,6 +156,10 @@ def _squawks(text):
                      ("7600", r"7600|seven[- ]six[- ]hundred|seventy[- ]six hundred|seven six zero zero")):
         m = re.search(rx, t)
         if m: out.append((m.start(), code))
+    if not out and re.search(r"\b(signal|code|squawk|transponder)", t):   # named but not numbered: the standard codes
+        for code, rx in (("7700", r"general emergency|emergency signal|emergency code"), ("7500", r"hijack"), ("7600", r"radio failure|lost (radio|communication)")):
+            m = re.search(rx, t)
+            if m: out.append((m.start(), code))
     return [c for _, c in sorted(out)]
 
 def recon(subject, ents, text, k=0, caption=""):
@@ -176,7 +181,8 @@ def recon(subject, ents, text, k=0, caption=""):
             if ph == "air": hits = ["aircraft_flight"] + [h for h in hits if h in ("cockpit_door", "cabin")]   # in the air: never parked
             elif ph == "landing": hits = [h for h in hits if h != "aircraft_ground"] or ["aircraft_landing"]
             order = hits + [s for s in ("aircraft_flight", "aircraft_landing", "aircraft_ground") if s not in hits]
-            if ph == "air": order = [o for o in order if o not in ("aircraft_landing", "aircraft_ground")]
+            if ph == "air":   # in the air: the aircraft in flight (and the cockpit when the beat is about the pilots)
+                order = (["cockpit_door"] if re.search(r"\b(cockpit|flight deck|pilots?|captain|co-?pilot|first officer)\b", text, re.I) else []) + ["aircraft_flight"]
             if ph == "ground": order = ["aircraft_ground"] + [o for o in order if o != "aircraft_ground"]
             if (subject or {}).get("interior"):   # a shot inside the aircraft: cabin / cockpit only
                 order = [h for h in hits if h in ("cockpit_door", "cabin")] or ["cabin", "cockpit_door"]
@@ -188,8 +194,8 @@ def recon(subject, ents, text, k=0, caption=""):
          "caption": caption[:40]}
     if military: g["model"] = "fighter"; g["colors"] = []
     if scene == "aircraft_flight":
-        if re.search(r"\b(descen\w*|dropp\w*|dive|diving|plunge\w*|lost altitude|losing altitude)\b", text, re.I) or len(alts) >= 2:
-            g["motion"] = "dive"
+        if (re.search(r"\b(descen\w*|dropp\w*|dive|diving|plunge\w*|lost altitude|losing altitude)\b", text, re.I) or len(alts) >= 2) and k % 2 == 0:
+            g["motion"] = "dive"   # alternate dive / level flight when a beat needs several visuals
         if len(alts) >= 2: g["altitude"] = [max(alts[0], alts[1]), min(alts[0], alts[1])] if g.get("motion") == "dive" else alts[:2]
         if codes: g["squawk"] = codes[:3]
     named = [p for p in people if p["name"].split()[0].lower() in text.lower() or (p["role"] and p["role"].split(",")[0].lower() in text.lower())]
