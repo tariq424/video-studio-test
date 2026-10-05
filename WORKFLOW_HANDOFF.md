@@ -76,7 +76,9 @@ Test of Oct 4 (job 20261004_164620) showed per-beat locks were not enough: only 
 - Oct 4 test (job 20261004_204512) fixes:
   - photo downloads are polite (1.5 s apart) and retried on 429/503 (Retry-After, else 5 s then 15 s); duplicates by title removed;
   - the most specific entity wins ("fighter jet" -> the F-35, not the airliner);
-  - beats about what happens inside (cockpit, cabin, passengers) use the cabin/cockpit reconstruction, not exterior photos;
+  - locked beats: the real subject photo comes first even if it shows a different moment (the narration carries the action);
+    photos are rejected only for wrong brand/livery, wrong model, watermark, not a real photo, or < 900 px - never for action.
+    Beats about what happens inside (cockpit, cabin) open on one real photo, then the cabin/cockpit reconstruction;
   - every generic stock clip must FIT the narration (vision question "fits", given the narration): no landmark of another country,
     no unrelated event, no calm/routine scene over an emergency; clothing logos count as brands;
   - Shorts no longer borrow other beats' clips; a beat without enough fitting footage gets fallback visuals instead;

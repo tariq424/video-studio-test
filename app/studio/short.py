@@ -254,13 +254,14 @@ def do_fallback(job, plan, cfg, wg, log, stop):
             ents = json.loads((job / "entities.json").read_text(encoding="utf-8")) if (job / "entities.json").exists() else []
             cap = bd.get("text", "") if bd.get("kind") == "headline" else bd.get("title", "")
             inside = re.search(r"\b(cockpit|cabin|passengers?|seats?|aisle|crew|pilots?|captain)\b", " ".join(s["queries"]), re.I)
-            if inside: pics = []   # the beat is about what happened INSIDE: exterior photos would not fit; use the cabin/cockpit reconstruction
-            else:
-                try: pics = photos.find(cfg, s["subject"], sd / "photos", log, want=8)
-                except Exception as e: log(f"  photo search failed ({str(e)[:100]})"); pics = []
+            try: pics = photos.find(cfg, s["subject"], sd / "photos", log, want=8)
+            except Exception as e: log(f"  photo search failed ({str(e)[:100]})"); pics = []
+            # the real subject comes first, even if the photo shows a different moment (the narration carries the action).
+            # A beat about what happened INSIDE (cockpit, cabin) opens on one real photo, then the cabin/cockpit reconstruction.
+            cap = min(n, len(items) + 1) if inside else n
             used = {i.get("photo") for v in out.values() for i in v if i.get("photo")}
             for pc in pics:
-                if len(items) >= n: break
+                if len(items) >= cap: break
                 if pc["id"] in used: continue
                 dst = fd / f"{pc['id']}.jpg"
                 if not dst.exists(): shutil.copy2(pc["path"], dst)

@@ -71,7 +71,8 @@ def _commons(q, log, n=15):
 PHOTO = """This is a photo found by searching for: {subject}.
 1. "brands": every brand, airline name/logo or make/badge you can read or clearly recognise. Empty list if none.
 2. "same_subject": does it clearly show {subject} itself (the same airline livery / the same make and model / the same building),
-   as the main subject? "yes", "no" or "unclear".
+   as the main subject? "yes", "no" or "unclear". Judge only WHAT it is, not what it is doing: parked, taxiing, landing or
+   flying are all fine.
 3. "watermark": is there a large watermark, caption, frame or text overlaid on the photo? true or false.
 4. "looks_ok": a clear, sharp, real photo (not a drawing, model, screenshot or collage)? true or false.
 Reply with JSON only: {{"brands": [], "same_subject": "yes|no|unclear", "watermark": false, "looks_ok": true, "seen": "10-20 words"}}"""
