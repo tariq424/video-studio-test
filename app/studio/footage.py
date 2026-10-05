@@ -251,7 +251,11 @@ def _brands(j):
     if isinstance(b, str): b = [b]
     return [str(x).strip() for x in b if str(x).strip() and _norm_brand(x) not in ("none", "no", "unknown", "na", "")]
 
-def verify(cfg, c, sheet_path, log, subject=None, ref=None):
+AVOID = """
+6. "forbidden": does any frame show {avoid}? Even partly, even small or in the background. true or false.
+Add "forbidden" to the JSON."""
+
+def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None):
     """-> (ok, reason, seen). Generic slots: hard checks + no visible third-party brand.
     Subject-locked slots: the clip must positively match the subject (brand evidence and the vision model agreeing with a reference photo)."""
     from PIL import Image, ImageStat
@@ -263,6 +267,7 @@ def verify(cfg, c, sheet_path, log, subject=None, ref=None):
     if subject and ref:
         img = side_by_side(ref, sheet_path, sheet_path.with_name(sheet_path.stem + "_vs.jpg"))
     prompt = STRICT.format(subject=subject["name"]) if (subject and ref) else VET.format(query=subject["name"] if subject else c["query"])
+    if avoid and not subject: prompt += AVOID.format(avoid="; or ".join(avoid)[:500])
     try: j = parse_json(_vision(cfg, img, prompt))
     except Exception as e:
         if subject: return False, f"vision check unavailable ({str(e)[:60]}); subject can't be confirmed", c["desc"]
@@ -275,6 +280,7 @@ def verify(cfg, c, sheet_path, log, subject=None, ref=None):
     brands = _brands(j); key = _norm_brand((subject or {}).get("brand", ""))
     other = [b for b in brands if not (key and (key in _norm_brand(b) or _norm_brand(b) in key))]
     if other: return False, f"shows another brand ({', '.join(other)[:60]})", seen
+    if avoid and not subject and yes("forbidden", False): return False, "shows something the story is about, but not the right one", seen
     if subject:
         evidence = bool(key) and (any(key in _norm_brand(b) for b in brands) or key in _norm_brand(c.get("desc", "")))
         same = str(j.get("same_subject", j.get("shows", ""))).strip().lower()
@@ -385,7 +391,7 @@ def fill(cfg, slots, orient, need, out_dir, log, stop, want_long_side, max_secs,
                 if not c or cid in used: continue
                 try: sh = sheet(c, out_dir / "sheets")
                 except Exception as e: log(f"  preview of {cid} failed ({str(e)[:60]})"); continue
-                ok, why, seen = verify(cfg, c, sh, log, subject=sj, ref=refs.get(sj["name"]) if sj else None)
+                ok, why, seen = verify(cfg, c, sh, log, subject=sj, ref=refs.get(sj["name"]) if sj else None, avoid=s.get("avoid"))
                 if not ok: log(f"  {s['id']}: skipped {c['src']} clip {cid} ({why})"); continue
                 c["seen"] = seen; got.append({k: c.get(k) for k in ("id", "src", "orient", "query", "dur", "w", "h", "file", "page", "author", "desc", "seen")}); used.add(cid)
             st["picked"][s["id"]] = got; save()
@@ -405,11 +411,9 @@ def fill(cfg, slots, orient, need, out_dir, log, stop, want_long_side, max_secs,
 QUERIES = """For each shot below (an image prompt written for an AI generator, plus the narration it illustrates), write 2 stock-video
 search phrases (3-5 words each) that would find REAL footage showing the same thing: subject + action + setting, people doing
 things where possible. No abstract words ("AI", "future", "concept", "technology"), no famous people.
-If the shot is about a specific identifiable thing viewers would expect to see (a particular airline's plane, a car make and model,
-a named product or landmark), set "subject" to it with its "brand" (e.g. {{"name": "flydubai Boeing 737", "brand": "flydubai"}},
-{{"name": "Mitsubishi Outlander Sport", "brand": "Mitsubishi"}}) and put the brand and model in the search phrases. Otherwise
-"subject" is null and phrases use no brand names. Never set a subject for a person.
-Reply with ONLY JSON: {{"shot_id": {{"q": ["phrase", "phrase"], "subject": null}}, ...}}
+The story is about: {subjects}. When a shot shows one of these, put its brand and model in the phrases ("flydubai boeing 737
+landing"); otherwise use no brand names.
+Reply with ONLY JSON: {{"shot_id": {{"q": ["phrase", "phrase"]}}, ...}}
 
 {shots}"""
 
@@ -419,13 +423,16 @@ def long_broll(job, plan, cfg, log, stop):
     if not vis: log("B-roll: nothing to do"); return
     d = job / "broll"; d.mkdir(exist_ok=True)
     qf = d / "queries.json"; qs = json.loads(qf.read_text(encoding="utf-8")) if qf.exists() else {}
+    from . import coherence
+    ents = coherence.entities(cfg, job, plan.get("title", ""), "\n".join(f"{s['title']}: {s['vo']}" for s in plan["sections"]), log, stop)
+    subjects = ", ".join(e["name"] for e in ents if e["kind"] != "person") or "nothing specific"
     todo = [(s, v) for s, v in vis if v["id"] not in qs]
     if todo:
         with LLM(cfg, log, stop) as llm:
             for i in range(0, len(todo), 15):
                 batch = todo[i:i + 15]
                 txt = "\n".join(f"SHOT {v['id']}: image prompt: {v['prompt'][:300]} | narration: {s['vo'][:300]}" for s, v in batch)
-                try: j = llm.chat_json("You are a precise video researcher.", QUERIES.format(shots=txt), max_tokens=2500)
+                try: j = llm.chat_json("You are a precise video researcher.", QUERIES.format(shots=txt, subjects=subjects), max_tokens=2500)
                 except Exception as e: log(f"  search phrases failed ({str(e)[:80]})"); j = {}
                 for s, v in batch:
                     e = j.get(v["id"]); e = {"q": e} if isinstance(e, list) else (e if isinstance(e, dict) else {})
@@ -434,14 +441,33 @@ def long_broll(job, plan, cfg, log, stop):
                     qs[v["id"]] = {"q": q or [" ".join(v["prompt"].split()[:5])], "subject": sj}
         qf.write_text(json.dumps(qs, indent=1), encoding="utf-8")
     norm = lambda e: e if isinstance(e, dict) else {"q": e, "subject": None}   # older jobs stored a plain list
-    slots = [{"id": v["id"], "text": f"Shot: {v['prompt'][:300]} Narration: {s['vo'][:250]}", "queries": norm(qs[v["id"]])["q"],
-              "subject": norm(qs[v["id"]]).get("subject")} for s, v in vis]
+    slots = []
+    for s, v in vis:
+        q = norm(qs[v["id"]])["q"]
+        sj, avoid = coherence.assign(ents, " ".join(q) + " " + v["prompt"])
+        slots.append({"id": v["id"], "text": f"Shot: {v['prompt'][:300]} Narration: {s['vo'][:250]}", "queries": q, "subject": sj, "avoid": avoid})
+        v["subject"] = sj
     locked = sum(1 for x in slots if x.get("subject"))
-    if locked: log(f"  {locked} shot(s) locked to a specific subject (e.g. {next(x['subject']['name'] for x in slots if x.get('subject'))}); they use real footage only on a confirmed match, otherwise an AI still")
+    if locked: log(f"  {locked} of {len(slots)} shot(s) locked to a story subject (e.g. {next(x['subject']['name'] for x in slots if x.get('subject'))}); they use real footage only on a confirmed match, otherwise a 3D reconstruction")
     picked = fill(cfg, slots, "landscape", {v["id"]: 1 for _, v in vis}, d, log, stop, want_long_side=1920, max_secs=12.0, state_file=d / "footage.json")
     n = 0
     for s, v in vis:
         c = (picked.get(v["id"]) or [None])[0]
         if c and media.ok(d / "clips" / f"{c['id']}.mp4"):
             v["stock"] = str((d / "clips" / f"{c['id']}.mp4").relative_to(job)).replace("\\", "/"); v["stock_src"] = c["src"]; n += 1
-    log(f"B-roll: {n} of {len(vis)} AI visuals replaced with real footage; {len(vis) - n} will be AI-rendered")
+    # locked shots with no confirmed footage: 3D reconstruction clips (never a photo-real AI image of the wrong livery/model)
+    miss = [(s, v) for s, v in vis if v.get("subject") and not v.get("stock")]
+    if miss:
+        from . import short
+        k = {}
+        for s, v in miss:
+            if stop(): raise RuntimeError("cancelled")
+            i = k.get(s["id"], 0); k[s["id"]] = i + 1
+            g = coherence.recon(v["subject"], ents, v["prompt"] + " " + s["vo"], i)
+            out = d / "recon" / f"{v['id']}.mp4"
+            try:
+                short.render_recon(g, out, 9.0, (1920, 1080), cfg, log, stop)
+                v["stock"] = str(out.relative_to(job)).replace("\\", "/"); v["stock_src"] = "reconstruction"; n += 1
+            except Exception as e: log(f"  reconstruction for {v['id']} failed ({str(e)[:120]}); it stays an AI visual")
+        log(f"  {sum(1 for _, v in miss if v.get('stock'))} locked shot(s) shown as 3D reconstructions")
+    log(f"B-roll: {n} of {len(vis)} AI visuals replaced with real footage or reconstructions; {len(vis) - n} will be AI-rendered")

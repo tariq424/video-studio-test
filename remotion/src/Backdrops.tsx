@@ -7,9 +7,11 @@ import world from "world-atlas/countries-50m.json";
 import { C, HEAD, BODY } from "./theme";
 
 export type MapPoint = { name: string; lat: number; lon: number; role: "origin" | "planned" | "actual" | "stop" | "place" };
+import type { Recon } from "./Recon";
 export type Backdrop =
   | { kind: "map"; title?: string; points: MapPoint[] }
-  | { kind: "headline"; kicker?: string; text: string; sub?: string };
+  | { kind: "headline"; kicker?: string; text: string; sub?: string }
+  | Recon;
 
 const countries = (feature as any)(world as any, (world as any).objects.countries);
 

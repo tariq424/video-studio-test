@@ -153,6 +153,15 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                                      "visuals": [{"type": "chart", "chart": g["g"], "at": g.get("at")} for g in gs]})
         log("Checking the Short against the source (names, attributions, numbers)...")
         plan = fact_check(llm, plan, meta, transcript, log, stop)
+        from . import coherence
+        ents = coherence.entities(cfg, Path(srcdir).parent, title, notes, log, stop, llm=llm)
+        nl = 0
+        for s in plan["sections"]:
+            sj, avoid = coherence.assign(ents, " ".join(s["queries"]) + " " + s.get("still_prompt", ""))
+            if sj or not s.get("subject"): s["subject"] = sj
+            s["avoid"] = [] if s.get("subject") else avoid
+            nl += bool(s.get("subject"))
+        if nl: log(f"  {nl} beat(s) locked to a story subject")
     plan = verify_quotes(plan, transcript, log)
     n = sum(len(x["vo"].split()) for x in plan["sections"])
     if n > words * 1.12: log(f"  NOTE: script is {n} words (target {words}); trim it in review or it will be sped up to fit 3:00")
@@ -181,7 +190,7 @@ def do_stock(job, plan, cfg, log, stop):
             need[s["id"]] = 1
         else:
             secs = len(s["vo"].split()) / cfg.get("voice_wpm", 142) * 60 + GAP
-            slots.append({"id": s["id"], "text": s["vo"], "queries": s["queries"], "subject": s.get("subject")})
+            slots.append({"id": s["id"], "text": s["vo"], "queries": s["queries"], "subject": s.get("subject"), "avoid": s.get("avoid") or []})
             need[s["id"]] = max(2, min(3, math.ceil(secs / 6.0)))
     picked = footage.fill(cfg, slots, "portrait", need, d, log, stop, want_long_side=2560, max_secs=10.0, state_file=d / "footage.json", fallback=True)
     (d / "pick.json").write_text(json.dumps(picked, indent=1), encoding="utf-8")
@@ -214,8 +223,8 @@ def depth_free(img, prefix):
     return [p]
 
 def do_fallback(job, plan, cfg, wg, log, stop):
-    """For beats with no matching footage: the script's map backdrop (geography), AI stills with 2.5D depth motion,
-    or the headline card. Writes short/fallback.json = {beat: [bg items]}."""
+    """For beats with no matching footage: the script's map backdrop (geography); then for subject-locked beats 3D reconstructions
+    (Remotion), for other beats AI stills with 2.5D depth motion; else the headline card. Writes short/fallback.json = {beat: [bg items]}."""
     from . import render, depth
     sd = job / "short"; fd = sd / "fallback"; fd.mkdir(parents=True, exist_ok=True)
     tm = json.loads((sd / "timings.json").read_text(encoding="utf-8"))
@@ -224,7 +233,7 @@ def do_fallback(job, plan, cfg, wg, log, stop):
     needs = {k: v for k, v in _needs(plan, tm, pick, sd, cfg).items() if k not in out}
     if not needs:
         log("Fallback visuals: none needed"); ff.write_text(json.dumps(out, indent=1), encoding="utf-8"); return
-    gpu = wg.alive()
+    gpu = wg.alive() if any(not s.get("subject") for s in plan["sections"] if s["id"] in needs) else False
     log(f"Fallback visuals for {len(needs)} beat(s) without matching footage: {', '.join(needs)}")
     seed = 5100
     for s in plan["sections"]:
@@ -233,6 +242,17 @@ def do_fallback(job, plan, cfg, wg, log, stop):
         n = needs[s["id"]]; items = []
         bd = s.get("backdrop") or {"kind": "headline", "kicker": "", "text": s["vo"][:60], "sub": ""}
         if bd.get("kind") == "map": items.append({"type": "graphic", "g": bd})
+        if s.get("subject"):   # locked: a 3D reconstruction in the subject's colours (an AI photo would invent the livery/model)
+            from . import coherence
+            ents = json.loads((job / "entities.json").read_text(encoding="utf-8")) if (job / "entities.json").exists() else []
+            cap = bd.get("text", "") if bd.get("kind") == "headline" else bd.get("title", "")
+            k = 0
+            while len(items) < n:
+                items.append({"type": "graphic", "g": coherence.recon(s["subject"], ents, s["vo"] + " " + " ".join(s["queries"]), k, cap if k == 0 else "")}); k += 1
+            out[s["id"]] = items
+            log(f"  {s['id']}: " + ", ".join(i["g"]["kind"] + (f" ({i['g']['scene']})" if i["g"]["kind"] == "recon" else "") for i in items))
+            ff.write_text(json.dumps(out, indent=1), encoding="utf-8")
+            continue
         k = 0
         while len(items) < n:
             made = False
@@ -412,17 +432,41 @@ def _npx():
         if p: return p
     raise RuntimeError("Node.js (npx) not found. Run Install in Pinokio again.")
 
+def _gl(cfg):
+    """WebGL backend for Remotion (3D reconstructions): the GPU via ANGLE on Windows, software elsewhere."""
+    return cfg.get("remotion_gl") or ("angle" if os.name == "nt" else "swangle")
+
+def _ensure_remotion(log):
+    rdir = config.ROOT / "remotion"
+    need = [rdir / "node_modules" / "@remotion" / "cli", rdir / "node_modules" / "@remotion" / "three", rdir / "node_modules" / "d3-geo"]
+    if not all(p.exists() for p in need):
+        log("Installing the Remotion renderer and its parts (one time)...")
+        subprocess.run([shutil.which("npm.cmd") or shutil.which("npm") or "npm", "install", "--no-audit", "--no-fund"], cwd=rdir, check=True, timeout=1800)
+    return rdir
+
+def render_recon(g, out, secs, size, cfg, log, stop):
+    """Render one 3D reconstruction clip (Recon composition) to out (mp4)."""
+    if media.ok(out): return out
+    rdir = _ensure_remotion(log); out.parent.mkdir(parents=True, exist_ok=True)
+    pf = out.with_suffix(".json"); pf.write_text(json.dumps({"g": g, "secs": secs, "w": size[0], "h": size[1]}), encoding="utf-8")
+    tmp = out.with_name(out.stem + "_tmp.mp4")
+    cmd = [_npx(), "remotion", "render", "src/Root.tsx", "Recon", str(tmp), f"--props={pf}", f"--gl={_gl(cfg)}",
+           f"--concurrency={cfg.get('short_concurrency', '75%')}", "--jpeg-quality=92", "--crf=18", "--log=error"]
+    p = subprocess.run(cmd, cwd=rdir, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
+    if p.returncode != 0 or not tmp.exists():
+        raise RuntimeError(" / ".join((p.stdout + p.stderr).strip().splitlines()[-4:])[:300])
+    if out.exists(): out.unlink()
+    tmp.rename(out); log(f"  reconstruction {out.stem}: {g.get('scene')} ({g.get('name') or ''})")
+    return out
+
 def do_render(job, plan, cfg, meta, log, stop):
     total = build(job, plan, cfg, log)
-    rdir = config.ROOT / "remotion"
-    if not (rdir / "node_modules" / "@remotion" / "cli").exists():
-        log("Installing the Remotion renderer (one time)...")
-        subprocess.run([shutil.which("npm.cmd") or shutil.which("npm") or "npm", "install", "--no-audit", "--no-fund"], cwd=rdir, check=True, timeout=1800)
+    rdir = _ensure_remotion(log)
     out_dir = job / "output"; out_dir.mkdir(exist_ok=True)
     safe = re.sub(r"[^A-Za-z0-9]+", "_", plan["title"]).strip("_")[:60] or "short"
     out = out_dir / f"{safe}_short.mp4"; tmp = out_dir / "_short_rendering.mp4"
     cmd = [_npx(), "remotion", "render", "src/Root.tsx", "Teaser", str(tmp), f"--public-dir={job / 'short' / 'public'}",
-           f"--concurrency={cfg.get('short_concurrency', '75%')}", "--jpeg-quality=95", "--crf=16", "--log=info"]
+           f"--concurrency={cfg.get('short_concurrency', '75%')}", "--jpeg-quality=95", "--crf=16", "--log=info", f"--gl={_gl(cfg)}"]
     log(f"Rendering the Short with Remotion ({total:.0f}s of video)...")
     p = subprocess.Popen(cmd, cwd=rdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
     last, t0, tail = "", time.time(), []
