@@ -486,6 +486,9 @@ def long_broll(job, plan, cfg, log, stop):
                 except Exception as e: log(f"  photo clip for {v['id']} failed ({str(e)[:100]})")
             g = coherence.recon(v["subject"], ents, v["prompt"] + " " + s["vo"], i)
             out = d / "recon" / f"{v['id']}.mp4"
+            if g.get("kind") == "headline":   # no 3D model for this kind of subject (e.g. a fighter jet): a drawn card
+                out = d / "cards" / f"{v['id']}.mp4"; photos.headline_clip(g["text"], g.get("kicker", ""), out, 9.0)
+                v["stock"] = str(out.relative_to(job)).replace("\\", "/"); v["stock_src"] = "headline"; n += 1; continue
             try:
                 short.render_recon(g, out, 9.0, (1920, 1080), cfg, log, stop)
                 v["stock"] = str(out.relative_to(job)).replace("\\", "/"); v["stock_src"] = "reconstruction"; n += 1

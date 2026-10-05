@@ -74,7 +74,8 @@ PHOTO = """This is a photo found by searching for: {subject}.
    as the main subject? "yes", "no" or "unclear". Judge only WHAT it is, not what it is doing: parked, taxiing, landing or
    flying are all fine.
 3. "watermark": is there a large watermark, caption, frame or text overlaid on the photo? true or false.
-4. "looks_ok": a clear, sharp, real photo (not a drawing, model, screenshot or collage)? true or false.
+4. "looks_ok": a clear, sharp, real photo of the real thing (not a drawing, scale model, simulator, screenshot, factory part or
+   collage)? true or false.
 Reply with JSON only: {{"brands": [], "same_subject": "yes|no|unclear", "watermark": false, "looks_ok": true, "seen": "10-20 words"}}"""
 
 def _check(cfg, p, path, subject, log):
@@ -95,7 +96,10 @@ def _check(cfg, p, path, subject, log):
     same = str(j.get("same_subject", "")).strip().lower()
     if same == "no": return False, "not the subject"
     meta = _norm_brand(p["title"] + " " + p["tags"])
-    evidence = (not key) or key in meta or any(key in _norm_brand(b) for b in brands)
+    # brand in the title/tags or visible; or, for things with no visible brand (military aircraft...), the model designation
+    # from the subject's name (e.g. "F-35") in the photo's title/tags
+    models = [_norm_brand(t) for t in re.findall(r"[A-Za-z]*-?\d+[A-Za-z0-9-]*", subject["name"]) if re.search(r"\d", t)]
+    evidence = (not key) or key in meta or any(key in _norm_brand(b) for b in brands) or any(m and m in meta for m in models)
     if not evidence: return False, f"no sign of {subject.get('brand')}"
     if not key and same != "yes": return False, "subject not confirmed"
     return True, ""

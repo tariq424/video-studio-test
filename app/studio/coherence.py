@@ -114,6 +114,12 @@ def recon(subject, ents, text, k=0, caption=""):
     kind = (subject or {}).get("kind")
     people = [e for e in ents if e["kind"] == "person"]
     if not subject and people: kind = "person"
+    military = re.search(r"\b(f-?\d+|fighter|military|combat|stealth|bomber|air force|jet fighter|drone|helicopter)\b",
+                         ((subject or {}).get("name", "") + " " + " ".join(next((e["category_words"] for e in ents if e["name"] == (subject or {}).get("name")), []))), re.I)
+    if kind == "aircraft" and military:
+        # the 3D kit only has an airliner model; drawing a fighter as an airliner would be wrong, so a headline card instead
+        w = text.split()
+        return {"kind": "headline", "kicker": (subject or {}).get("name", "")[:30], "text": caption or " ".join(w[:9]).rstrip(",.;") + ("..." if len(w) > 9 else ""), "sub": ""}
     if kind == "aircraft":
         hits = [s for s, rx in SCENE_WORDS if re.search(rx, text, re.I)]
         order = hits + [s for s in ("aircraft_flight", "aircraft_landing", "aircraft_ground") if s not in hits]
