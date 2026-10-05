@@ -6,7 +6,21 @@ import { ReconBackdrop } from "./Recon";
 
 // Stills are wide (16:9) in a tall frame, so we SCROLL across them to reveal the whole scene.
 // Videos play slightly slowed so a 5 s clip fills ~6 s.
-export const Shot: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, seed }) => {
+// News-style honesty label on real-but-not-of-the-event visuals: "FILE" (a real photo of the subject taken another time),
+// "ILLUSTRATIVE" (generic stock footage). Same place and style as the RECONSTRUCTION tag, on the left.
+export const Shot: React.FC<{ bg: Bg; dur: number; seed: number }> = (props) => {
+  const { height, width } = useVideoConfig(); const tall = height > width;
+  const tag = (props.bg as any).tag as string | undefined;
+  return (
+    <AbsoluteFill>
+      <ShotInner {...props} />
+      {tag ? <div style={{ position: "absolute", top: tall ? 250 : 40, left: tall ? 40 : 48, fontFamily: "Inter, sans-serif", fontWeight: 800,
+        fontSize: tall ? 28 : 24, letterSpacing: 3, color: "#111", background: "rgba(255,200,61,0.95)", borderRadius: 8, padding: "8px 16px" }}>{tag}</div> : null}
+    </AbsoluteFill>
+  );
+};
+
+const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, seed }) => {
   const f = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
   const t = f / fps;

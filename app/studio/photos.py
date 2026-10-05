@@ -268,7 +268,7 @@ def kenburns(img, out, secs, size, k=0, credit=""):
     kb = (f"scale={W * 2}:{H * 2}:force_original_aspect_ratio=increase,crop={W * 2}:{H * 2},"
           f"zoompan=z='{zs}':x='{xs}':y='ih/2-(ih/zoom/2)':d={fr}:s={W}x{H}:fps=30")
     if credit:
-        lab = _credit_png(credit[:110], Path(out).with_suffix(".credit.png"), W / 1920)
+        lab = _credit_png(("FILE  ·  " + credit)[:120], Path(out).with_suffix(".credit.png"), W / 1920)
         m = int(28 * W / 1920)
         media.ff("-loop", 1, "-i", img, "-loop", 1, "-i", lab, "-t", f"{secs:.2f}", "-filter_complex",
                  f"[0:v]{kb}[v];[v][1:v]overlay=W-w-{m}:{m}:shortest=1,format=yuv420p", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",

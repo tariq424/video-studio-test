@@ -404,6 +404,8 @@ def build(job, plan, cfg, log):
         log(f"  narration {raw_total:.0f}s is over the Shorts limit; speeding it up {speed:.2f}x")
     pool = [c for v in pick.values() for c in v]
     fbf = sd / "fallback.json"; fallback = json.loads(fbf.read_text(encoding="utf-8")) if fbf.exists() else {}
+    ef = job / "entities.json"
+    story_subjects = any(e.get("kind") != "person" for e in (json.loads(ef.read_text(encoding="utf-8")) if ef.exists() else []))
     (pub / "media" / "fb").mkdir(parents=True, exist_ok=True)
     beats, parts, t = [], [], 0.0
     for i, s in enumerate(secs):
@@ -431,11 +433,12 @@ def build(job, plan, cfg, log):
                 dst = pub / "media" / "stock" / f"{c['id']}.mp4"
                 if not dst.exists(): shutil.copy2(src, dst)
                 bg = {"src": f"media/stock/{c['id']}.mp4", "type": "video", "from": round(t0, 3)}
+                if story_subjects: bg["tag"] = "ILLUSTRATIVE"   # generic footage in a story about a specific event
                 if c.get("orient") == "landscape": bg["fit"] = "frame"
             elif c["type"] == "image":
                 dst = pub / "media" / "fb" / Path(c["src"]).name
                 if not dst.exists(): shutil.copy2(sd / c["src"], dst)
-                bg = {"type": "image", "src": f"media/fb/{Path(c['src']).name}", "fit": "frame", "credit": c.get("short_credit", ""), "from": round(t0, 3)}
+                bg = {"type": "image", "src": f"media/fb/{Path(c['src']).name}", "fit": "frame", "credit": c.get("short_credit", ""), "tag": "FILE", "from": round(t0, 3)}
             elif c["type"] == "layers":
                 srcs = []
                 for lp in c["layers"]:
