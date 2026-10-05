@@ -473,7 +473,7 @@ def long_broll(job, plan, cfg, log, stop):
             if pc:   # a real, openly licensed photo of the subject, slowly zoomed/panned
                 out = d / "photo_clips" / f"{v['id']}.mp4"; out.parent.mkdir(exist_ok=True)
                 try:
-                    photos.kenburns(pc["path"], out, 9.0, (1920, 1080), i)
+                    photos.kenburns(pc["path"], out, 9.0, (1920, 1080), i, credit=photos.short_credit(pc))
                     v["stock"] = str(out.relative_to(job)).replace("\\", "/"); v["stock_src"] = pc["src"]; v["credit"] = photos.credit(pc)
                     used.add(pc["id"]); n += 1; continue
                 except Exception as e: log(f"  photo clip for {v['id']} failed ({str(e)[:100]})")

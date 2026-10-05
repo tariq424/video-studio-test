@@ -61,10 +61,14 @@ Test of Oct 4 (job 20261004_164620) showed per-beat locks were not enough: only 
   (`short.render_recon`, composition `Recon`) and uses them as the shot's footage.
 - **Subject-locked shots never search the stock libraries** (Pexels/Pixabay/NASA are for generic scenes). They go to
   `photos.py`: real openly licensed photos of the subject, from **Openverse** first (no key; aggregates Flickr, Commons and more;
-  anonymous limit 200 requests/day), then **Flickr** (only if `FLICKR_API_KEY` is in `.env`), then **Wikimedia Commons**.
+  anonymous limit 200 requests/day), then **Wikimedia Commons**. Flickr's own API is deliberately not used (free keys are
+  non-commercial; Openverse already indexes Flickr). An Openverse 429 (throttled) or outage is logged and the search goes straight
+  to Commons; a throttled empty result is not cached, so a resume retries. No failure in this chain stops the job: with no usable
+  photo the shot becomes a 3D reconstruction. Photos under 900 px wide (by metadata or by the downloaded file) are rejected.
   Only CC0, Public Domain, CC BY and CC BY-SA (no NC, ND or GFDL). Each photo is vision-checked (subject's brand in its title/tags or
   visible, no other brand, no watermark). Short: shown whole over a blurred copy with an on-screen credit; long: 9 s slow zoom/pan
-  clip. Every photo gets a credit line (title, author, licence, link) in the YouTube description. Each photo is used once per video.
+  clip with the credit burned in top-right for the whole clip. WanGP image-to-video is deliberately NOT used on these photos
+  (garbled liveries; CC BY-SA derivative question). Every photo gets a credit line (title, author, licence, link) in the YouTube description. Each photo is used once per video.
   Order for a locked shot: real photos -> 3D reconstruction (Short: the route map first if the beat has one).
 - Photo-real AI stills are now only used for unlocked (generic) beats.
 - Remotion WebGL: `--gl=angle` on Windows (GPU), `swangle` elsewhere; override with `remotion_gl` in settings.json. Software rendering
