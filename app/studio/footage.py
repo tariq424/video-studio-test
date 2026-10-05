@@ -163,9 +163,14 @@ Answer each question about what you actually see:
    visible brand name/logo on a product (like an advert)? (Small incidental text in the background does not count.) true or false.
 3. "same_scene": do all 4 frames come from the same continuous scene (no hard cut to something unrelated)? true or false.
 4. "looks_ok": is it clear, real footage (not blurry, glitchy, distorted or disturbing)? true or false.
-5. "brands": every brand you can read or clearly recognise in the frames: airline names or tail logos, car makes or badges, company
-   or product logos (e.g. ["Qatar Airways"], ["Toyota"]). Empty list if none.
-Reply with JSON only: {{"shows": "yes|partly|no", "overlay_text": false, "same_scene": true, "looks_ok": true, "brands": [], "seen": "10-20 words: what the clip shows"}}"""
+5. "brands": every brand you can read or clearly recognise in the frames: airline names or tail logos (also on seats, headrests
+   or uniforms), car makes or badges, clothing logos (e.g. Adidas), company or product logos. Empty list if none.
+6. "fits": the narration playing over this clip is: "{narration}"
+   Would a viewer find the clip a sensible illustration of that narration? Answer "no" if it shows a recognisable place,
+   building or landmark that is not the one the narration is about (e.g. a famous parliament of another country), an unrelated
+   event, or a mood that contradicts it (calm, routine, happy scenes while the narration describes an emergency, violence, fear
+   or a crisis). "yes" or "partly" otherwise.
+Reply with JSON only: {{"shows": "yes|partly|no", "overlay_text": false, "same_scene": true, "looks_ok": true, "brands": [], "fits": "yes|partly|no", "seen": "10-20 words: what the clip shows"}}"""
 
 STRICT = """The LEFT image is a reference photo of: {subject}.
 The RIGHT image shows 4 frames from a stock video clip.
@@ -255,7 +260,7 @@ AVOID = """
 6. "forbidden": does any frame show {avoid}? Even partly, even small or in the background. true or false.
 Add "forbidden" to the JSON."""
 
-def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None):
+def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None, narration=""):
     """-> (ok, reason, seen). Generic slots: hard checks + no visible third-party brand.
     Subject-locked slots: the clip must positively match the subject (brand evidence and the vision model agreeing with a reference photo)."""
     from PIL import Image, ImageStat
@@ -266,7 +271,7 @@ def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None):
     img = sheet_path
     if subject and ref:
         img = side_by_side(ref, sheet_path, sheet_path.with_name(sheet_path.stem + "_vs.jpg"))
-    prompt = STRICT.format(subject=subject["name"]) if (subject and ref) else VET.format(query=subject["name"] if subject else c["query"])
+    prompt = STRICT.format(subject=subject["name"]) if (subject and ref) else VET.format(query=subject["name"] if subject else c["query"], narration=(narration or c["query"])[:400].replace('"', "'"))
     if avoid and not subject: prompt += AVOID.format(avoid="; or ".join(avoid)[:500])
     try: j = parse_json(_vision(cfg, img, prompt))
     except Exception as e:
@@ -281,6 +286,7 @@ def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None):
     other = [b for b in brands if not (key and (key in _norm_brand(b) or _norm_brand(b) in key))]
     if other: return False, f"shows another brand ({', '.join(other)[:60]})", seen
     if avoid and not subject and yes("forbidden", False): return False, "shows something the story is about, but not the right one", seen
+    if not subject and str(j.get("fits", "yes")).strip().lower() == "no": return False, "doesn't fit what the narration says", seen
     if subject:
         evidence = bool(key) and (any(key in _norm_brand(b) for b in brands) or key in _norm_brand(c.get("desc", "")))
         same = str(j.get("same_subject", j.get("shows", ""))).strip().lower()
@@ -391,7 +397,8 @@ def fill(cfg, slots, orient, need, out_dir, log, stop, want_long_side, max_secs,
                 if not c or cid in used: continue
                 try: sh = sheet(c, out_dir / "sheets")
                 except Exception as e: log(f"  preview of {cid} failed ({str(e)[:60]})"); continue
-                ok, why, seen = verify(cfg, c, sh, log, subject=sj, ref=refs.get(sj["name"]) if sj else None, avoid=s.get("avoid"))
+                ok, why, seen = verify(cfg, c, sh, log, subject=sj, ref=refs.get(sj["name"]) if sj else None, avoid=s.get("avoid"),
+                                      narration=s.get("narration") or s["text"])
                 if not ok: log(f"  {s['id']}: skipped {c['src']} clip {cid} ({why})"); continue
                 c["seen"] = seen; got.append({k: c.get(k) for k in ("id", "src", "orient", "query", "dur", "w", "h", "file", "page", "author", "desc", "seen")}); used.add(cid)
             st["picked"][s["id"]] = got; save()

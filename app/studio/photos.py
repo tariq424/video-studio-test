@@ -8,7 +8,7 @@ the 3D reconstruction. Photos narrower than MIN_W pixels are rejected (they woul
 Only licences that allow commercial use AND changes (we crop and move the photo): CC0, Public Domain Mark, CC BY, CC BY-SA
 (preferred in that order). Every photo used gets a credit line ("Photo: title by creator, CC BY-SA 2.0, link") in the YouTube
 description. Each photo is checked by the vision model: it must show the subject (brand evidence) and no other brand."""
-import io, json, re
+import io, json, re, time
 from pathlib import Path
 import requests
 from . import media
@@ -95,6 +95,27 @@ def _check(cfg, p, path, subject, log):
     if not key and same != "yes": return False, "subject not confirmed"
     return True, ""
 
+_last_dl = [0.0]
+
+def _download(url):
+    """Polite image download: at least 1.5 s between requests (image hosts like Wikimedia's upload server throttle bursts),
+    and on HTTP 429/503 wait (Retry-After, else 5 s then 15 s) and try again, twice. -> (bytes, "") or (None, reason)."""
+    why = ""
+    for wait in (0, 5, 15):
+        if wait: time.sleep(wait)
+        gap = time.time() - _last_dl[0]
+        if gap < 1.5: time.sleep(1.5 - gap)
+        _last_dl[0] = time.time()
+        try: r = requests.get(url, headers=UA, timeout=60)
+        except Exception as e: why = str(e)[:60]; continue
+        if r.status_code == 200 and r.content: return r.content, ""
+        why = f"HTTP {r.status_code}"
+        if r.status_code not in (429, 503): return None, why
+        try: ra = float(r.headers.get("Retry-After", "0"))
+        except ValueError: ra = 0
+        if 0 < ra <= 60: time.sleep(ra)
+    return None, why + " after 3 tries"
+
 def find(cfg, subject, out_dir, log, want=4, keys=None):
     """-> list of checked photos for the subject (cached per subject in out_dir/<slug>.json): dicts with "path" + licence data."""
     out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
@@ -109,10 +130,11 @@ def find(cfg, subject, out_dir, log, want=4, keys=None):
             more, problem = _openverse(subject["brand"] + " " + (subject.get("kind") or ""), log); cands += more
         cands += _commons(subject["brand"], log)
     seen, uniq = set(), []
-    for c in cands:
-        k = (c["url"].split("?")[0], c["title"].lower())
-        if k in seen: continue
-        seen.add(k); uniq.append(c)
+    for c in cands:   # the same photo often appears twice (Flickr + its Commons copy, or two sizes): one per title / URL
+        t = re.sub(r"[^a-z0-9]", "", re.sub(r"\.(jpe?g|png)$", "", c["title"].lower()))
+        k1, k2 = c["url"].split("?")[0], t
+        if k1 in seen or (k2 and k2 in seen): continue
+        seen.update({k1, k2}); uniq.append(c)
     # metadata that names the brand first, then freest licence, then larger
     key = re.sub(r"[^a-z0-9]", "", (subject.get("brand") or "").lower())
     uniq.sort(key=lambda c: (0 if key and key in re.sub(r"[^a-z0-9]", "", (c["title"] + c["tags"]).lower()) else 1,
@@ -128,13 +150,13 @@ def find(cfg, subject, out_dir, log, want=4, keys=None):
         if len(got) >= want: break
         if c["w"] and c["w"] < MIN_W: log(f"  photo skipped: {c['title'][:50]} (only {c['w']} px wide)"); continue
         path = out_dir / f"{c['id']}.jpg"
-        try:
-            if not path.exists():
-                r = requests.get(c["url"], headers=UA, timeout=60); r.raise_for_status()
-                im = Image.open(io.BytesIO(r.content)).convert("RGB")
-                if im.width < MIN_W: log(f"  photo skipped: {c['title'][:50]} (only {im.width} px wide)"); continue
-                im.save(path, "JPEG", quality=92)
-        except Exception as e: log(f"  photo {c['id']} download failed ({str(e)[:60]})"); continue
+        if not path.exists():   # downloaded files are kept, so a re-run never fetches them again
+            data, why = _download(c["url"])
+            if data is None: log(f"  photo download failed ({why}): {c['title'][:50]}"); continue
+            try: im = Image.open(io.BytesIO(data)).convert("RGB")
+            except Exception: log(f"  photo download failed (not an image): {c['title'][:50]}"); continue
+            if im.width < MIN_W: log(f"  photo skipped: {c['title'][:50]} (only {im.width} px wide)"); continue
+            im.save(path, "JPEG", quality=92)
         ok, why = _check(cfg, c, path, subject, log)
         if not ok: log(f"  photo skipped: {c['title'][:50]} ({why})"); continue
         c["path"] = str(path); got.append(c)

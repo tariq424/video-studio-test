@@ -108,10 +108,13 @@ async function loadDetail(){if(editing)return;const s=await j('/api/jobs/'+sel);
  h+=`<div id="sdoc"></div><div id="doc"></div><div id="ed"></div>`;
  h+=`<details ${s.status=='error'?'open':''} style="margin-top:18px"><summary class="mut">Technical log</summary><pre id="log">${esc((s.log||[]).join('\n'))}</pre></details>`;
  $('detail').innerHTML=h;const l=$('log');if(l)l.scrollTop=l.scrollHeight;
- if(s.plan_summary&&done.includes('script'))showScript();if(s.short_summary&&done.includes('short_script'))showShort()}
-async function showShort(){const p=await j(`/api/jobs/${sel}/short_plan`);const w=p.sections.reduce((a,x)=>a+x.vo.split(/\s+/).length,0);
+ if(s.plan_summary&&done.includes('script'))showScript(s);if(s.short_summary&&done.includes('short_script'))showShort(s)}
+// fact-check questions: a to-do while the job waits for review; just notes once review was skipped
+function qbox(qs,st){const waiting=st&&st.status=='awaiting_review';
+ return `<div style="border:1px solid ${waiting?'#d29922':'var(--line)'};border-radius:8px;padding:10px 14px;margin:10px 0"><b>${waiting?'Please check before approving:':'Fact-check notes (review was skipped, so the video was made without pausing):'}</b><ul>${qs.map(q=>`<li>${esc(q)}</li>`).join('')}</ul><span class="mut" style="font-size:13px">${waiting?"Fix with Edit script, or approve if it's fine.":"To fix these before rendering next time, untick Skip script review."}</span></div>`}
+async function showShort(st){const p=await j(`/api/jobs/${sel}/short_plan`);const w=p.sections.reduce((a,x)=>a+x.vo.split(/\s+/).length,0);
  let h=`<div class="script-doc"><div class="mut" style="font-size:13px">SHORT · ${p.sections.length} beats · ${w} words · about ${fmt(Math.round(w/155*60+p.sections.length*0.35+2))}</div>`;
- if(p.questions&&p.questions.length)h+=`<div style="border:1px solid #d29922;border-radius:8px;padding:10px 14px;margin:10px 0"><b>Please check before approving:</b><ul>${p.questions.map(q=>`<li>${esc(q)}</li>`).join('')}</ul></div>`;else if(p.checked)h+=`<div class="mut" style="font-size:13px;margin-top:4px">✓ Checked against the source</div>`;
+ if(p.questions&&p.questions.length)h+=qbox(p.questions,st);else if(p.checked)h+=`<div class="mut" style="font-size:13px;margin-top:4px">✓ Checked against the source</div>`;
  h+=`<h1>${esc(p.title)}</h1><p class="sub">${esc(p.tag||'')}</p>`;
  p.sections.forEach((x,i)=>{const g=(x.visuals||[]).map(v=>v.chart.kind).concat(x.cta?['end card']:[]).join(', ');h+=`<h3>${i+1}. <span class="mut" style="font-weight:400;font-size:13px">${esc(g)}${x.queries&&x.queries.length?' · footage: '+esc(x.queries.join(' / ')):''}</span></h3><p>${esc(x.vo)}</p>`});
  h+=`</div>`;$('sdoc').innerHTML=h}
@@ -122,9 +125,9 @@ async function editShort(){editing=true;planCache=await j(`/api/jobs/${sel}/shor
 async function saveShort(){planCache.title=$('pt').value;planCache.sections.forEach((x,i)=>{x.vo=$('sv'+i).value});
  await j(`/api/jobs/${sel}/short_plan`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(planCache)});editing=false;lastKey='';loadDetail()}
 function statusText(s){return {awaiting_review:'Script ready — read it below, then approve',running:'Working: '+s.stage,queued:'Queued',done:'Finished',error:'Stopped with an error',stopped:'Stopped'}[s.status]||s.status}
-async function showScript(){const p=await j(`/api/jobs/${sel}/plan`);const w=p.sections.reduce((a,x)=>a+x.vo.split(/\s+/).length,0);
+async function showScript(st){const p=await j(`/api/jobs/${sel}/plan`);const w=p.sections.reduce((a,x)=>a+x.vo.split(/\s+/).length,0);
  let h=`<div class="script-doc"><div class="mut" style="font-size:13px">${p.sections.length} sections · ${w} words · about ${(w/155).toFixed(1)} minutes</div>`;
- if(p.questions&&p.questions.length)h+=`<div style="border:1px solid #d29922;border-radius:8px;padding:10px 14px;margin:10px 0"><b>Please check before approving:</b><ul>${p.questions.map(q=>`<li>${esc(q)}</li>`).join('')}</ul><span class="mut" style="font-size:13px">Fix with Edit script, or approve if it's fine.</span></div>`;else if(p.checked)h+=`<div class="mut" style="font-size:13px;margin-top:4px">✓ Checked against the transcript (names, speakers, claims)</div>`;
+ if(p.questions&&p.questions.length)h+=qbox(p.questions,st);else if(p.checked)h+=`<div class="mut" style="font-size:13px;margin-top:4px">✓ Checked against the transcript (names, speakers, claims)</div>`;
  h+=`<h1>${esc(p.title)}</h1>${p.subtitle?`<p class="sub">${esc(p.subtitle)}</p>`:''}`;
  p.sections.forEach((x,i)=>{h+=`<h3>${i+1}. ${esc(x.title)}</h3><p>${esc(x.vo)}</p>`});
  h+=`</div>`;$('doc').innerHTML=h}

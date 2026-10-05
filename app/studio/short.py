@@ -44,7 +44,10 @@ For each beat also give:
 - "queries": 2 stock-video search phrases (3-5 words each) for what to SHOW while this beat plays. Be specific and visual:
   subject + action + setting, people doing things where possible, e.g. "hands signing contract close-up", "trader watching
   stock screens", "surgeon in operating room", "students walking campus". No abstract words ("AI", "future", "concept",
-  "technology", "innovation"), no famous people, nothing that is mostly text. No brand names, EXCEPT when the beat has a
+  "technology", "innovation"), no famous people, nothing that is mostly text. Match the MOOD and the PLACE of the beat: for an
+  emergency, attack or crisis ask for tense, urgent scenes ("emergency lights flashing at night", "worried passengers holding
+  armrests"), never routine or happy ones; for a named country ask for that country ("jerusalem city skyline", not "parliament
+  building"), or for something neutral if you can't (a map, a newsroom, a radar screen). No brand names, EXCEPT when the beat has a
   "subject": then include the subject's brand and model in the phrases (e.g. "flydubai plane landing", "flydubai boeing 737").
 - "subject": set it ONLY when viewers would expect to SEE one specific identifiable real thing during this beat - a particular
   airline's aircraft, a car make and model, a named product, ship, building or landmark - as
@@ -213,7 +216,7 @@ def _needs(plan, tm, pick, sd, cfg):
         if s.get("cta") or s["id"] not in tm: continue
         have = sum(_clip_len(sd, c) / 0.85 for c in pick.get(s["id"], []))
         rem = tm[s["id"]]["dur"] + GAP - have
-        if rem > 0.5 and (s.get("subject") or not pool):
+        if rem > 0.5:   # never fill with another beat's footage: it illustrates a different sentence
             out[s["id"]] = max(1, min(3, math.ceil(rem / FB_SECS)))
     return out
 
@@ -250,8 +253,11 @@ def do_fallback(job, plan, cfg, wg, log, stop):
             from . import coherence, photos
             ents = json.loads((job / "entities.json").read_text(encoding="utf-8")) if (job / "entities.json").exists() else []
             cap = bd.get("text", "") if bd.get("kind") == "headline" else bd.get("title", "")
-            try: pics = photos.find(cfg, s["subject"], sd / "photos", log, want=8)
-            except Exception as e: log(f"  photo search failed ({str(e)[:100]})"); pics = []
+            inside = re.search(r"\b(cockpit|cabin|passengers?|seats?|aisle|crew|pilots?|captain)\b", " ".join(s["queries"]), re.I)
+            if inside: pics = []   # the beat is about what happened INSIDE: exterior photos would not fit; use the cabin/cockpit reconstruction
+            else:
+                try: pics = photos.find(cfg, s["subject"], sd / "photos", log, want=8)
+                except Exception as e: log(f"  photo search failed ({str(e)[:100]})"); pics = []
             used = {i.get("photo") for v in out.values() for i in v if i.get("photo")}
             for pc in pics:
                 if len(items) >= n: break
@@ -391,7 +397,7 @@ def build(job, plan, cfg, log):
         near = {c["id"] for j in (i - 1, i + 1) if 0 <= j < len(secs) for c in pick.get(secs[j]["id"], [])}
         borrow = [c for c in pool if c["id"] not in near] or pool   # never repeat a neighbouring beat's shot
         k = 0
-        if s.get("subject"): borrow = []   # subject-locked: never fill with other beats' footage (could be the wrong subject)
+        borrow = []   # no borrowing: another beat's clip illustrates a different sentence; short_fallback fills the gap instead
         while borrow and cap(clips) < d + 0.3 and k < len(borrow):
             c = borrow[(i * 5 + k) % len(borrow)]; k += 1
             if all(c["id"] != x["id"] for x in clips): clips.append(c)
@@ -463,6 +469,8 @@ def _ensure_remotion(log):
         subprocess.run([shutil.which("npm.cmd") or shutil.which("npm") or "npm", "install", "--no-audit", "--no-fund"], cwd=rdir, check=True, timeout=1800)
     return rdir
 
+BROWSER_FLAKE = "trying to connect to the browser"
+
 def render_recon(g, out, secs, size, cfg, log, stop):
     """Render one 3D reconstruction clip (Recon composition) to out (mp4)."""
     if media.ok(out): return out
@@ -471,7 +479,10 @@ def render_recon(g, out, secs, size, cfg, log, stop):
     tmp = out.with_name(out.stem + "_tmp.mp4")
     cmd = [_npx(), "remotion", "render", "src/Root.tsx", "Recon", str(tmp), f"--props={pf}", f"--gl={_gl(cfg)}",
            f"--concurrency={cfg.get('short_concurrency', '75%')}", "--jpeg-quality=92", "--crf=18", "--log=error"]
-    p = subprocess.run(cmd, cwd=rdir, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
+    for attempt in range(3):
+        p = subprocess.run(cmd, cwd=rdir, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
+        if p.returncode == 0 or BROWSER_FLAKE not in (p.stdout + p.stderr) or attempt == 2: break
+        time.sleep(10)
     if p.returncode != 0 or not tmp.exists():
         raise RuntimeError(" / ".join((p.stdout + p.stderr).strip().splitlines()[-4:])[:300])
     if out.exists(): out.unlink()
@@ -487,14 +498,18 @@ def do_render(job, plan, cfg, meta, log, stop):
     cmd = [_npx(), "remotion", "render", "src/Root.tsx", "Teaser", str(tmp), f"--public-dir={job / 'short' / 'public'}",
            f"--concurrency={cfg.get('short_concurrency', '75%')}", "--jpeg-quality=95", "--crf=16", "--log=info", f"--gl={_gl(cfg)}"]
     log(f"Rendering the Short with Remotion ({total:.0f}s of video)...")
-    p = subprocess.Popen(cmd, cwd=rdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
-    last, t0, tail = "", time.time(), []
-    for line in p.stdout:
-        line = line.strip()
-        if line: last = line; tail = (tail + [line])[-40:]
-        if time.time() - t0 > 30 and last: log("  " + last[:160]); t0 = time.time()
-        if stop(): p.kill(); raise RuntimeError("cancelled")
-    if p.wait() != 0:
+    for attempt in range(3):
+        p = subprocess.Popen(cmd, cwd=rdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+        last, t0, tail = "", time.time(), []
+        for line in p.stdout:
+            line = line.strip()
+            if line: last = line; tail = (tail + [line])[-40:]
+            if time.time() - t0 > 30 and last: log("  " + last[:160]); t0 = time.time()
+            if stop(): p.kill(); raise RuntimeError("cancelled")
+        if p.wait() == 0: break
+        if attempt < 2 and any(BROWSER_FLAKE in l for l in tail):
+            # headless Chrome sometimes starts slowly (busy GPU/disk); Remotion gives it 25 s - just start again
+            log(f"  Remotion couldn't connect to its browser in time; retrying the render ({attempt + 2} of 3)"); time.sleep(10); continue
         for l in tail[-15:]: log("  | " + l[:200])
         raise RuntimeError("Remotion render failed: " + " / ".join(x for x in tail[-6:] if x)[:400])
     if out.exists(): out.unlink()

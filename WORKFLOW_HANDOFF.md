@@ -8,7 +8,7 @@ Video Studio is a fork of Explainer Studio (`F:\code\explainer-studio`, github `
 
 - **Code:** `F:\code\video-studio`, a private GitHub repo at `tariq424/video-studio`. The copy on F: is the working copy; GitHub is kept in sync with it.
 - **Outputs:** `F:\videos\video_studio\jobs\<job id>\`. A job's videos are in its `output\` folder.
-- **UI:** `http://127.0.0.1:42003` (the port can change on restart; see Hardware and tools). Start it from Pinokio → **Video Studio** → Start (launcher scripts in `C:\pinokio\api\video-studio`, with copies in `pinokio/` in the repo).
+- **UI:** `http://127.0.0.1:42020` (fixed since Oct 4; `start-video-studio.bat` starts it without Pinokio). Start it from Pinokio → **Video Studio** → Start (launcher scripts in `C:\pinokio\api\video-studio`, with copies in `pinokio/` in the repo).
 
 ## Ground rules (owner: Tariq)
 - **Everything on F:.** Videos go in `F:\videos`. C: is for system files only; Ollama's model store on C: is the one accepted exception.
@@ -71,6 +71,17 @@ Test of Oct 4 (job 20261004_164620) showed per-beat locks were not enough: only 
   (garbled liveries; CC BY-SA derivative question). Every photo gets a credit line (title, author, licence, link) in the YouTube description. Each photo is used once per video.
   Order for a locked shot: real photos -> 3D reconstruction (Short: the route map first if the beat has one).
 - Photo-real AI stills are now only used for unlocked (generic) beats.
+- Oct 4 test (job 20261004_204512) fixes:
+  - photo downloads are polite (1.5 s apart) and retried on 429/503 (Retry-After, else 5 s then 15 s); duplicates by title removed;
+  - the most specific entity wins ("fighter jet" -> the F-35, not the airliner);
+  - beats about what happens inside (cockpit, cabin, passengers) use the cabin/cockpit reconstruction, not exterior photos;
+  - every generic stock clip must FIT the narration (vision question "fits", given the narration): no landmark of another country,
+    no unrelated event, no calm/routine scene over an emergency; clothing logos count as brands;
+  - Shorts no longer borrow other beats' clips; a beat without enough fitting footage gets fallback visuals instead;
+  - the script AI is told to match the beat's mood and place in its search phrases;
+  - Remotion is retried (up to 3 times) when headless Chrome is slow to start ("trying to connect to the browser").
+- App address is fixed: http://127.0.0.1:42020 (next free port if busy, printed). `start-video-studio.bat` in the repo root runs it
+  without Pinokio (`start-video-studio.bat reload` = auto-restart on code changes, which also stops a running render).
 - Remotion WebGL: `--gl=angle` on Windows (GPU), `swangle` elsewhere; override with `remotion_gl` in settings.json. Software rendering
   is about 2 frames/s at 1080p, so the GPU matters for long videos.
 - The separate `video-studio-coherence` repo (Copilot) was reviewed and not used: its modules were non-working stubs.

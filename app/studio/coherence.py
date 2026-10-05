@@ -85,13 +85,21 @@ def assign(ents, text):
     """-> (subject or None, avoid list). subject: the entity this shot must show (dict with name/brand/kind/colors).
     avoid: descriptions of categories the clip must NOT show (for unlocked shots)."""
     things = [e for e in ents if e["kind"] != "person" and e["category_words"]]
-    for e in things:
+    low = text.lower(); best, score = None, 0
+    for e in things:   # the most specific match wins: a name/brand beats "fighter jet", which beats "jet"
         brand = e["brand"].lower()
-        named = (brand and brand in text.lower()) or e["name"].lower() in text.lower()
-        if named or _mentions(text, e["category_words"]):
-            if not named and INTERIOR.search(text) and not EXTERIOR.search(text):
-                break   # interior shot of that kind: no lock, but no exterior of any such object either (below)
-            return {"name": e["name"], "brand": e["brand"], "kind": e["kind"], "colors": e["colors"]}, []
+        if (brand and brand in low) or e["name"].lower() in low: sc = 1000 + len(e["name"])
+        else:
+            hits = [w for w in e["category_words"] if _mentions(text, [w])]
+            sc = max((len(w) for w in hits), default=0)
+            # words that are this entity's OWN (not shared with another entity) count double
+            own = [w for w in hits if not any(w in o["category_words"] for o in things if o is not e)]
+            sc += 100 * bool(own)
+        if sc > score: best, score = e, sc
+    if best:
+        if score < 1000 and INTERIOR.search(text) and not EXTERIOR.search(text):
+            return None, [e["avoid"] for e in things if e["avoid"]]   # interior shot: no lock, but no exterior of such objects
+        return {"name": best["name"], "brand": best["brand"], "kind": best["kind"], "colors": best["colors"]}, []
     return None, [e["avoid"] for e in things if e["avoid"]]
 
 SCENE_WORDS = [

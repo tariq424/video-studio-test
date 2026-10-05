@@ -130,6 +130,13 @@ def free_port(p):
     return p
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT") or free_port(7870))
+    # fixed address http://127.0.0.1:42020 (PORT overrides); if it's taken, the next free port is used and printed
+    want = int(os.environ.get("PORT") or 42020)
+    port = want if os.environ.get("WERKZEUG_RUN_MAIN") else free_port(want)   # the reloader's child must reuse the parent's port
+    os.environ["PORT"] = str(port)
+    if port != want: print(f"Port {want} is busy; using {port} instead", flush=True)
     print(f"Video Studio running on http://127.0.0.1:{port}", flush=True)
-    app.run(host="127.0.0.1", port=port, debug=False, threaded=True)
+    # VS_RELOAD=1: restart automatically when a .py file changes (development only - it also stops a running render;
+    # the job is then marked stopped and Resume continues it)
+    reload = os.environ.get("VS_RELOAD") == "1"
+    app.run(host="127.0.0.1", port=port, debug=False, threaded=True, use_reloader=reload)
