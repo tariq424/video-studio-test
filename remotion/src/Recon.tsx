@@ -18,7 +18,7 @@ export type Recon = {
   caption?: string;              // short line under the RECONSTRUCTION tag
   people?: number;               // people scene: how many figures
   model?: "airliner" | "fighter"; // aircraft scenes: which 3D model
-  motion?: "cruise" | "dive";    // aircraft_flight: level cruise or a steep descent
+  motion?: "cruise" | "dive" | "climb" | "unstable";   // aircraft_flight attitude, chosen from the narration
   altitude?: [number, number];   // HUD altimeter counting from -> to (feet), e.g. [30000, 15000]
   squawk?: string[];             // HUD transponder codes shown in turn, e.g. ["7700", "7500"]
   door?: "closed" | "open";      // cockpit_door: open shows an injured crew member (mannequin) in the doorway
@@ -343,17 +343,19 @@ const SceneGraph: React.FC<{ r: Recon; t: number; p: number; tall: boolean }> = 
   const e = ease(p);
   switch (r.scene) {
     case "aircraft_flight": {
-      const fighter = r.model === "fighter", dive = r.motion === "dive";
+      const fighter = r.model === "fighter", dive = r.motion === "dive", climb = r.motion === "climb", wobble = r.motion === "unstable";
       const a = -0.9 + e * 0.9;
       const d = (tall ? 62 : 48) * (fighter ? 0.55 : 1);
       // dive: the nose drops to ~25 degrees and the aircraft sinks while the camera follows it down
-      const pitch = dive ? -interpolate(e, [0, 0.35, 1], [0, 0.42, 0.45]) : 0;
-      const sink = dive ? -interpolate(p, [0, 1], [0, 60]) : 0;
-      const bank = dive ? 0.12 * Math.sin(t * 0.7) : 0.04 * Math.sin(t * 0.6);
+      // pitch (+ = nose up), height change and bank for each attitude; "unstable" = erratic pitching and rolling
+      const pitch = dive ? -interpolate(e, [0, 0.35, 1], [0, 0.42, 0.45]) : climb ? interpolate(e, [0, 0.4, 1], [0, 0.2, 0.22])
+                  : wobble ? 0.12 * Math.sin(t * 2.3) + 0.06 * Math.sin(t * 5.1) : 0;
+      const sink = dive ? -interpolate(p, [0, 1], [0, 60]) : climb ? interpolate(p, [0, 1], [0, 25]) : wobble ? 3 * Math.sin(t * 1.7) : 0;
+      const bank = dive ? 0.12 * Math.sin(t * 0.7) : wobble ? 0.35 * Math.sin(t * 1.9) + 0.15 * Math.sin(t * 4.3) : 0.04 * Math.sin(t * 0.6);
       return (<>
         <color attach="background" args={[dive ? "#6f9fd6" : "#7fb2ec"]} /><fog attach="fog" args={["#cfe2f7", 200, 1600]} />
         <Lights sky="#d6e8ff" ground="#ffffff" />
-        {dive ? <Cam pos={[6, sink + 3, tall ? 62 : 48]} look={[0, sink - 3, 0]} fov={tall ? 55 : 40} />   /* side view: the nose visibly drops */
+        {dive || climb || wobble ? <Cam pos={[6, sink + 3, tall ? 62 : 48]} look={[0, sink + (climb ? 3 : -3), 0]} fov={tall ? 55 : 40} />   /* side view: the attitude is visible */
               : <Cam pos={[Math.cos(a) * d, 9 + e * 3, Math.sin(a) * d + 6]} look={[2, 0, 0]} fov={tall ? 55 : 40} />}
         <group rotation={[0.03 * Math.sin(t * 0.8), 0, pitch + bank * 0.2]} position={[0, Math.sin(t * 0.9) * 0.4 + sink, 0]}>
           <group rotation={[bank, 0, 0]}>{fighter ? <Fighter colors={r.colors} /> : <Airliner colors={r.colors} gear={false} />}</group>

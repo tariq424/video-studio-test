@@ -210,8 +210,15 @@ def recon(subject, ents, text, k=0, caption="", moment=None):
          "caption": caption[:40]}
     if military: g["model"] = "fighter"; g["colors"] = []
     if scene == "aircraft_flight":
-        if (re.search(r"\b(descen\w*|dropp\w*|dive|diving|plunge\w*|lost altitude|losing altitude)\b", text, re.I) or len(alts) >= 2) and k % 2 == 0:
-            g["motion"] = "dive"   # alternate dive / level flight when a beat needs several visuals
+        # attitude from the narration: descending -> dive, climbing -> climb, a struggle/loss of control -> unstable, else level
+        if re.search(r"\b(descen\w*|dropp\w*|dive|diving|plunge\w*|nosedive\w*|lost altitude|losing altitude)\b", text, re.I) or len(alts) >= 2:
+            g["motion"] = "dive" if k % 2 == 0 else "unstable"
+        elif re.search(r"\b(fight\w*|fought|struggl\w*|turbulen\w*|erratic\w*|shook|shaking|lurch\w*|unstable|out of control|wrestl\w*|grabb\w*)\b", text, re.I):
+            g["motion"] = "unstable"
+        elif re.search(r"\b(climb\w*|took off|taking off|gained altitude|ascend\w*)\b", text, re.I):
+            g["motion"] = "climb"
+        else:
+            g["motion"] = "cruise"
         if len(alts) >= 2: g["altitude"] = [max(alts[0], alts[1]), min(alts[0], alts[1])] if g.get("motion") == "dive" else alts[:2]
         if codes: g["squawk"] = codes[:3]
     named = [p for p in people if p["name"].split()[0].lower() in text.lower() or (p["role"] and p["role"].split(",")[0].lower() in text.lower())]
