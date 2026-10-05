@@ -46,6 +46,24 @@ Only visuals with no good match are rendered on the GPU by WanGP. In assembly a 
 
 Locked visuals (see **Subject lock** below) never take a generic clip: if no clip shows the subject, WanGP renders an AI still or motion clip instead. After `write_plan`, `short.verify_quotes` turns any quote card whose words aren't in the transcript into a headline card.
 
+### Story-level coherence (`coherence.py`, Oct 4 2026; replaces per-beat locking below where they differ)
+Test of Oct 4 (job 20261004_164620) showed per-beat locks were not enough: only 2 of 11 Short beats were locked, so "passenger jet" and
+"wing" beats showed Biman, AnadoluJet and GoAir planes, and the photo-real AI stills invented fake airlines.
+- `coherence.entities()`: one LLM call lists the story's identifiable subjects (kind, brand, category words, an "avoid" description,
+  colours; named people with role/row). Cached in `<job>/entities.json`, shared by the long video and the Short.
+- `coherence.assign()`: any shot whose search phrases or image prompt mention the subject's CATEGORY ("jet", "wing", "SUV") is locked
+  to it. Interior shots (cabin, dashboard) are not locked, but every unlocked shot is checked for the forbidden category
+  (`AVOID` question in the vision check) and rejected if it shows any such object.
+- Locked shots with no confirmed real footage become **3D reconstructions** (`remotion/src/Recon.tsx`, three.js via `@remotion/three`):
+  low-poly airliner (in flight / landing on a desert runway / parked with police car), cabin with mannequin passengers and labelled
+  seats, cockpit door, SUV on a road, labelled mannequin people, generic object. Coloured with the subject's scheme, labelled
+  "RECONSTRUCTION", never a logo or a face. Short: `do_fallback` adds them as backdrops. Long: `long_broll` renders 9 s clips
+  (`short.render_recon`, composition `Recon`) and uses them as the shot's footage.
+- Photo-real AI stills are now only used for unlocked (generic) beats.
+- Remotion WebGL: `--gl=angle` on Windows (GPU), `swangle` elsewhere; override with `remotion_gl` in settings.json. Software rendering
+  is about 2 frames/s at 1080p, so the GPU matters for long videos.
+- The separate `video-studio-coherence` repo (Copilot) was reviewed and not used: its modules were non-working stubs.
+
 ### Subject lock and brand rejection (`footage.py`, Oct 2026)
 Built after a flydubai Short showed a Qatar Airways wing and a Turkish Airlines jet, and a Mitsubishi Outlander video showed Toyotas and Mercedes.
 - **Subject lock.** When a beat or visual is about an identifiable entity (a named airline's aircraft, a car make/model, a named person, a product), the script AI sets `subject: {name, brand}` (Short beats in `SHORT`; long visuals in the `QUERIES` prompt, which also puts the make/model in the search phrases).
