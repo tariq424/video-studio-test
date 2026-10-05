@@ -107,6 +107,12 @@ def put_short_plan(jid):
         if isinstance(b.get("vo"), str) and b["vo"].strip(): a["vo"] = " ".join(b["vo"].split())
     studio.job(jid).save_short_plan(p); studio.job(jid).log("Short script edited in the web page"); return jsonify(ok=True)
 
+@app.post("/api/jobs/<jid>/transcript")
+def paste_transcript(jid):
+    t = ((request.get_json(silent=True) or {}).get("text") or "").strip()
+    if len(t.split()) < 50: return jsonify(error="That transcript is too short (need at least 50 words)."), 400
+    studio.set_transcript(jid, t); return jsonify(ok=True)
+
 @app.post("/api/jobs/<jid>/<action>")
 def act(jid, action):
     {"approve": studio.approve, "resume": studio.resume, "stop": studio.stop}[action](jid); return jsonify(ok=True)

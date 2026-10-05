@@ -89,6 +89,78 @@ class Studio:
                     j.save(status="error", error=str(e)[:500])
             finally: self.current = None
 
+    # ---- YouTube transcripts without hammering YouTube: reuse what we have, respect a cooldown after a block
+    YT_COOLDOWN = 30 * 60
+
+    def _yt_block_file(self): return self.jobs_dir() / "_youtube_blocked.json"
+
+    def _youtube_transcript(self, j, s, log):
+        src = j.dir / "src"; src.mkdir(exist_ok=True)
+        man, tf, mf = src / "transcript_manual.txt", src / "transcript.txt", src / "meta.json"
+        vid = transcript.video_id(s["url"])
+        def meta_from_elsewhere():
+            if mf.exists():
+                m = json.loads(mf.read_text(encoding="utf-8"))
+                if m.get("title") and m.get("title") != "Pasted transcript": return m
+            for d in self.jobs_dir().iterdir():   # another job of the same video
+                o = d / "src" / "meta.json"
+                if d != j.dir and o.exists():
+                    try:
+                        m = json.loads(o.read_text(encoding="utf-8"))
+                        if vid and m.get("id") == vid: return m
+                    except Exception: pass
+            return None
+        # 1) a pasted transcript always wins; metadata from an earlier attempt / another job, else one light YouTube call
+        if man.exists():
+            text = man.read_text(encoding="utf-8"); meta = meta_from_elsewhere()
+            if not meta:
+                try: meta = transcript.meta_only(s["url"], src)
+                except Exception as e:
+                    log(f"  (couldn't get the video's title from YouTube: {str(e)[:100]}); using a placeholder")
+                    meta = {"id": vid, "title": "Pasted transcript", "webpage_url": s.get("url", "")}
+            mf.write_text(json.dumps(meta, indent=1), encoding="utf-8"); tf.write_text(text, encoding="utf-8")
+            log(f"Transcript: {len(text.split())} words (pasted)"); return meta, text
+        # 2) already fetched in an earlier attempt of this job
+        if tf.exists() and len(tf.read_text(encoding="utf-8").split()) > 100 and meta_from_elsewhere():
+            text = tf.read_text(encoding="utf-8"); log(f"Transcript: reusing the one already fetched ({len(text.split())} words)")
+            return meta_from_elsewhere(), text
+        # 3) another job already has this video's transcript
+        if vid:
+            for d in sorted(self.jobs_dir().iterdir(), reverse=True):
+                o, om = d / "src" / "transcript.txt", d / "src" / "meta.json"
+                if d == j.dir or not (o.exists() and om.exists()): continue
+                try: m = json.loads(om.read_text(encoding="utf-8"))
+                except Exception: continue
+                if m.get("id") == vid and len(o.read_text(encoding="utf-8").split()) > 100:
+                    text = o.read_text(encoding="utf-8"); tf.write_text(text, encoding="utf-8"); mf.write_text(json.dumps(m, indent=1), encoding="utf-8")
+                    log(f"Transcript: reusing the transcript of the same video from job {d.name} ({len(text.split())} words); YouTube not contacted")
+                    return m, text
+        # 4) YouTube recently blocked this PC: don't ask again yet
+        bf = self._yt_block_file()
+        if bf.exists():
+            b = json.loads(bf.read_text(encoding="utf-8"))
+            left = b.get("until", 0) - time.time()
+            if left > 0:
+                at = datetime.datetime.fromtimestamp(b["until"]).strftime("%H:%M")
+                raise RuntimeError(f"YouTube blocked this PC recently, so it wasn't asked again. Try again after {at} (about {int(left // 60) + 1} min), "
+                                   f"or paste the transcript into this job (Paste transcript, below) and it continues without YouTube.")
+        # 5) fetch; a block starts the cooldown
+        try: return transcript.fetch(s["url"], src, log)
+        except RuntimeError as e:
+            if "blocking or rate-limiting" in str(e):
+                until = time.time() + self.YT_COOLDOWN
+                bf.write_text(json.dumps({"until": until, "why": str(e)[:200]}), encoding="utf-8")
+                at = datetime.datetime.fromtimestamp(until).strftime("%H:%M")
+                raise RuntimeError(f"YouTube blocked this PC ({str(e).split('(')[1].split(')')[0] if '(' in str(e) else 'rate limit'}). "
+                                   f"Try again after {at} (about {self.YT_COOLDOWN // 60} min), or paste the transcript into this job (Paste transcript, below).")
+            raise
+
+    def set_transcript(self, jid, text):
+        j = self.job(jid); (j.dir / "src").mkdir(exist_ok=True)
+        (j.dir / "src" / "transcript_manual.txt").write_text(text, encoding="utf-8")
+        j.log(f"Transcript pasted ({len(text.split())} words)")
+        if j.state.get("status") in ("error", "stopped"): self.resume(jid)
+
     def _run(self, jid):
         j = self.job(jid); s = j.state; cfg = config.load(); self.current = jid
         stop = lambda: jid in self.cancel
@@ -104,14 +176,8 @@ class Studio:
                 if not s.get("url"):
                     up = j.dir / "src" / s["upload"] if s.get("upload") else None
                     meta, text = sources.load(j.dir / "src", up, s.get("src_title", ""), s.get("src_credit", ""), log)
-                elif man.exists():
-                    text = man.read_text(encoding="utf-8"); meta = {"title": "Pasted transcript", "webpage_url": s.get("url", "")}
-                    try: meta, _ = transcript.fetch(s["url"], j.dir / "src", log) if s.get("url") else (meta, "")
-                    except Exception as e: log(f"  (metadata fetch failed: {e})")
-                    (j.dir / "src" / "meta.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
-                    (j.dir / "src" / "transcript.txt").write_text(text, encoding="utf-8")
                 else:
-                    meta, text = transcript.fetch(s["url"], j.dir / "src", log)
+                    meta, text = self._youtube_transcript(j, s, log)
                 j.save(title=meta.get("title", ""))
             elif st == "script":
                 if s.get("provider"): cfg["script_provider"] = s["provider"]

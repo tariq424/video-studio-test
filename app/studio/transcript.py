@@ -66,6 +66,23 @@ def _whisper(url, outdir, log):
         log(f"  GPU transcription unavailable ({str(e)[:80]}); using CPU (slower)")
         return run(WhisperModel("small.en", device="cpu", compute_type="int8"))
 
+def video_id(url):
+    m = re.search(r"(?:youtu\.be/|[?&]v=|/shorts/|/live/|/embed/)([A-Za-z0-9_-]{11})", url or "")
+    return m.group(1) if m else ""
+
+def meta_only(url, outdir):
+    """Title/channel/description only (one light request, no captions)."""
+    import yt_dlp
+    try:
+        with yt_dlp.YoutubeDL({"skip_download": True, "quiet": True, "no_warnings": True}) as y:
+            info = y.extract_info(url, download=False)
+    except Exception as e:
+        if _blocked(e): raise RuntimeError(BLOCKED.format(why=str(e)[:120]))
+        raise
+    meta = {k: info.get(k) for k in ["id", "title", "channel", "uploader", "upload_date", "duration", "webpage_url", "description"]}
+    meta["chapters"] = [{"title": c.get("title"), "start": c.get("start_time")} for c in (info.get("chapters") or [])]
+    return meta
+
 def fetch(url, outdir, log):
     import yt_dlp
     outdir = Path(outdir); outdir.mkdir(parents=True, exist_ok=True)

@@ -92,7 +92,7 @@ function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt
 let lastKey='';
 async function loadDetail(){if(editing)return;const s=await j('/api/jobs/'+sel);const done=s.done||[];
  const key=sel+'|'+s.status+'|'+s.stage;
- if(s.status=='awaiting_review'&&key==lastKey)return;   // don't redraw the script while you read it
+ if((s.status=='awaiting_review'||(s.status=='error'&&s.stage=='transcript'))&&key==lastKey)return;   // don't redraw while you read/paste
  lastKey=key;
  const mtxt={both:`long ${s.minutes} min + Short ${fmt(Math.round(s.short_secs||165))}`,short:`Short ${fmt(Math.round(s.short_secs||165))}`,long:`long ${s.minutes} min`}[s.mode||'long'];
  let h=`<h2>${esc(s.title||s.url)}</h2><div class="mut">${mtxt} · <b>${statusText(s)}</b>${s.error?` · <span style="color:var(--bad)">${esc(s.error)}</span>`:''}</div>`;
@@ -102,6 +102,7 @@ async function loadDetail(){if(editing)return;const s=await j('/api/jobs/'+sel);
  if(['running','queued'].includes(s.status))h+=`<button class="sec" onclick="act('stop')">Stop</button>`;
  if(['error','stopped'].includes(s.status))h+=`<button onclick="act('resume')">Resume</button>`;
  h+=`</div>`;
+ if(s.status=='error'&&s.stage=='transcript')h+=`<details open style="margin-top:12px"><summary>Paste transcript (continues without YouTube)</summary><textarea id="jptx" rows="8" style="width:100%" placeholder="Paste the video's transcript here"></textarea><button onclick="pasteTx()">Use this transcript and continue</button> <span id="jptxm" class="mut"></span></details>`;
  if(s.short_output){const rel=s.short_output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished Short: <code>${esc(s.short_output)}</code><br><span class="mut">YouTube description with credits: output/youtube_short_description.txt</span></p><video controls style="max-width:360px" src="/files/${sel}/${rel}"></video>`}
  if(s.output){const rel=s.output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished video: <code>${esc(s.output)}</code></p><video controls src="/files/${sel}/${rel}"></video>`}
  h+=`<div id="sdoc"></div><div id="doc"></div><div id="ed"></div>`;
@@ -127,6 +128,7 @@ async function showScript(){const p=await j(`/api/jobs/${sel}/plan`);const w=p.s
  h+=`<h1>${esc(p.title)}</h1>${p.subtitle?`<p class="sub">${esc(p.subtitle)}</p>`:''}`;
  p.sections.forEach((x,i)=>{h+=`<h3>${i+1}. ${esc(x.title)}</h3><p>${esc(x.vo)}</p>`});
  h+=`</div>`;$('doc').innerHTML=h}
+async function pasteTx(){const t=$('jptx').value;const r=await fetch(`/api/jobs/${sel}/transcript`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})});const k=await r.json();if(k.error){$('jptxm').textContent=k.error;return}lastKey='';loadJobs()}
 async function act(a){await j(`/api/jobs/${sel}/${a}`,{method:'POST'});editing=false;lastKey='';loadJobs()}
 async function editPlan(){editing=true;planCache=await j(`/api/jobs/${sel}/plan`);$('doc').innerHTML='';$('sdoc').innerHTML='';
  let h=`<h2 style="margin-top:16px">Script review</h2><label>Title</label><input type="text" id="pt" value="${esc(planCache.title)}"><label>Subtitle</label><input type="text" id="ps" value="${esc(planCache.subtitle||'')}">`;
