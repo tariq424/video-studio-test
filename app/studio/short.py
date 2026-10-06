@@ -62,16 +62,20 @@ For each beat also give:
    (role: "origin", "planned" = intended destination shown dashed, "actual" = where it really went, "stop" = a place on the way,
    "place" = just a location; real coordinates in decimal degrees). Otherwise a headline card:
    {{"kind":"headline","kicker":"1-3 words","text":"4-9 words summing up the beat","sub":"optional 3-8 words"}}
-- "still_prompt": a 25-45 word prompt for an AI image that fits this beat, photorealistic, vertical framing, no text, no logos, no
-  readable signs, no real people's faces (describe generic people or objects). For a subject, describe it by shape and colours
-  without logos (e.g. "a white single-aisle passenger jet with a dark blue tail, landing at dusk").
-
+- "still_prompt": a 30-50 word prompt for a photorealistic AI image of THIS beat, vertical framing. Describe the subject, the
+  setting and the mood, at the exact moment the narration describes (e.g. if the plane dropped, it is diving steeply; if it sat on
+  the tarmac, it is parked with emergency vehicles around; tense, never cheerful, for an emergency). The AI garbles marks, so
+  NEVER ask for any text, letters, numbers, logos, brand names, airline names or livery lettering, flags, registrations, signs
+  or real people's faces (describe generic people from behind or at a distance). For a subject, describe it by type, shape
+  and colours only (e.g. "a white single-aisle passenger jet with a plain dark blue tail, descending steeply through clouds").
+- "motion": 8-15 words for animating that image for 7 seconds: what moves and how the camera moves
+  (e.g. "the jet banks and descends through clouds, camera tracks alongside"). Slow, physically plausible motion.
 Also give "title" (max 60 chars, YouTube title), "tag" (max 28 chars, small label shown at the top, e.g. "MOONSHOTS #293 · CONDENSED"),
 "description" (2-3 sentences for YouTube that credit {channel} and the original), and "source_spoken": how a narrator would
 name the source in a sentence, e.g. "the Moonshots podcast, episode two ninety-three" or "a NotebookLM briefing on battery recycling".
 
 Reply with ONLY JSON:
-{{"title":"...","tag":"...","description":"...","source_spoken":"...","beats":[{{"vo":"...","graphics":[{{"at":null,"g":{{...}}}},{{"at":"word","g":{{...}}}}],"queries":["...","..."],"subject":null,"backdrop":{{...}},"still_prompt":"..."}}]}}"""
+{{"title":"...","tag":"...","description":"...","source_spoken":"...","beats":[{{"vo":"...","graphics":[{{"at":null,"g":{{...}}}},{{"at":"word","g":{{...}}}}],"queries":["...","..."],"subject":null,"backdrop":{{...}},"still_prompt":"...","motion":"..."}}]}}"""
 
 def _log_none(m): pass
 
@@ -161,7 +165,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             plan["sections"].append({"id": f"b{i}", "title": f"Beat {i + 1}", "vo": re.sub(r"\s+", " ", b["vo"]).strip(),
                                      "queries": [q for q in b.get("queries", []) if isinstance(q, str)][:3] or ["city skyline aerial"],
                                      "subject": sj, "backdrop": _clean_backdrop(b.get("backdrop"), b["vo"]),
-                                     "still_prompt": str(b.get("still_prompt") or "")[:400],
+                                     "still_prompt": str(b.get("still_prompt") or "")[:500], "motion": str(b.get("motion") or "")[:160],
                                      "visuals": [{"type": "chart", "chart": g["g"], "at": g.get("at")} for g in gs]})
         log("Checking the Short against the source (names, attributions, numbers)...")
         plan = fact_check(llm, plan, meta, transcript, log, stop)
@@ -239,84 +243,108 @@ def depth_free(img, prefix):
     return [p]
 
 def do_fallback(job, plan, cfg, wg, log, stop):
-    """For beats with no matching footage: the script's map backdrop (geography); then for subject-locked beats 3D reconstructions
-    (Remotion), for other beats AI stills with 2.5D depth motion; else the headline card. Writes short/fallback.json = {beat: [bg items]}."""
-    from . import render, depth
+    """The visual ladder for beats that step 1 didn't cover (stock footage for generic beats, real photos for subject beats):
+    2 WanGP still -> 3 WanGP image-to-video (GENERATED) -> 4 parallax of the still (PARALLAX) -> 5 3D reconstruction / headline card.
+    Every step is checked against the beat's narration (ladder.py); a failed check escalates. A beat's map backdrop (geography)
+    is kept as its first visual. Writes short/fallback.json = {beat: [bg items]} and logs one ladder line per beat."""
+    from . import depth, coherence, photos, ladder
     sd = job / "short"; fd = sd / "fallback"; fd.mkdir(parents=True, exist_ok=True)
     tm = json.loads((sd / "timings.json").read_text(encoding="utf-8"))
     pick = json.loads((sd / "stock" / "pick.json").read_text(encoding="utf-8"))
     ff = sd / "fallback.json"; out = json.loads(ff.read_text(encoding="utf-8")) if ff.exists() else {}
-    needs = {k: v for k, v in _needs(plan, tm, pick, sd, cfg).items() if k not in out}
+    allneeds = _needs(plan, tm, pick, sd, cfg)
+    needs = {k: v for k, v in allneeds.items() if k not in out}
+    log("Visual ladder per beat (1 stock/photo -> 2 still -> 3 animate -> 4 parallax -> 5 reconstruction):")
+    for s in plan["sections"]:   # beats step 1 covered on its own
+        if s.get("cta") or s["id"] not in tm or s["id"] in allneeds: continue
+        log(f"  {s['id']}: stock ({len(pick.get(s['id'], []))} clip(s), coherent)")
     if not needs:
-        log("Fallback visuals: none needed"); ff.write_text(json.dumps(out, indent=1), encoding="utf-8"); return
-    gpu = wg.alive() if any(not s.get("subject") for s in plan["sections"] if s["id"] in needs) else False
-    from . import coherence
+        log("  no other beats need visuals"); ff.write_text(json.dumps(out, indent=1), encoding="utf-8"); return
+    ents = json.loads((job / "entities.json").read_text(encoding="utf-8")) if (job / "entities.json").exists() else []
     phases = coherence.beat_phases([x for x in plan["sections"] if not x.get("cta")])
-    log(f"Fallback visuals for {len(needs)} beat(s) without matching footage: {', '.join(needs)}")
-    seed = 5100
+    pre, step1, slots = {}, {}, []
     for s in plan["sections"]:
         if s["id"] not in needs: continue
         if stop(): raise RuntimeError("cancelled")
         n = needs[s["id"]]; items = []
         bd = s.get("backdrop") or {"kind": "headline", "kicker": "", "text": s["vo"][:60], "sub": ""}
-        if bd.get("kind") == "map": items.append({"type": "graphic", "g": bd})
-        if s.get("subject"):   # locked: real licensed photos of the subject, then a 3D reconstruction (an AI image would invent the livery/model)
-            from . import coherence, photos
-            ents = json.loads((job / "entities.json").read_text(encoding="utf-8")) if (job / "entities.json").exists() else []
-            cap = bd.get("text", "") if bd.get("kind") == "headline" else bd.get("title", "")
-            qtxt = " ".join(s["queries"])
-            inside = s["subject"].get("interior") or re.search(r"\b(cockpit|flight deck|pilots?|captain)\b", qtxt, re.I)
-            bp = phases.get(s["id"], "")   # the moment of the story this beat is at: in the air, landing, on the ground
-            pics = []
-            # inside the plane: the cabin/cockpit reconstruction (another airline's real cabin would be wrong).
-            # In the air: also the reconstruction - real photos show planes taking off or cruising calmly, never the emergency
-            if not inside and bp != "air":
+        if bd.get("kind") == "map": items.append({"type": "graphic", "g": bd, "rung": "map"})
+        have = len(pick.get(s["id"], []))
+        why1 = f"only {have} coherent stock clip(s)" if have else "no coherent stock"
+        if s.get("subject"):   # step 1 for a subject beat: real licensed photos of it (FILE), only where a photo can show this moment
+            inside = s["subject"].get("interior") or re.search(r"\b(cockpit|flight deck|pilots?|captain)\b", " ".join(s["queries"]), re.I)
+            bp = phases.get(s["id"], ""); pics = []
+            if inside: why1 = "inside the aircraft: no real photo of it"
+            elif bp == "air": why1 = "in the air: no real photo shows this moment"
+            else:
                 try: pics = photos.find(cfg, s["subject"], sd / "photos", log, want=10)
                 except Exception as e: log(f"  photo search failed ({str(e)[:100]})")
                 fit = [pc for pc in pics if coherence.phase_ok(bp, pc.get("phase"))]
-                if pics and not fit: log(f"  {s['id']}: no photo shows the subject {bp or 'in this situation'} ({', '.join(sorted({pc.get('phase') or '?' for pc in pics}))} only); using the reconstruction")
+                why1 = ("no usable photo" if not pics else f"no photo shows it {bp or 'in this situation'}") if not fit else ""
                 pics = fit
-            limit = n
             used = {i.get("photo") for v in out.values() for i in v if i.get("photo")}
             for pc in pics:
-                if len(items) >= limit: break
+                if len(items) >= n: break
                 if pc["id"] in used: continue
                 dst = fd / f"{pc['id']}.jpg"
                 if not dst.exists(): shutil.copy2(pc["path"], dst)
-                # shown whole over a blurred copy: most photos are landscape, and cropping them to vertical would blur them
-                items.append({"type": "image", "src": str(dst.relative_to(sd)).replace("\\", "/"), "fit": "frame",
+                items.append({"type": "image", "src": str(dst.relative_to(sd)).replace("\\", "/"), "fit": "frame", "rung": "photo",
                               "photo": pc["id"], "credit": photos.credit(pc), "short_credit": photos.short_credit(pc)}); used.add(pc["id"])
-            k = 0
-            while len(items) < n:
-                items.append({"type": "graphic", "g": coherence.recon(s["subject"], ents, s["vo"], k, cap if k == 0 else "", moment=phases.get(s["id"], ""))}); k += 1
-            out[s["id"]] = items
-            log(f"  {s['id']}: " + ", ".join("real photo" if i["type"] == "image" else i["g"]["kind"] + (f" ({i['g']['scene']})" if i["g"]["kind"] == "recon" else "") for i in items))
-            ff.write_text(json.dumps(out, indent=1), encoding="utf-8")
-            continue
-        k = 0
-        while len(items) < n:
-            made = False
-            if gpu and s.get("still_prompt"):
-                seed += 1; img = fd / f"{s['id']}_{k}.jpg"
-                try:
-                    if not img.exists():
-                        r = wg.gen({"model_type": cfg["still_model"], "prompt": s["still_prompt"] + render.STYLE, "resolution": "1088x1920",
-                                    "num_inference_steps": 4, "seed": seed}, log, f"still {s['id']}_{k}", stop=stop)
-                        if r["ok"]: shutil.copy(r["file"], img)
-                    if img.exists():
-                        try: lay = depth.layers(img, fd / f"{s['id']}_{k}", log)
-                        except Exception as e:
-                            log(f"  depth layers failed ({str(e)[:80]}); still without parallax")
-                            lay = depth_free(img, fd / f"{s['id']}_{k}")
-                        items.append({"type": "layers", "layers": [str(p.relative_to(sd)).replace("\\", "/") for p in lay]}); made = True
-                except Exception as e: log(f"  AI still for {s['id']} failed ({str(e)[:100]})")
-            if not made:
-                items.append({"type": "graphic", "g": bd if bd.get("kind") == "headline" else {"kind": "headline", "kicker": "", "text": s["vo"][:70], "sub": ""}})
-                if not gpu or not s.get("still_prompt"): break
-            k += 1
+            if len(items) < n and pics: why1 = "not enough matching photos"
+        pre[s["id"]] = items; step1[s["id"]] = ("photo" if s.get("subject") else "stock", why1)
+        for k in range(n - len(items)):
+            slots.append({"key": f"{s['id']}_{k}", "beat": s["id"], "vo": s["vo"], "still_prompt": s.get("still_prompt", ""),
+                          "motion": s.get("motion", ""), "subject": s.get("subject")})
+    gpu = bool(slots) and wg.alive()
+    if slots and not gpu: log("  WanGP isn't reachable: skipping steps 2-4")
+    st = ladder.run(cfg, wg, sd, fd, slots, log, stop, gpu) if slots else {}
+    for s in plan["sections"]:
+        if s["id"] not in needs: continue
+        items = pre[s["id"]]; bd = s.get("backdrop") or {}
+        cap = bd.get("text", "") if bd.get("kind") == "headline" else bd.get("title", "")
+        rung1, why1 = step1[s["id"]]
+        lines, k5 = [], 0
+        for sl in [x for x in slots if x["beat"] == s["id"]]:
+            r = st.get(sl["key"], {}); chain = [rung1]; why = [f"{rung1}: {why1}"] if why1 else []
+            chain.append("still")
+            if r.get("still_ok"):
+                chain.append("animate")
+                if r.get("clip_ok"):
+                    items.append({"type": "video", "src": r["clip"], "secs": round((r.get("clip_secs") or FB_SECS) / 0.85, 2), "tag": "GENERATED", "rung": "animate"})
+                    lines.append(" -> ".join(chain) + (f"  ({'; '.join(why)})" if why else "")); continue
+                why.append(f"animate: {r.get('clip_why') or 'not run'}")
+                chain.append("parallax")
+                img = sd / r["still"]; pre_ = fd / sl["key"]
+                try: lay = depth.layers(img, pre_, log)
+                except Exception as e:
+                    log(f"  depth layers failed ({str(e)[:80]}); still without parallax"); lay = depth_free(img, pre_)
+                items.append({"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "PARALLAX", "rung": "parallax"})
+            else:
+                why.append(f"still: {r.get('still_why') or 'not made'}")
+                if s.get("subject"):
+                    chain.append("reconstruction")
+                    items.append({"type": "graphic", "g": coherence.recon(s["subject"], ents, s["vo"], k5, cap if k5 == 0 else "", moment=phases.get(s["id"], "")), "rung": "reconstruction"}); k5 += 1
+                else:
+                    chain.append("headline")
+                    items.append({"type": "graphic", "g": bd if bd.get("kind") == "headline" else {"kind": "headline", "kicker": "", "text": s["vo"][:70], "sub": ""}, "rung": "headline"})
+            lines.append(" -> ".join(chain) + (f"  ({'; '.join(why)})" if why else ""))
+        # an animation can come out shorter than planned: never let a clip run out, end on something that can stretch
+        rem = tm[s["id"]]["dur"] + GAP - sum(_clip_len(sd, c) / 0.85 for c in pick.get(s["id"], []))
+        if items and sum(i.get("secs", FB_SECS) for i in items) < rem and items[-1]["type"] == "video":
+            still = next((st[x["key"]]["still"] for x in slots if x["beat"] == s["id"] and st.get(x["key"], {}).get("still_ok")), None)
+            if still:
+                lay = depth_free(sd / still, fd / f"{s['id']}_tail")
+                items.append({"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "PARALLAX", "rung": "parallax (fill)"})
+        if not items: items.append({"type": "graphic", "g": {"kind": "headline", "kicker": "", "text": s["vo"][:70], "sub": ""}, "rung": "headline"})
+        items = [it for j, it in enumerate(items) if not (j and it["rung"] == "headline" and items[j - 1]["rung"] == "headline")]   # one card stretches
         out[s["id"]] = items
-        log(f"  {s['id']}: " + ", ".join("map" if i.get("g", {}).get("kind") == "map" else "headline" if i["type"] == "graphic" else "AI still (2.5D)" for i in items))
+        if not lines: lines = [f"{rung1}" + (f"  ({rung1}: {why1})" if why1 else "")]
+        got = ", ".join(i["rung"] for i in items)
+        for j, ln in enumerate(lines): log(f"  {s['id']}{'#' + str(j + 1) if len(lines) > 1 else ''}: {ln}")
+        log(f"  {s['id']} uses: {got}")
         ff.write_text(json.dumps(out, indent=1), encoding="utf-8")
+
+def _rel_sd(p, sd): return str(Path(p).relative_to(sd)).replace("\\", "/")
 
 
 # ---------------------------------------------------------------- narration + timings
@@ -425,7 +453,7 @@ def build(job, plan, cfg, log):
         bgs = []
         clips = [c for c in clips if _clip_len(sd, c) > 0]
         fb = fallback.get(s["id"], []) if cap(clips) < d - 0.5 else []
-        items = [("clip", c, _clip_len(sd, c) / 0.85) for c in clips] + [("fb", x, FB_SECS) for x in fb]
+        items = [("clip", c, _clip_len(sd, c) / 0.85) for c in clips] + [("fb", x, x.get("secs", FB_SECS)) for x in fb]
         caps = [it[2] for it in items]; tot = sum(caps) or 1.0; t0 = 0.0
         for k, (kind, c, cp) in enumerate(items):   # screen time in proportion to length, so no clip runs out early
             if kind == "clip":
@@ -439,6 +467,10 @@ def build(job, plan, cfg, log):
                 dst = pub / "media" / "fb" / Path(c["src"]).name
                 if not dst.exists(): shutil.copy2(sd / c["src"], dst)
                 bg = {"type": "image", "src": f"media/fb/{Path(c['src']).name}", "fit": "frame", "credit": c.get("short_credit", ""), "tag": "FILE", "from": round(t0, 3)}
+            elif c["type"] == "video":   # WanGP image-to-video (ladder step 3)
+                dst = pub / "media" / "fb" / Path(c["src"]).name
+                if not dst.exists(): shutil.copy2(sd / c["src"], dst)
+                bg = {"type": "video", "src": f"media/fb/{Path(c['src']).name}", "tag": c.get("tag", "GENERATED"), "from": round(t0, 3)}
             elif c["type"] == "layers":
                 srcs = []
                 for lp in c["layers"]:
@@ -446,6 +478,7 @@ def build(job, plan, cfg, log):
                     if not dst.exists(): shutil.copy2(sd / lp, dst)
                     srcs.append(f"media/fb/{Path(lp).name}")
                 bg = {"type": "layers", "layers": srcs, "from": round(t0, 3)}
+                if c.get("tag"): bg["tag"] = c["tag"]
             else:
                 bg = {"type": "graphic", "g": c["g"], "from": round(t0, 3)}
             t0 += d * cp / tot if tot >= d else min(cp, d - t0)

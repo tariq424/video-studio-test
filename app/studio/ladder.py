@@ -1,0 +1,114 @@
+"""The visual ladder for Short beats that stock footage / real photos didn't cover (step 1 runs in short_stock / photos):
+  2. WanGP still (from the beat's still_prompt)   -> coherence check against the narration
+  3. WanGP image-to-video of that still           -> coherence + garble check on 3 frames      => tag GENERATED
+  4. Parallax of the still (depth layers)         -> used when step 3 fails but the still passed => tag PARALLAX
+  5. 3D reconstruction (subject beats) / headline card (other beats)                            => tag RECONSTRUCTION (in Recon.tsx)
+No visual is used just because it exists: a step whose output fails the check escalates to the next one.
+GPU work is batched (all stills, then all checks, then all animations, then all checks) so WanGP and the Ollama vision
+model don't keep pushing each other out of video memory."""
+import json, shutil
+from pathlib import Path
+from . import media
+from .llm import parse_json
+
+CHECK = """This {what} will be shown full-screen in a news Short while the narrator says:
+"{narration}"
+{subject}
+Judge the picture and reply with ONLY JSON:
+{{"fits": "yes" or "no" - does it show what this sentence describes: the same kind of subject, the same moment and action
+  (e.g. a plane diving if the narration says it dropped, on the ground if it says it landed or sat on the tarmac) and the same mood
+  (tense for an emergency, never cheerful)?,
+ "marks": true or false - any readable text, letters, numbers, logo, brand name, airline name or livery lettering, flag or registration?,
+ "garbled": true or false - melted or deformed objects, broken shapes, extra or missing limbs, warped faces, impossible geometry{extra}?,
+ "why": "max 12 words"}}"""
+
+def _yes(v): return str(v).strip().lower() in ("true", "yes", "1")
+
+def check(cfg, img, narration, subject=None, video=False):
+    """-> (ok, reason). Fails closed: if the vision model can't judge it, the visual isn't used."""
+    from .footage import _vision
+    if cfg.get("vet_provider", "local") == "off": return True, "unchecked (vetting off)"
+    subj = ""
+    if subject:
+        subj = (f"The story is about {subject.get('name')}. The picture should show the same kind of thing (same type, shape and colours), "
+                f"but it must NOT show its name or logo.")
+    prompt = CHECK.format(what="video clip (three frames from it, left to right)" if video else "AI-generated picture",
+                          narration=narration[:500].replace('"', "'"), subject=subj,
+                          extra=", or the subject changing shape between the frames" if video else "")
+    try: j = parse_json(_vision(cfg, img, prompt))
+    except Exception as e: return False, f"check unavailable ({str(e)[:50]})"
+    why = str(j.get("why", ""))[:80]
+    if _yes(j.get("garbled", False)): return False, "garbled" + (f": {why}" if why else "")
+    if _yes(j.get("marks", False)): return False, "shows text/logo/flag"
+    if str(j.get("fits", "no")).strip().lower() != "yes": return False, "doesn't fit the narration" + (f": {why}" if why else "")
+    return True, why
+
+def _rel(p, sd): return str(Path(p).relative_to(sd)).replace("\\", "/")
+
+def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100):
+    """slots: [{"key", "beat", "vo", "still_prompt", "motion", "subject"}] -> {key: {"still": path|None, "still_ok", "still_why",
+    "clip": path|None, "clip_ok", "clip_why", "clip_secs"}}. State is kept in fallback/ladder.json so Resume doesn't redo work."""
+    from . import render, footage
+    sf = fd / "ladder.json"
+    st = json.loads(sf.read_text(encoding="utf-8")) if sf.exists() else {}
+    def save(): sf.write_text(json.dumps(st, indent=1), encoding="utf-8")
+    for s in slots: st.setdefault(s["key"], {})
+    if not gpu:
+        for s in slots: st[s["key"]].setdefault("still_why", "WanGP not available")
+        save(); return st
+    # step 2: stills
+    for i, s in enumerate(slots):
+        if stop(): raise RuntimeError("cancelled")
+        r = st[s["key"]]; img = fd / f"{s['key']}.jpg"
+        if "still" in r and (r["still"] is None or img.exists()): continue
+        if not s.get("still_prompt"): r["still"] = None; r["still_why"] = "no scene prompt"; save(); continue
+        if not img.exists():
+            try:
+                g = wg.gen({"model_type": cfg["still_model"], "prompt": s["still_prompt"] + render.STYLE, "resolution": "1088x1920",
+                            "num_inference_steps": 4, "seed": seed + i}, log, f"still {s['key']}", stop=stop)
+                if g["ok"]: shutil.copy(g["file"], img)
+            except Exception as e: log(f"  still {s['key']} failed ({str(e)[:100]})")
+        r["still"] = _rel(img, sd) if img.exists() else None
+        if r["still"] is None: r["still_why"] = "WanGP failed"
+        save()
+    # step 2 check
+    todo = [s for s in slots if st[s["key"]].get("still") and "still_ok" not in st[s["key"]]]
+    if todo:
+        try: footage.ensure_vet_model(cfg, log)
+        except Exception as e: log(f"  {str(e)[:160]}")
+        for s in todo:
+            r = st[s["key"]]; ok, why = check(cfg, sd / r["still"], s["vo"], s.get("subject"))
+            r["still_ok"], r["still_why"] = ok, why; save()
+        footage.unload_vet_model(cfg)
+    # step 3: image-to-video of the stills that passed
+    if cfg.get("short_i2v", True):
+        for i, s in enumerate(slots):
+            if stop(): raise RuntimeError("cancelled")
+            r = st[s["key"]]; mp = fd / f"{s['key']}_i2v.mp4"
+            if not r.get("still_ok") or "clip" in r and (r["clip"] is None or mp.exists()): continue
+            if not media.ok(mp):
+                try:
+                    g = wg.gen({"model_type": cfg["video_model"], "prompt": (s.get("motion") or s["still_prompt"]) + render.STYLE,
+                                "image_prompt_type": "S", "image_start": str((sd / r["still"]).resolve()), "resolution": "720x1280",
+                                "video_length": int(cfg.get("short_i2v_frames", 169)), "num_inference_steps": 8, "seed": seed + 400 + i},
+                               log, f"animate {s['key']}", stop=stop)
+                    if g["ok"]: shutil.copy(g["file"], mp)
+                except Exception as e: log(f"  animation {s['key']} failed ({str(e)[:100]})")
+            r["clip"] = _rel(mp, sd) if media.ok(mp) else None
+            if r["clip"] is None: r["clip_why"] = "WanGP image-to-video failed"
+            else: r["clip_secs"] = round(media.dur(mp), 2)
+            save()
+        todo = [s for s in slots if st[s["key"]].get("clip") and "clip_ok" not in st[s["key"]]]
+        if todo:
+            try: footage.ensure_vet_model(cfg, log)
+            except Exception as e: log(f"  {str(e)[:160]}")
+            for s in todo:
+                r = st[s["key"]]; strip = fd / f"{s['key']}_i2v_strip.jpg"
+                try: media.frames_strip(sd / r["clip"], strip); ok, why = check(cfg, strip, s["vo"], s.get("subject"), video=True)
+                except Exception as e: ok, why = False, f"frame check failed ({str(e)[:50]})"
+                r["clip_ok"], r["clip_why"] = ok, why; save()
+            footage.unload_vet_model(cfg)
+    else:
+        for s in slots: st[s["key"]].setdefault("clip_why", "image-to-video off in settings")
+    save()
+    return st
