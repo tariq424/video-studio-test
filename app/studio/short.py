@@ -318,7 +318,7 @@ def do_fallback(job, plan, cfg, wg, log, stop):
                 try: lay = depth.layers(img, pre_, log)
                 except Exception as e:
                     log(f"  depth layers failed ({str(e)[:80]}); still without parallax"); lay = depth_free(img, pre_)
-                items.append({"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "PARALLAX", "rung": "parallax"})
+                items.append({"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED · PARALLAX", "rung": "parallax"})
             else:
                 why.append(f"still: {r.get('still_why') or 'not made'}")
                 if s.get("subject"):
@@ -334,7 +334,7 @@ def do_fallback(job, plan, cfg, wg, log, stop):
             still = next((st[x["key"]]["still"] for x in slots if x["beat"] == s["id"] and st.get(x["key"], {}).get("still_ok")), None)
             if still:
                 lay = depth_free(sd / still, fd / f"{s['id']}_tail")
-                items.append({"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "PARALLAX", "rung": "parallax (fill)"})
+                items.append({"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED · PARALLAX", "rung": "parallax (fill)"})
         if not items: items.append({"type": "graphic", "g": {"kind": "headline", "kicker": "", "text": s["vo"][:70], "sub": ""}, "rung": "headline"})
         items = [it for j, it in enumerate(items) if not (j and it["rung"] == "headline" and items[j - 1]["rung"] == "headline")]   # one card stretches
         out[s["id"]] = items
