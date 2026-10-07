@@ -222,8 +222,11 @@ This is the human or AI step the app can't do for itself:
 
 ## Visual review for Shorts (Phase 1, Oct 2026)
 - Job form "Visuals (Shorts)": **Auto** (ladder stops at the first passing step; pauses only when a beat is uncertain: the check
-  couldn't run, or the AI still failed and the beat fell back to reconstruction/headline) or **Review every beat** (ladder runs every
-  treatment for every beat, then pauses).
+  couldn't run, or the AI still failed and the beat fell back to reconstruction/headline) or **Review every beat** (every
+  treatment except animation for every beat, then pauses).
+- Animation (WanGP LTX-2 image-to-video, ~14 min per 7 s clip on the RTX 5060: the 19B model streams through system RAM) runs ONLY
+  from an explicit click: "Show all options for this beat" or "Add animation". Approve auto / Approve all remaining never animate.
+  FastWan 5B was tested (Oct 2026): 7.6 min and unusable quality, so it is not used.
 - Stage `short_review` (after short_fallback): `review.collect` writes `short/review/review.json` (candidates per beat, auto pick,
   decisions, history); job status `awaiting_visuals`. Survives restarts.
 - Review panel on the job page: thumbnails (coarse stills; garbled animations show the worst frame with ⚠), click = 2-second middle
