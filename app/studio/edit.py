@@ -223,6 +223,8 @@ def open_beat(job, bid, cfg, log):
             b = rv["beats"].setdefault(bid, {"vo": sec["vo"], "secs": tb["dur"], "auto": [], "cands": [], "decision": "auto", "chosen": [],
                                              "uncertain": False, "why": "", "history": [], "busy": "", "msg": "", "notes": []})
             b["skip_item"] = review._skip_item(sec); b["secs"] = tb["dur"]
+            if not b.get("current") and (b.get("chosen") if b.get("decision") == "chosen" else b.get("auto")):
+                b["current"] = list(b["chosen"] if b.get("decision") == "chosen" else b["auto"])   # reviewed job: its pick is what the video shows
             if not b.get("current"):   # what the video shows now (older jobs have no candidates at all)
                 cur = []
                 for bg in tb["bgs"]:

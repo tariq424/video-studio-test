@@ -89,9 +89,11 @@ def edit_beat(page, api, e, run):
     page.click(T("edit-at") + f'[data-beat="{e["beat"]}"]', timeout=20000)
     page.wait_for_selector(T("edit-treatment"), timeout=120000)
     run.step("beat panel open", detail=e["beat"])
-    for box in page.query_selector_all(T("edit-choose")):
-        if box.is_checked(): box.uncheck()
-    for cid in e.get("cands") or []: page.check(T("edit-choose") + f'[data-cand="{cid}"]')
+    for _ in range(50):   # the panel redraws after every tick, so look the boxes up again each time
+        on = page.locator(T("edit-choose") + ":checked")
+        if on.count() == 0: break
+        on.first.uncheck()
+    for cid in e.get("cands") or []: page.locator(T("edit-choose") + f'[data-cand="{cid}"]').check()
     if e.get("fit"): page.click(T(f"edit-fit-{e['fit']}"))
     run.step("treatment chosen", detail=f"{e.get('cands')} fit={e.get('fit', 'auto')}")
     n0 = len(json.loads(urllib.request.urlopen(f"{api}/api/jobs/{e['job']}").read()).get("edits", []))
