@@ -89,11 +89,12 @@ def edit_beat(page, api, e, run):
     page.click(T("edit-at") + f'[data-beat="{e["beat"]}"]', timeout=20000)
     page.wait_for_selector(T("edit-treatment"), timeout=120000)
     run.step("beat panel open", detail=e["beat"])
-    for _ in range(50):   # the panel redraws after every tick, so look the boxes up again each time
-        on = page.locator(T("edit-choose") + ":checked")
-        if on.count() == 0: break
-        on.first.uncheck()
-    for cid in e.get("cands") or []: page.locator(T("edit-choose") + f'[data-cand="{cid}"]').check()
+    # tick boxes through the page's own handlers (the treatments sit in a sideways-scrolling row, and the panel redraws
+    # after every tick, so element handles go stale)
+    page.evaluate("""ids=>{for(let k=0;k<50;k++){const on=document.querySelector('[data-testid=edit-choose]:checked');if(!on)break;on.click()}
+      for(const id of ids){const b=document.querySelector(`[data-testid=edit-choose][data-cand="${id}"]`);if(b&&!b.checked)b.click()}}""", e.get("cands") or [])
+    got = page.evaluate("()=>[...document.querySelectorAll('[data-testid=edit-choose]:checked')].map(b=>b.dataset.cand)")
+    if got != list(e.get("cands") or []): raise RuntimeError(f"couldn't select {e.get('cands')} (selected: {got})")
     if e.get("fit"): page.click(T(f"edit-fit-{e['fit']}"))
     run.step("treatment chosen", detail=f"{e.get('cands')} fit={e.get('fit', 'auto')}")
     n0 = len(json.loads(urllib.request.urlopen(f"{api}/api/jobs/{e['job']}").read()).get("edits", []))
