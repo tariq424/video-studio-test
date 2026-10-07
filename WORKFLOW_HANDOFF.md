@@ -250,3 +250,15 @@ This is the human or AI step the app can't do for itself:
   apply = BeatClip render -> v_<sid>_<vi>.mp4 -> assemble.section() rebuilds that section -> sections joined by stream copy ->
   audio from build/final_audio.wav. plan visual edit_clip keeps the edit for full rebuilds.
 - After a render only previews are pruned now; unused treatment files stay until "Done editing (clean up)".
+
+## /make — describe a video (Oct 2026)
+- http://127.0.0.1:42020/make: Describe box -> "Fill the form" (POST /make/parse: phi4-mini via Ollama, fallback gemma3:4b, plus
+  rules in studio/make.py; links/paths/numbers always from the rules; model switches only count when the text mentions the topic)
+  -> the real form (/?embed=1 in an iframe) filled by data-testid -> you click Make video -> live run pane (/make/status).
+- Spec only has real options: input youtube|local_file|text (NotebookLM = local file), mode short|explainer|both, lengths,
+  script_review, visuals auto|review, captions, presenter, script_ai. Research / TLDR / verification switch / fact-check switch /
+  thumbnail / channel are reported as "not done" (they don't exist as per-job options).
+- Saved jobs: F:\code\video-studio\make_saved.json. Local file by path: form field "file-path" (server copies it).
+- app/vs_runner.py: Playwright runner (headless Edge; installs playwright on first use) -> screenshots/<ts>/ + steps.jsonl;
+  POST /make/runner {spec, click_make, edit:{job,beat,cands,fit}}; Make video is only clicked when click_make is true (tests).
+- Every post-render edit records state.edits[].verify = {frames_same, audio_same, decode_ok}.
