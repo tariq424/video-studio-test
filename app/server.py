@@ -102,7 +102,7 @@ def review_beat(jid, bid):
             review.decide(j.dir, bid, a, b.get("cands") if a != "revert" else b.get("i"), cfg, j.log)
             j.log(f"Visual review {bid}: {a}" + (f" {', '.join(b.get('cands') or [])}" if a == "choose" else ""))
         elif a == "supply": review.supply(j.dir, bid, b.get("src", ""), b.get("tag", ""), cfg, j.log); j.log(f"Visual review {bid}: your file added")
-        elif a in ("expand", "refine"):
+        elif a in ("expand", "refine", "animate"):
             err = review.start(studio, jid, bid, a, {"text": b.get("text", ""), "tag": b.get("tag", "")})
             if err: return jsonify(error=err), 409
         else: return jsonify(error="unknown action"), 400

@@ -419,14 +419,15 @@ def start(studio, jid, bid, kind, payload=None):
     """Run 'expand' (show all options) or 'refine' for one beat in the background. -> error text or ''"""
     if studio.current: return "Another job is using the GPU right now; try again when it has finished."
     if not _gpu.acquire(blocking=False): return "Already generating options for a beat; wait for it to finish."
-    job = studio.job(jid).dir; _busy(job, bid, "Generating options..." if kind == "expand" else "Working on your instruction...")
+    job = studio.job(jid).dir
+    _busy(job, bid, {"expand": "Generating options...", "animate": "Animating (several minutes)..."}.get(kind, "Working on your instruction..."))
     def run():
         log = studio.job(jid).log
         try:
             from . import config
             from .wangp import WanGP
             cfg = config.load(); wg = WanGP(cfg)
-            (expand if kind == "expand" else refine)(job, bid, cfg, wg, log, payload or {})
+            {"expand": expand, "refine": refine, "animate": add_animation}[kind](job, bid, cfg, wg, log, payload or {})
         except Exception as e:
             log(f"  {bid}: {kind} failed: {str(e)[:300]}")
             with _lock(job):
@@ -435,14 +436,14 @@ def start(studio, jid, bid, kind, payload=None):
             _busy(job, bid, ""); _gpu.release()
     threading.Thread(target=run, daemon=True).start(); return ""
 
-def _run_slots(job, sec, keys, cfg, wg, log, prompt=None, motion=None):
+def _run_slots(job, sec, keys, cfg, wg, log, prompt=None, motion=None, animate=False):
     from . import ladder
     sd, _ = _p(job)
     slots = [{"key": k, "beat": sec["id"], "vo": sec["vo"], "still_prompt": prompt or sec.get("still_prompt", ""),
               "motion": motion if motion is not None else sec.get("motion", ""), "subject": sec.get("subject")} for k in keys]
     gpu = wg.alive()
     if not gpu: log("  WanGP isn't reachable: no AI stills or animations")
-    return ladder.run(cfg, wg, sd, sd / "fallback", slots, log, lambda: False, gpu, seed=7000 + int(time.time()) % 1000, full=True)
+    return ladder.run(cfg, wg, sd, sd / "fallback", slots, log, lambda: False, gpu, seed=7000 + int(time.time()) % 1000, full=True, animate=animate)
 
 def _extra_stock(job, sec, queries, tag, cfg, log):
     from . import footage
@@ -464,7 +465,7 @@ def expand(job, bid, cfg, wg, log, payload):
     lf = sd / "fallback" / "ladder.json"; lad = json.loads(lf.read_text(encoding="utf-8")) if lf.exists() else {}
     keys = [k for k in lad if k.rsplit("_", 1)[0] == bid] or [f"{bid}_9"]
     log(f"{bid}: generating all treatments (slots {', '.join(keys)})")
-    st = _run_slots(job, sec, keys[:1] if not any(lad.get(k, {}).get("still") for k in keys) else keys, cfg, wg, log)
+    st = _run_slots(job, sec, keys[:1] if not any(lad.get(k, {}).get("still") for k in keys) else keys, cfg, wg, log, animate=True)
     with _lock(job): rv = load(job); have = {rv["cands"][c]["rung"] for c in rv["beats"][bid]["cands"]}
     picked, rejected, pics = [], [], []
     if not sec.get("subject") and "stock" not in have:
@@ -491,6 +492,23 @@ def expand(job, bid, cfg, wg, log, payload):
         save(job, rv)
     thumbs(job, cfg, log)
     log(f"{bid}: all treatments ready")
+
+def add_animation(job, bid, cfg, wg, log, payload):
+    """Add animation: animate this beat's AI still(s) (making a still first if there is none)."""
+    sd, rd = _p(job); sp, sec = _section(job, bid)
+    lf = sd / "fallback" / "ladder.json"; lad = json.loads(lf.read_text(encoding="utf-8")) if lf.exists() else {}
+    keys = [k for k in lad if k.rsplit("_", 1)[0] == bid and lad[k].get("still")] or [f"{bid}_9"]
+    keys = [k for k in keys if not lad.get(k, {}).get("clip")] or keys
+    log(f"{bid}: animating ({', '.join(keys[:1])})")
+    st = _run_slots(job, sec, keys[:1], cfg, wg, log, animate=True)
+    with _lock(job):
+        rv = load(job)
+        for k in keys[:1]:
+            if k in st: _slot_cands(rv, sec, k, st[k], sd, True, log)
+        r = st.get(keys[0], {})
+        rv["beats"][bid]["msg"] = "Animation added." if r.get("clip") else f"Animation failed: {r.get('clip_why') or r.get('still_why') or 'unknown'}"
+        save(job, rv)
+    thumbs(job, cfg, log)
 
 def refine(job, bid, cfg, wg, log, payload):
     from .llm import LLM

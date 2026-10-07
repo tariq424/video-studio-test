@@ -50,7 +50,7 @@ def check(cfg, img, narration, subject=None, video=False, info=None):
 
 def _rel(p, sd): return str(Path(p).relative_to(sd)).replace("\\", "/")
 
-def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False):
+def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False, animate=None):
     """slots: [{"key", "beat", "vo", "still_prompt", "motion", "subject"}] -> {key: {"still": path|None, "still_ok", "still_why",
     "clip": path|None, "clip_ok", "clip_why", "clip_secs", "clip_worst"}}. State is kept in fallback/ladder.json so Resume doesn't redo work.
     full=True (Review every beat / Show all options): animate every still, also the ones that failed their check, so the
@@ -88,16 +88,18 @@ def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False):
             r["still_ok"], r["still_why"] = ok, why; save()
         footage.unload_vet_model(cfg)
     # step 3: image-to-video of the stills that passed
-    if cfg.get("short_i2v", True):
+    # animation (step 3) is on demand by default: it is slow on this PC and most beats don't need motion
+    if animate is None: animate = bool(cfg.get("short_i2v_auto", False))
+    if animate and cfg.get("short_i2v", True):
         for i, s in enumerate(slots):
             if stop(): raise RuntimeError("cancelled")
             r = st[s["key"]]; mp = fd / f"{s['key']}_i2v.mp4"
             if not (r.get("still_ok") or (full and r.get("still"))) or "clip" in r and (r["clip"] is None or mp.exists()): continue
             if not media.ok(mp):
                 try:
-                    g = wg.gen({"model_type": cfg["video_model"], "prompt": (s.get("motion") or s["still_prompt"]) + render.STYLE,
+                    g = wg.gen({"model_type": cfg.get("short_i2v_model") or cfg["video_model"], "prompt": (s.get("motion") or s["still_prompt"]) + render.STYLE,
                                 "image_prompt_type": "S", "image_start": str((sd / r["still"]).resolve()), "resolution": "720x1280",
-                                "video_length": int(cfg.get("short_i2v_frames", 169)), "num_inference_steps": 8, "seed": seed + 400 + i},
+                                "video_length": int(cfg.get("short_i2v_frames", 169)), "num_inference_steps": int(cfg.get("short_i2v_steps", 8)), "seed": seed + 400 + i},
                                log, f"animate {s['key']}", stop=stop)
                     if g["ok"]: shutil.copy(g["file"], mp)
                 except Exception as e: log(f"  animation {s['key']} failed ({str(e)[:100]})")
@@ -117,6 +119,6 @@ def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False):
                 r["clip_ok"], r["clip_why"], r["clip_worst"] = ok, why, info.get("worst", 2); save()
             footage.unload_vet_model(cfg)
     else:
-        for s in slots: st[s["key"]].setdefault("clip_why", "image-to-video off in settings")
+        for s in slots: st[s["key"]].setdefault("clip_why", "not animated (on demand: Add animation)")
     save()
     return st
