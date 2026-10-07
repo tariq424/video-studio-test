@@ -69,6 +69,14 @@ def create():
         b.setdefault("auto_approve", "true")   # script review is skipped unless the user ticks it off
         for k in ("presenter", "auto_approve", "captions"): b[k] = b.get(k) in ("true", "1", "on", True)
     else: b = request.get_json(silent=True) or {}; f = None
+    sp = (b.get("src_path") or "").strip().strip('"')
+    if sp and not (f and f.filename):   # a file on this PC by path (the /make page can't put a file into an upload field)
+        if not Path(sp).is_file(): return jsonify(error=f"File not found on this PC: {sp}"), 400
+        if not kind_of(Path(sp).name): return jsonify(error="Unsupported file type. Use audio (.mp3 .m4a .wav ...) or .txt .md .pdf .docx"), 400
+        class _F:   # looks like an uploaded file to Studio.create
+            filename = Path(sp).name
+            def save(self, dst): import shutil; shutil.copy2(sp, dst)
+        f = _F()
     if f is not None and f.filename and not kind_of(f.filename): return jsonify(error="Unsupported file type. Use audio (.mp3 .m4a .wav ...) or .txt .md .pdf .docx"), 400
     if not b.get("url") and not b.get("transcript") and not (f and f.filename): return jsonify(error="Give a YouTube link, a file, or paste some text."), 400
     jid = studio.create(b.get("url", "").strip(), b.get("minutes", 15), b.get("presenter", False), b.get("auto_approve", True), b.get("transcript", ""),
@@ -252,6 +260,84 @@ def files(jid, p):
     d = studio.job(jid).dir.resolve(); f = (d / p).resolve()
     if d not in f.parents or not f.exists(): abort(404)
     return send_from_directory(f.parent, f.name)
+
+# ---- /make: describe a video in plain English
+@app.get("/make")
+def make_page(): return send_from_directory(app.static_folder, "make.html")
+
+@app.post("/make/parse")
+def make_parse():
+    from studio import make
+    t = ((request.get_json(silent=True) or {}).get("text") or "").strip()
+    if not t: return jsonify(error="Describe the video first."), 400
+    return jsonify(make.parse(t, config.load()))
+
+@app.get("/make/model")
+def make_model():
+    from studio import make
+    m, why = make.model_status(config.load())
+    return jsonify(model=m, problem=why, pull=make._pull["state"])
+
+@app.get("/make/status")
+def make_status():
+    jid = request.args.get("job", "")
+    j = studio.job(jid)
+    if not jid or not j.dir.exists(): return jsonify(error="no such job"), 404
+    s = j.state; lp = j.dir / "log.txt"
+    out = {k: s.get(k) for k in ("status", "stage", "error", "title", "mode", "short_output", "output", "thumbnail", "edits")}
+    out.update(id=jid, done=s.get("done", []), stages=stages_for(s.get("mode", "long")), current=studio.current,
+               log=lp.read_text(encoding="utf-8").splitlines()[-25:] if lp.exists() else [])
+    return jsonify(out)
+
+@app.get("/make/saved")
+def make_saved():
+    from studio import make
+    return jsonify(make.saved())
+
+@app.post("/make/save")
+def make_save():
+    from studio import make
+    b = request.get_json(silent=True) or {}
+    if not b.get("name") or not isinstance(b.get("spec"), dict): return jsonify(error="name and spec needed"), 400
+    return jsonify(make.save(b["name"], b["spec"], b.get("description", "")))
+
+@app.delete("/make/saved/<name>")
+def make_saved_delete(name):
+    from studio import make
+    return jsonify(make.delete(name))
+
+@app.post("/make/runner")
+def make_runner():
+    from studio import make
+    b = request.get_json(silent=True) or {}
+    rid, err = make.runner_start(b.get("spec"), b.get("click_make", False), b.get("edit"), os.environ.get("PORT"))
+    return (jsonify(error=err), 409) if err else jsonify(id=rid)
+
+@app.get("/make/runner")
+def make_runner_status():
+    from studio import make
+    return jsonify(make.runner_status(request.args.get("id")))
+
+@app.post("/make/runner/cancel")
+def make_runner_cancel():
+    from studio import make
+    return jsonify(cancelled=make.runner_cancel())
+
+@app.get("/make/shots/<rid>/<name>")
+def make_shot(rid, name):
+    from studio import make
+    d = (make.shots_root() / rid).resolve()
+    if make.shots_root().resolve() not in d.parents: abort(404)
+    return send_from_directory(d, name)
+
+@app.post("/make/edit")
+def make_edit():
+    from studio import edit
+    b = request.get_json(silent=True) or {}; j = studio.job(b.get("job", ""))
+    if not j.dir.exists(): return jsonify(error="no such job"), 404
+    if studio.current: return jsonify(error="A job is rendering right now; edit when it has finished."), 409
+    err = edit.start_apply(j.dir, b.get("beat", ""), b.get("cands") or [], b.get("fit", "auto"), config.load(), j.log)
+    return (jsonify(error=err), 409) if err else jsonify(ok=True)
 
 def free_port(p):
     for q in range(p, p + 50):

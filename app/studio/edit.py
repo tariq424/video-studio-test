@@ -398,6 +398,16 @@ def _clear_prev(job):
     for p in list(Path(job).glob("output/*.prev")) + list(Path(job).glob("short/public/*.prev")) + list(Path(job).glob("build/*.prev")):
         p.unlink(missing_ok=True)
 
+def _vstats(p):
+    """Frame count, audio fingerprint/duration and decode errors of a video (for checking a splice)."""
+    import hashlib
+    a = subprocess.run([media._bin("ffmpeg"), "-v", "error", "-i", str(p), "-map", "0:a:0", "-c", "copy", "-f", "data", "-"], capture_output=True).stdout
+    try: ad = float(subprocess.run([media._bin("ffprobe"), "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=duration", "-of", "csv=p=0", str(p)],
+                                   capture_output=True, text=True).stdout.strip().strip(",") or 0)
+    except ValueError: ad = 0.0
+    errs = subprocess.run([media._bin("ffmpeg"), "-v", "error", "-i", str(p), "-f", "null", "-"], capture_output=True, text=True).stderr.strip()
+    return {"frames": _nframes(p), "audio_md5": hashlib.md5(a).hexdigest(), "audio_dur": ad, "decode_errors": len([l for l in errs.splitlines() if l.strip()])}
+
 def _backup(paths):
     for p in paths:
         p = Path(p)
@@ -428,6 +438,8 @@ def apply(job, bid, cids, fit, cfg, log):
     k, ws, sd, rv, d, lay, mode, why = _plan_beat(job, bid, cids, fit, cfg)
     log(f"Edit {bid}: {', '.join(RUNG(rv, c) for c in cids)} -> {FIT_NAME.get(mode, mode)} ({why})")
     _clear_prev(job)
+    outp = Path(Job(job).state["short_output" if k == "short" else "output"])
+    pre = _vstats(outp)
     if k == "short": _apply_short(job, bid, sd, lay, cfg, log)
     else: _apply_long(job, bid, sd, lay, d, cfg, log)
     with review._lock(ws):
@@ -437,8 +449,13 @@ def apply(job, bid, cids, fit, cfg, log):
         b["decision"], b["chosen"] = "chosen", list(cids); b["current"] = list(cids)
         b["msg"] = f"Applied ({FIT_NAME.get(mode, mode)})."
         review.save(ws, rv)
-    j = Job(job); edits = j.state.get("edits", []); edits.append({"beat": bid, "fit": mode, "t": time.time()}); j.save(edits=edits)
-    log(f"Edit {bid}: spliced into the video in {time.time() - t0:.0f}s")
+    post = _vstats(outp)
+    ver = {"frames_same": pre["frames"] == post["frames"], "decode_ok": post["decode_errors"] == 0,
+           "audio_same": (pre["audio_md5"] == post["audio_md5"]) if k == "short" else abs(pre["audio_dur"] - post["audio_dur"]) < 0.05,
+           "frames": post["frames"]}
+    j = Job(job); edits = j.state.get("edits", []); edits.append({"beat": bid, "fit": mode, "t": time.time(), "verify": ver}); j.save(edits=edits)
+    log(f"Edit {bid}: spliced into the video in {time.time() - t0:.0f}s; check: frames {'same' if ver['frames_same'] else 'CHANGED'}, "
+        f"audio {'unchanged' if ver['audio_same'] else 'CHANGED'}, decoding {'clean' if ver['decode_ok'] else 'ERRORS'}")
 
 def RUNG(rv, cid):
     from .review import RUNG as R

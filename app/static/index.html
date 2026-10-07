@@ -33,8 +33,10 @@ main>section{min-width:0}
 .rv-badge{font-size:12px;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}.rv-prev{margin:6px 0}.rv-prev video,.rv-prev img{max-height:420px;width:auto;border-radius:8px}
 .rv-note{font-size:12.5px;color:var(--mut);border-left:2px solid var(--line);padding-left:8px;margin:4px 0}
 .ed-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}.ed-fit button{padding:5px 10px;font-size:12.5px}.ed-fit button.on{background:var(--acc);color:#111;border-color:var(--acc)}
+html.embed header,html.embed #settings,html.embed main>section:last-child,html.embed main>section>.card:not(#newvideo){display:none!important}
+html.embed main{grid-template-columns:1fr;padding:0;max-width:none}html.embed body{background:var(--panel)}html.embed #newvideo{border:0;margin:0}
 </style></head><body>
-<header><h1>Video Studio</h1><span class="mut">YouTube, NotebookLM audio or notes → explainer + Short</span><span style="flex:1"></span>
+<header><h1>Video Studio</h1><a href="/make" style="color:var(--acc);font-weight:600">Describe a video →</a><span class="mut">YouTube, NotebookLM audio or notes → explainer + Short</span><span style="flex:1"></span>
 <span id="pw" class="pill">WanGP …</span><span id="pk" class="pill">API key …</span><button class="sec" onclick="toggleSettings()">Settings</button></header>
 <main>
 <section>
@@ -59,23 +61,24 @@ main>section{min-width:0}
   <label>Channel name (shown on the Short's 9:16 thumbnail; blank = none)</label><input id="chn" type="text">
   <div class="row" style="margin-top:12px"><button onclick="saveSettings()">Save</button><button class="sec" onclick="testKey()">Test saved keys</button><button class="sec" onclick="smoke()">Run smoke test (1 beat)</button><span id="ssaved" class="mut"></span></div>
  </div>
- <div class="card"><h2>New video</h2>
-  <label>Source</label><select id="srck" onchange="srcUI()"><option value="yt">YouTube link</option><option value="file">Upload a file (NotebookLM audio, .mp3/.m4a/.wav, or .pdf/.docx/.txt/.md)</option><option value="text">Paste text (notes, briefing doc)</option></select>
-  <div id="s_yt"><label>YouTube link</label><input id="url" type="text" placeholder="https://www.youtube.com/watch?v=...">
-   <details><summary>Paste a transcript too (if the video has no captions)</summary><textarea id="tx"></textarea></details></div>
-  <div id="s_file" style="display:none"><label>File</label><input id="upf" type="file" accept=".mp3,.m4a,.wav,.aac,.ogg,.flac,.opus,.webm,.mp4,.txt,.md,.pdf,.docx"></div>
-  <div id="s_text" style="display:none"><label>Text</label><textarea id="ptx" rows="8" placeholder="Paste NotebookLM notes, a briefing doc, an article..."></textarea></div>
-  <div id="s_meta" style="display:none"><label>Title of the source (shown in credits)</label><input id="stt" type="text" placeholder="e.g. The economics of AI agents">
-   <label>Credit (who made it)</label><input id="scr" type="text" placeholder="e.g. NotebookLM, or the author's name"></div>
-  <label>Make</label><select id="mode" onchange="srcUI()"><option value="both">Long explainer + Short</option><option value="short">Short only</option><option value="long">Long explainer only</option></select>
-  <div id="m_short"><label>Short length: <b id="sv">2:45</b> (YouTube Shorts max is 3:00)</label><input id="ssec" type="range" min="120" max="176" step="5" value="165" oninput="sv.textContent=fmt(+this.value)" style="width:100%"></div>
-  <div id="m_long"><label>Long video length: <b id="mv">15</b> minutes</label><input id="min" type="range" min="3" max="20" value="15" oninput="mv.textContent=this.value" style="width:100%">
-   <label><input id="caps" type="checkbox" checked> Animated captions with icons</label>
-   <label><input id="pres" type="checkbox"> On-screen presenter (small corner window, experimental)</label></div>
-  <label>Script AI for this video</label><select id="jp"><option value="">Use Settings default</option><option value="zai">z.ai GLM</option><option value="deepseek">DeepSeek</option><option value="claude">Claude</option><option value="local">Local AI (Ollama)</option></select>
-  <div id="m_vr"><label>Visuals (Shorts)</label><select id="vrev"><option value="auto">Auto: pick automatically, pause only when unsure</option><option value="every">Review every beat: make every treatment, pause to choose</option></select></div>
-  <label><input id="auto" type="checkbox" checked> Skip script review (render straight away; untick to read and edit the script first)</label>
-  <div class="row" style="margin-top:12px"><button onclick="createJob()">Make video</button><span id="cmsg" class="mut"></span></div>
+ <div class="card" id="newvideo" data-testid="new-video-form"><h2>New video</h2>
+  <label>Source</label><select id="srck" data-testid="input-type" onchange="srcUI()"><option value="yt">YouTube link</option><option value="file">Upload a file (NotebookLM audio, .mp3/.m4a/.wav, or .pdf/.docx/.txt/.md)</option><option value="text">Paste text (notes, briefing doc)</option></select>
+  <div id="s_yt"><label>YouTube link</label><input id="url" data-testid="youtube-url" type="text" placeholder="https://www.youtube.com/watch?v=...">
+   <details><summary>Paste a transcript too (if the video has no captions)</summary><textarea id="tx" data-testid="transcript-text"></textarea></details></div>
+  <div id="s_file" style="display:none"><label>File</label><input id="upf" data-testid="file-upload" type="file" accept=".mp3,.m4a,.wav,.aac,.ogg,.flac,.opus,.webm,.mp4,.txt,.md,.pdf,.docx">
+   <label>…or a file path on this PC</label><input id="upp" data-testid="file-path" type="text" placeholder="F:\notebooklm\briefing.m4a"></div>
+  <div id="s_text" style="display:none"><label>Text</label><textarea id="ptx" data-testid="source-text" rows="8" placeholder="Paste NotebookLM notes, a briefing doc, an article..."></textarea></div>
+  <div id="s_meta" style="display:none"><label>Title of the source (shown in credits)</label><input id="stt" data-testid="source-title" type="text" placeholder="e.g. The economics of AI agents">
+   <label>Credit (who made it)</label><input id="scr" data-testid="source-credit" type="text" placeholder="e.g. NotebookLM, or the author's name"></div>
+  <label>Make</label><select id="mode" data-testid="output-mode" onchange="srcUI()"><option value="both">Long explainer + Short</option><option value="short">Short only</option><option value="long">Long explainer only</option></select>
+  <div id="m_short"><label>Short length: <b id="sv">2:45</b> (YouTube Shorts max is 3:00)</label><input id="ssec" data-testid="short-length" type="range" min="120" max="176" step="5" value="165" oninput="sv.textContent=fmt(+this.value)" style="width:100%"></div>
+  <div id="m_long"><label>Long video length: <b id="mv">15</b> minutes</label><input id="min" data-testid="long-length" type="range" min="3" max="20" value="15" oninput="mv.textContent=this.value" style="width:100%">
+   <label><input id="caps" data-testid="toggle-captions" type="checkbox" checked> Animated captions with icons</label>
+   <label><input id="pres" data-testid="toggle-presenter" type="checkbox"> On-screen presenter (small corner window, experimental)</label></div>
+  <label>Script AI for this video</label><select id="jp" data-testid="script-ai"><option value="">Use Settings default</option><option value="zai">z.ai GLM</option><option value="deepseek">DeepSeek</option><option value="claude">Claude</option><option value="local">Local AI (Ollama)</option></select>
+  <div id="m_vr"><label>Visuals (Shorts)</label><select id="vrev" data-testid="visuals-mode"><option value="auto">Auto: pick automatically, pause only when unsure</option><option value="every">Review every beat: make every treatment, pause to choose</option></select></div>
+  <label><input id="auto" data-testid="toggle-skip-script-review" type="checkbox" checked> Skip script review (render straight away; untick to read and edit the script first)</label>
+  <div class="row" style="margin-top:12px"><button data-testid="make-video" onclick="createJob()">Make video</button><span id="cmsg" data-testid="make-message" class="mut"></span></div>
  </div>
  <div class="card"><h2>Jobs</h2><div id="jobs" class="mut">No jobs yet.</div></div>
 </section>
@@ -83,6 +86,9 @@ main>section{min-width:0}
 </main>
 <script>
 let sel=null, stages=[], planCache=null, editing=false;
+const EMBED=new URLSearchParams(location.search).has('embed');
+{const qj=new URLSearchParams(location.search).get('job');if(qj)sel=qj;}
+if(EMBED)document.documentElement.classList.add('embed');
 const $=id=>document.getElementById(id);
 async function j(u,o){const r=await fetch(u,o);if(!r.ok)throw new Error(await r.text());return r.json()}
 function toggleSettings(){const s=$('settings');s.style.display=s.style.display=='none'?'block':'none';loadSettings()}
@@ -96,8 +102,8 @@ async function createJob(){$('cmsg').textContent='Starting...';const k=$('srck')
  const f={mode:$('mode').value,short_secs:$('ssec').value,minutes:$('min').value,presenter:$('pres').checked,captions:$('caps').checked,auto_approve:$('auto').checked,provider:$('jp').value,visual_review:$('vrev').value,src_title:$('stt').value,src_credit:$('scr').value,
   url:k=='yt'?$('url').value.trim():'',transcript:k=='yt'?$('tx').value:k=='text'?$('ptx').value:''};
  for(const x in f)fd.append(x,f[x]);
- if(k=='file'){if(!$('upf').files.length){$('cmsg').textContent='Choose a file first.';return}fd.append('file',$('upf').files[0])}
- try{const r=await fetch('/api/jobs',{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'failed');sel=d.id;$('url').value='';$('ptx').value='';$('upf').value='';$('cmsg').textContent='';loadJobs()}catch(e){$('cmsg').textContent=e.message}}
+ if(k=='file'){if($('upf').files.length)fd.append('file',$('upf').files[0]);else if($('upp').value.trim())fd.append('src_path',$('upp').value.trim());else{$('cmsg').textContent='Choose a file (or type its path) first.';return}}
+ try{const r=await fetch('/api/jobs',{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'failed');sel=d.id;if(EMBED)parent.postMessage({vsJob:d.id},'*');$('url').value='';$('upp').value='';$('ptx').value='';$('upf').value='';$('cmsg').textContent='';loadJobs()}catch(e){$('cmsg').textContent=e.message}}
 async function loadJobs(){const js=await j('/api/jobs');$('jobs').innerHTML=js.length?js.map(x=>`<div class="job ${x.id==sel?'sel':''}" onclick="sel='${x.id}';editing=false;planCache=null;loadJobs()"><b>${esc(x.title||x.url||x.id)}</b><div class="mut" style="font-size:12px">${x.id} · ${x.status} · ${x.stage}</div></div>`).join(''):'No jobs yet.';if(sel)loadDetail()}
 function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 let lastKey='';
@@ -106,7 +112,7 @@ async function loadDetail(){if(editing)return;const s=await j('/api/jobs/'+sel);
  if((s.status=='awaiting_review'||s.status=='awaiting_visuals'||s.status=='finished'||(s.status=='error'&&s.stage=='transcript'))&&key==lastKey)return;   // don't redraw while you read/paste
  lastKey=key;
  const mtxt={both:`long ${s.minutes} min + Short ${fmt(Math.round(s.short_secs||165))}`,short:`Short ${fmt(Math.round(s.short_secs||165))}`,long:`long ${s.minutes} min`}[s.mode||'long'];
- let h=`<h2>${esc(s.title||s.url)}</h2><div class="mut">${mtxt} · <b>${statusText(s)}</b>${s.error?` · <span style="color:var(--bad)">${esc(s.error)}</span>`:''}</div>`;
+ let h=`<h2>${esc(s.title||s.url)}</h2><div class="mut">${mtxt} · <b data-testid="job-status" data-status="${esc(s.status)}" data-stage="${esc(s.stage)}">${statusText(s)}</b>${s.error?` · <span style="color:var(--bad)">${esc(s.error)}</span>`:''}</div>`;
  h+=`<div class="stages">${(s.stages||stages).map(t=>`<span class="st ${done.includes(t)?'done':(s.stage==t?'cur':'')}">${t}</span>`).join('')}</div>`;
  h+=`<div class="row">`;
  if(s.status=='awaiting_review'){h+=`<button onclick="act('approve')">Approve & render</button>`;if(s.plan_summary)h+=`<button class="sec" onclick="editPlan()">Edit long script</button>`;if(s.short_summary)h+=`<button class="sec" onclick="editShort()">Edit Short script</button>`}
@@ -162,7 +168,7 @@ function drawReview(){const bs=Object.entries(RV.beats);const left=bs.filter(([k
  const order=bs.sort((a,b)=>(b[1].uncertain&&!b[1].decision)-(a[1].uncertain&&!a[1].decision)||(+a[0].slice(1))-(+b[0].slice(1)));
  let h=`<div class="card" style="margin-top:14px"><h2>Visual review · ${RV.mode=='every'?'every beat':'auto (uncertain beats first)'}</h2>
  <div class="mut" style="font-size:13px">Available treatments for each beat. The blue outline is the pipeline's pick; click a thumbnail to preview it, tick <b>Use</b> on one or more (they play in the order you tick them).</div>
- <div class="row" style="margin-top:10px"><button onclick="rvAll('approve_all')">Approve all remaining (${left})</button><button class="sec" ${left?'disabled':''} onclick="rvAll('continue')">Continue to render</button><span id="rvmsg" class="mut"></span></div>`;
+ <div class="row" style="margin-top:10px"><button data-testid="review-approve-all" onclick="rvAll('approve_all')">Approve all remaining (${left})</button><button class="sec" data-testid="review-continue" ${left?'disabled':''} onclick="rvAll('continue')">Continue to render</button><span id="rvmsg" class="mut"></span></div>`;
  for(const [bid,b] of order)h+=beatHTML(bid,b);
  h+=`</div>`;$('rvp').innerHTML=h}
 function beatHTML(bid,b){const n=+bid.slice(1)+1;const dec=b.decision?{auto:'✓ auto pick',chosen:'✓ your choice',skip:'✓ skipped (headline card)'}[b.decision]:'needs a decision';
@@ -171,15 +177,15 @@ function beatHTML(bid,b){const n=+bid.slice(1)+1;const dec=b.decision?{auto:'✓
  let h=`<div class="rv-beat ${b.uncertain&&!b.decision?'unsure':''} ${b.decision?'done':''}" id="rv_${bid}"><div class="row"><b>Beat ${n}</b><span class="rv-badge">${dec}</span>${b.uncertain?`<span class="rv-badge" style="color:#d29922">⚠ ${esc(b.why)}</span>`:''}${b.busy?`<span class="rv-badge" style="color:var(--acc)">${esc(b.busy)}</span>`:''}</div>
  <p style="margin:6px 0">${esc(b.vo)}</p><div class="mut" style="font-size:13px">Pipeline pick: <b>${esc(autoTxt)}</b>${b.why&&!b.uncertain?' — '+esc(b.why):''}</div><div class="rv-row">`;
  for(const cid of b.cands){const c=RV.cands[cid];const i=s.indexOf(cid);const tag=c.item.tag?` · ${esc(c.item.tag)}`:'';
-  h+=`<div class="rv-c ${i>=0?'sel':''} ${b.auto.includes(cid)?'auto':''}"><div class="${c.worst?'wrn':''}"><img loading="lazy" src="${c.thumb?`/files/${sel}/short/${c.thumb}`:''}" onclick="rvPrev('${bid}','${cid}')" title="Click to preview"></div>
+  h+=`<div class="rv-c ${i>=0?'sel':''} ${b.auto.includes(cid)?'auto':''}" data-testid="review-treatment" data-beat="${bid}" data-cand="${cid}" data-rung="${c.rung}" data-index="${b.cands.indexOf(cid)}"><div class="${c.worst?'wrn':''}"><img data-testid="review-treatment-thumb" loading="lazy" src="${c.thumb?`/files/${sel}/short/${c.thumb}`:''}" onclick="rvPrev('${bid}','${cid}')" title="Click to preview"></div>
   <b>${esc(RUNG[c.rung]||c.rung)}</b>${tag}<br><span class="${c.ok?'ok':'bad'}">${c.ok?'✓':'✗'} ${esc(c.why)}</span><br>
-  <label style="margin:2px 0;color:var(--fg)"><input type="checkbox" ${i>=0?'checked':''} onchange="rvTick('${bid}','${cid}',this.checked)"> Use${i>=0&&s.length>1?' #'+(i+1):''}</label></div>`}
+  <label style="margin:2px 0;color:var(--fg)"><input type="checkbox" data-testid="review-choose" data-cand="${cid}" ${i>=0?'checked':''} onchange="rvTick('${bid}','${cid}',this.checked)"> Use${i>=0&&s.length>1?' #'+(i+1):''}</label></div>`}
  h+=`</div><div class="rv-prev" id="pv_${bid}"></div>
- <div class="row"><button onclick="rvDo('${bid}','choose')" ${s.length?'':'disabled'}>Use selected (${s.length})</button><button class="sec" onclick="rvDo('${bid}','auto')">Approve auto</button><button class="sec" onclick="rvDo('${bid}','skip')">Skip (headline card)</button><button class="sec" onclick="rvDo('${bid}','expand')" ${b.busy?'disabled':''}>Show all options for this beat</button><button class="sec" onclick="rvDo('${bid}','animate')" ${b.busy?'disabled':''} title="Animates the AI still with WanGP; takes several minutes">Add animation</button>${b.decision?`<button class="sec" onclick="rvDo('${bid}','undo')">Undo decision</button>`:''}</div>
+ <div class="row"><button data-testid="review-use-selected" data-beat="${bid}" onclick="rvDo('${bid}','choose')" ${s.length?'':'disabled'}>Use selected (${s.length})</button><button class="sec" data-testid="review-approve-auto" data-beat="${bid}" onclick="rvDo('${bid}','auto')">Approve auto</button><button class="sec" data-testid="review-skip" data-beat="${bid}" onclick="rvDo('${bid}','skip')">Skip (headline card)</button><button class="sec" onclick="rvDo('${bid}','expand')" ${b.busy?'disabled':''}>Show all options for this beat</button><button class="sec" onclick="rvDo('${bid}','animate')" ${b.busy?'disabled':''} title="Animates the AI still with WanGP; takes several minutes">Add animation</button>${b.decision?`<button class="sec" onclick="rvDo('${bid}','undo')">Undo decision</button>`:''}</div>
  <details ${rvOpen[bid]?'open':''} ontoggle="rvOpen['${bid}']=this.open" style="margin-top:6px"><summary>Refine / supply your own / history</summary>
  <label>Tell it what to change (e.g. "nose down, storm clouds", "the plane is climbing but the narration says it dropped", or a file path / URL)</label>
- <textarea id="rf_${bid}" rows="2"></textarea><div class="row"><button onclick="rvRefine('${bid}')" ${b.busy?'disabled':''}>Regenerate</button></div>
- <label>Your own file (path on this PC or a URL) and its on-screen label</label><div class="row"><input type="text" id="sp_${bid}" style="flex:1" placeholder="F:\\clips\\plane.mp4 or https://..."><select id="st_${bid}" style="width:auto"><option value="">no label</option><option>FILE</option><option>ILLUSTRATIVE</option><option>GENERATED</option></select><button class="sec" onclick="rvSupply('${bid}')">Add</button></div>
+ <textarea id="rf_${bid}" data-testid="review-refine-text" data-beat="${bid}" rows="2"></textarea><div class="row"><button onclick="rvRefine('${bid}')" ${b.busy?'disabled':''}>Regenerate</button></div>
+ <label>Your own file (path on this PC or a URL) and its on-screen label</label><div class="row"><input type="text" id="sp_${bid}" data-testid="review-supply-path" data-beat="${bid}" style="flex:1" placeholder="F:\\clips\\plane.mp4 or https://..."><select id="st_${bid}" style="width:auto"><option value="">no label</option><option>FILE</option><option>ILLUSTRATIVE</option><option>GENERATED</option></select><button class="sec" data-testid="review-supply" data-beat="${bid}" onclick="rvSupply('${bid}')">Add</button></div>
  ${(b.notes||[]).map(x=>`<div class="rv-note">${esc(x.t)} you: “${esc(x.you)}” → <b>${esc(x.intent)}</b>: ${esc(x.understood)} <span style="opacity:.7">[handled by ${esc(x.backend)}]</span></div>`).join('')}
  ${b.history.length?`<label>Earlier option sets</label>${b.history.map((x,i)=>`<div class="row"><span class="mut" style="font-size:13px">${esc(x.label)} (${x.cands.length} options)</span><button class="sec" onclick="rvDo('${bid}','revert',${i})">Revert to this set</button></div>`).join('')}`:''}
  </details>${b.msg?`<div class="mut" style="font-size:12.5px;margin-top:6px">${esc(b.msg)}</div>`:''}</div>`;return h}
@@ -215,10 +221,10 @@ function edTick(){const v=$('ov');if(!v||!ED.beats.length)return;const b=edAt(v.
 function edBar(d){const el=$('edbar');if(!el)return;const v=$('ov');const b=v?edAt(v.currentTime):null;d=d||ED.last||{};ED.last=d;
  let h=`<div class="ed-bar">`;
  if(d.busy)h+=`<span class="rv-badge" style="color:var(--acc)">${esc(d.busy)}</span>`;
- else if(b&&b.editable)h+=`<button onclick="edOpen('${b.id}')">Edit at ${fmtT(v.currentTime)} (${esc(b.label)}${ED.kind=='long'?' · '+b.id:''})</button>`;
+ else if(b&&b.editable)h+=`<button data-testid="edit-at" data-beat="${b.id}" onclick="edOpen('${b.id}')">Edit at ${fmtT(v.currentTime)} (${esc(b.label)}${ED.kind=='long'?' · '+b.id:''})</button>`;
  else if(b)h+=`<span class="mut" style="font-size:13px">${esc(b.label)}: not editable (title/end card)</span>`;
  else h+=`<span class="mut" style="font-size:13px">Play or scrub to a beat to edit it</span>`;
- if(d.undo&&!d.busy)h+=`<button class="sec" onclick="edAll('undo')">Undo last edit</button>`;
+ if(d.undo&&!d.busy)h+=`<button class="sec" data-testid="edit-undo" onclick="edAll('undo')">Undo last edit</button>`;
  h+=`<button class="sec" onclick="if(confirm('Re-render the whole video? Your edits are kept.'))edAll('rerender')">Full re-render</button><button class="sec" onclick="edAll('cleanup')" title="Deletes previews and unused treatment files; thumbnails stay">Done editing (clean up)</button>`;
  if(d.error)h+=`<span style="color:var(--bad);font-size:13px">Last edit failed: ${esc(d.error)}</span>`;
  if(d.edits&&d.edits.length)h+=`<span class="mut" style="font-size:12px">${d.edits.length} edit(s) applied</span>`;
@@ -234,16 +240,16 @@ function edDraw(){const bid=ED.open,b=ED.rv.beats[bid],bt=ED.beats.find(x=>x.id=
  <p style="margin:6px 0">${esc(b.vo)}</p>${b.busy?`<span class="rv-badge" style="color:var(--acc)">${esc(b.busy)}</span>`:''}
  <div class="mut" style="font-size:13px">Tick the treatment(s) to use (they play in the order ticked); click a thumbnail to preview it. Blue outline = in the video now.</div><div class="rv-row">`;
  for(const cid of b.cands){const c=ED.rv.cands[cid];if(c.missing)continue;const i=ED.sel.indexOf(cid);const tag=c.item.tag?` · ${esc(c.item.tag)}`:'';
-  h+=`<div class="rv-c ${i>=0?'sel':''} ${(b.current||[]).includes(cid)?'auto':''}"><div class="${c.worst?'wrn':''}"><img loading="lazy" src="${c.thumb?edBase()+c.thumb:''}" onclick="edCand('${cid}')" style="${ED.space=='long'?'width:213px;height:120px':''}"></div>
+  h+=`<div class="rv-c ${i>=0?'sel':''} ${(b.current||[]).includes(cid)?'auto':''}" data-testid="edit-treatment" data-cand="${cid}" data-rung="${c.rung}" data-index="${b.cands.indexOf(cid)}"><div class="${c.worst?'wrn':''}"><img data-testid="edit-treatment-thumb" loading="lazy" src="${c.thumb?edBase()+c.thumb:''}" onclick="edCand('${cid}')" style="${ED.space=='long'?'width:213px;height:120px':''}"></div>
   <b>${esc(RUNG[c.rung]||(c.rung=='current'?((b.current||[]).includes(cid)?'In the video now':'Before your edit'):c.rung))}</b>${tag}<br><span class="${c.ok?'ok':'bad'}">${c.ok?'✓':'✗'} ${esc(c.rung=='current'&&!(b.current||[]).includes(cid)?'was in the video':c.why)}</span><br>
-  <label style="margin:2px 0;color:var(--fg)"><input type="checkbox" ${i>=0?'checked':''} onchange="edTickC('${cid}',this.checked)"> Use${i>=0&&ED.sel.length>1?' #'+(i+1):''}</label></div>`}
+  <label style="margin:2px 0;color:var(--fg)"><input type="checkbox" data-testid="edit-choose" data-cand="${cid}" ${i>=0?'checked':''} onchange="edTickC('${cid}',this.checked)"> Use${i>=0&&ED.sel.length>1?' #'+(i+1):''}</label></div>`}
  h+=`</div><div id="edpv" class="rv-prev"></div>
- <div class="row ed-fit"><span class="mut" style="font-size:13px">Fit to the ${(bt.dur||0).toFixed(1)}s slot:</span>${FITS.map(([k,n])=>`<button class="sec ${ED.fit==k?'on':''}" onclick="ED.fit='${k}';edDraw()">${n}</button>`).join('')}</div>
- <div class="row" style="margin-top:8px"><button onclick="edPreview()" ${ED.sel.length?'':'disabled'}>Preview in the video</button><button onclick="edApply()" ${ED.sel.length?'':'disabled'}>Apply to video</button>
- <button class="sec" onclick="edSkip()">Skip (headline card)</button><button class="sec" onclick="edRv('expand')" ${b.busy?'disabled':''}>Show all options for this beat</button><button class="sec" onclick="edRv('animate')" ${b.busy?'disabled':''}>Add animation</button><span id="edmsg" class="mut"></span></div>
+ <div class="row ed-fit"><span class="mut" style="font-size:13px">Fit to the ${(bt.dur||0).toFixed(1)}s slot:</span>${FITS.map(([k,n])=>`<button class="sec ${ED.fit==k?'on':''}" data-testid="edit-fit-${k}" onclick="ED.fit='${k}';edDraw()">${n}</button>`).join('')}</div>
+ <div class="row" style="margin-top:8px"><button data-testid="edit-preview" onclick="edPreview()" ${ED.sel.length?'':'disabled'}>Preview in the video</button><button data-testid="edit-apply" onclick="edApply()" ${ED.sel.length?'':'disabled'}>Apply to video</button>
+ <button class="sec" data-testid="edit-skip" onclick="edSkip()">Skip (headline card)</button><button class="sec" data-testid="edit-show-all" onclick="edRv('expand')" ${b.busy?'disabled':''}>Show all options for this beat</button><button class="sec" data-testid="edit-add-animation" onclick="edRv('animate')" ${b.busy?'disabled':''}>Add animation</button><span id="edmsg" data-testid="edit-message" class="mut"></span></div>
  <details style="margin-top:8px"><summary>Refine / supply your own</summary>
- <label>Tell it what to change (e.g. "nose down, storm clouds", or a file path / URL)</label><textarea id="edrf" rows="2"></textarea><div class="row"><button onclick="edRv('refine')" ${b.busy?'disabled':''}>Regenerate</button></div>
- <label>Your own file (path on this PC or a URL) and its on-screen label</label><div class="row"><input type="text" id="edsp" style="flex:1"><select id="edst" style="width:auto"><option value="">no label</option><option>FILE</option><option>ILLUSTRATIVE</option><option>GENERATED</option></select><button class="sec" onclick="edSupply()">Add</button></div>
+ <label>Tell it what to change (e.g. "nose down, storm clouds", or a file path / URL)</label><textarea id="edrf" data-testid="edit-refine-text" rows="2"></textarea><div class="row"><button data-testid="edit-refine" onclick="edRv('refine')" ${b.busy?'disabled':''}>Regenerate</button></div>
+ <label>Your own file (path on this PC or a URL) and its on-screen label</label><div class="row"><input type="text" id="edsp" data-testid="edit-supply-path" style="flex:1"><select id="edst" data-testid="edit-supply-label" style="width:auto"><option value="">no label</option><option>FILE</option><option>ILLUSTRATIVE</option><option>GENERATED</option></select><button class="sec" data-testid="edit-supply" onclick="edSupply()">Add</button></div>
  ${(b.notes||[]).map(x=>`<div class="rv-note">${esc(x.t)} you: “${esc(x.you)}” → <b>${esc(x.intent)}</b>: ${esc(x.understood)} <span style="opacity:.7">[handled by ${esc(x.backend)}]</span></div>`).join('')}</details>
  ${b.msg?`<div class="mut" style="font-size:12.5px;margin-top:6px">${esc(b.msg)}</div>`:''}</div>`;
  $('edp').innerHTML=h;clearTimeout(ED.timer);if(b.busy)ED.timer=setTimeout(edRefresh,4000)}

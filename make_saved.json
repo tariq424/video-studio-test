@@ -1,0 +1,27 @@
+[
+ {
+  "name": "Test spec",
+  "spec": {
+   "input": {
+    "type": "local_file",
+    "source": "F:\\notebooklm\\AI agents briefing.m4a",
+    "title": "",
+    "credit": ""
+   },
+   "output": {
+    "mode": "both",
+    "short_length": 165,
+    "long_minutes": 12
+   },
+   "pipeline": {
+    "script_review": true,
+    "visuals": "review",
+    "captions": false,
+    "presenter": false,
+    "script_ai": ""
+   }
+  },
+  "description": "Make a 12 minute explainer and a short from F:\\notebooklm\\AI agents briefing.m4a, NotebookLM, let me read the script first, no captions, review mode",
+  "saved": "2026-10-07 15:52"
+ }
+]
