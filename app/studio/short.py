@@ -311,7 +311,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False):
             r = st.get(sl["key"], {}); chain = [rung1]; why = [f"{rung1}: {why1}"] if why1 else []
             chain.append("still")
             if r.get("still_ok"):
-                if "clip" in r: chain.append("animate")   # animation is on demand unless short_i2v_auto is on
+                if "clip" in r: chain.append("animate")   # animation only exists after an explicit click
                 if r.get("clip_ok"):
                     items.append({"type": "video", "src": r["clip"], "secs": round((r.get("clip_secs") or FB_SECS) / 0.85, 2), "tag": "GENERATED", "rung": "animate"})
                     lines.append(" -> ".join(chain) + (f"  ({'; '.join(why)})" if why else "")); continue

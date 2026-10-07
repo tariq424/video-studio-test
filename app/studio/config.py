@@ -41,7 +41,6 @@ DEFAULTS = {
     "video_model": "ltx2_distilled",
     "channel_name": "",              # shown on the Short's 9:16 thumbnail when set
     "short_i2v": True,                # Short visual ladder step 3: animate the AI still with WanGP image-to-video
-    "short_i2v_auto": False,          # False: animation only on demand (Add animation / Show all options); True: part of the ladder
     "short_i2v_model": "ltx2_distilled",
     "short_i2v_steps": 8,
     "short_i2v_frames": 169,          # ~7 s at 24 fps

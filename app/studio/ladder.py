@@ -50,7 +50,7 @@ def check(cfg, img, narration, subject=None, video=False, info=None):
 
 def _rel(p, sd): return str(Path(p).relative_to(sd)).replace("\\", "/")
 
-def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False, animate=None):
+def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False, animate=False):
     """slots: [{"key", "beat", "vo", "still_prompt", "motion", "subject"}] -> {key: {"still": path|None, "still_ok", "still_why",
     "clip": path|None, "clip_ok", "clip_why", "clip_secs", "clip_worst"}}. State is kept in fallback/ladder.json so Resume doesn't redo work.
     full=True (Review every beat / Show all options): animate every still, also the ones that failed their check, so the
@@ -88,8 +88,8 @@ def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False, animate=N
             r["still_ok"], r["still_why"] = ok, why; save()
         footage.unload_vet_model(cfg)
     # step 3: image-to-video of the stills that passed
-    # animation (step 3) is on demand by default: it is slow on this PC and most beats don't need motion
-    if animate is None: animate = bool(cfg.get("short_i2v_auto", False))
+    # animation (step 3) only on an explicit click (Show all options / Add animation -> animate=True); never in the
+    # pipeline, Review every beat, Approve auto or Approve all remaining
     if animate and cfg.get("short_i2v", True):
         for i, s in enumerate(slots):
             if stop(): raise RuntimeError("cancelled")
