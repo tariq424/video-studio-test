@@ -235,7 +235,7 @@ function edDraw(){const bid=ED.open,b=ED.rv.beats[bid],bt=ED.beats.find(x=>x.id=
  <div class="mut" style="font-size:13px">Tick the treatment(s) to use (they play in the order ticked); click a thumbnail to preview it. Blue outline = in the video now.</div><div class="rv-row">`;
  for(const cid of b.cands){const c=ED.rv.cands[cid];if(c.missing)continue;const i=ED.sel.indexOf(cid);const tag=c.item.tag?` · ${esc(c.item.tag)}`:'';
   h+=`<div class="rv-c ${i>=0?'sel':''} ${(b.current||[]).includes(cid)?'auto':''}"><div class="${c.worst?'wrn':''}"><img loading="lazy" src="${c.thumb?edBase()+c.thumb:''}" onclick="edCand('${cid}')" style="${ED.space=='long'?'width:213px;height:120px':''}"></div>
-  <b>${esc(RUNG[c.rung]||(c.rung=='current'?'In the video now':c.rung))}</b>${tag}<br><span class="${c.ok?'ok':'bad'}">${c.ok?'✓':'✗'} ${esc(c.why)}</span><br>
+  <b>${esc(RUNG[c.rung]||(c.rung=='current'?((b.current||[]).includes(cid)?'In the video now':'Before your edit'):c.rung))}</b>${tag}<br><span class="${c.ok?'ok':'bad'}">${c.ok?'✓':'✗'} ${esc(c.rung=='current'&&!(b.current||[]).includes(cid)?'was in the video':c.why)}</span><br>
   <label style="margin:2px 0;color:var(--fg)"><input type="checkbox" ${i>=0?'checked':''} onchange="edTickC('${cid}',this.checked)"> Use${i>=0&&ED.sel.length>1?' #'+(i+1):''}</label></div>`}
  h+=`</div><div id="edpv" class="rv-prev"></div>
  <div class="row ed-fit"><span class="mut" style="font-size:13px">Fit to the ${(bt.dur||0).toFixed(1)}s slot:</span>${FITS.map(([k,n])=>`<button class="sec ${ED.fit==k?'on':''}" onclick="ED.fit='${k}';edDraw()">${n}</button>`).join('')}</div>
