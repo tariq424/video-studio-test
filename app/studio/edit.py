@@ -113,7 +113,7 @@ def filler_for(rv, bid):
     """The beat's best AI still / parallax / photo, else its headline card (for the 'still' fit)."""
     if not rv or bid not in rv.get("beats", {}): return None
     b = rv["beats"][bid]
-    for rung in ("parallax", "still", "photo", "supplied"):
+    for rung in ("parallax", "still", "photo", "current", "supplied"):
         for cid in b["cands"]:
             c = rv["cands"][cid]
             if c["rung"] == rung and c.get("ok") and c["item"]["type"] in ("layers", "image") and not c.get("missing"): return c["item"]
