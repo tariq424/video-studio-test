@@ -401,7 +401,11 @@ def fill(cfg, slots, orient, need, out_dir, log, stop, want_long_side, max_secs,
                 except Exception as e: log(f"  preview of {cid} failed ({str(e)[:60]})"); continue
                 ok, why, seen = verify(cfg, c, sh, log, subject=sj, ref=refs.get(sj["name"]) if sj else None, avoid=s.get("avoid"),
                                       narration=s.get("narration") or s["text"])
-                if not ok: log(f"  {s['id']}: skipped {c['src']} clip {cid} ({why})"); continue
+                if not ok:
+                    log(f"  {s['id']}: skipped {c['src']} clip {cid} ({why})")
+                    st.setdefault("rejected", {}).setdefault(s["id"], []).append({"id": cid, "src": c["src"], "why": why, "sheet": str(sh), "desc": c.get("desc", "")[:80],
+                        "clip": {k: c.get(k) for k in ("id", "src", "orient", "query", "dur", "w", "h", "file", "page", "author", "desc")}})
+                    continue
                 c["seen"] = seen; got.append({k: c.get(k) for k in ("id", "src", "orient", "query", "dur", "w", "h", "file", "page", "author", "desc", "seen")}); used.add(cid)
             st["picked"][s["id"]] = got; save()
             lock = f" [subject: {sj['name']}]" if sj else ""

@@ -4,10 +4,10 @@ from pathlib import Path
 from . import config, transcript, writer, render, assemble, media, sources, short
 from .wangp import WanGP
 
-STAGES = ["transcript", "script", "short_script", "review", "short_stock", "short_voice", "short_fallback", "short_render",
+STAGES = ["transcript", "script", "short_script", "review", "short_stock", "short_voice", "short_fallback", "short_review", "short_render",
           "charts", "voice", "captions", "broll", "presenter", "motion", "stills", "assemble"]
 LONG = {"script", "charts", "voice", "captions", "broll", "presenter", "motion", "stills", "assemble"}
-SHORT = {"short_script", "short_stock", "short_voice", "short_fallback", "short_render"}
+SHORT = {"short_script", "short_stock", "short_voice", "short_fallback", "short_review", "short_render"}
 def stages_for(mode): return [s for s in STAGES if not ((mode == "short" and s in LONG) or (mode == "long" and s in SHORT))]
 
 class Job:
@@ -51,7 +51,7 @@ class Studio:
         return out
 
     def create(self, url, minutes, presenter=False, auto_approve=False, transcript_text="", provider="", captions=True,
-               mode="both", short_secs=165, upload=None, upload_name="", src_title="", src_credit=""):
+               mode="both", short_secs=165, upload=None, upload_name="", src_title="", src_credit="", visual_review="auto"):
         jid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         j = self.job(jid); j.dir.mkdir(parents=True); (j.dir / "src").mkdir()
         up = ""
@@ -61,7 +61,7 @@ class Studio:
             (j.dir / "src" / ("transcript_manual.txt" if url else "pasted.txt")).write_text(transcript_text, encoding="utf-8")
         j.save(url=url, minutes=float(minutes), presenter=bool(presenter), captions=bool(captions), auto_approve=bool(auto_approve), provider=provider or "",
                mode=mode if mode in ("long", "short", "both") else "both", short_secs=max(120.0, min(176.0, float(short_secs))),
-               upload=up, src_title=src_title, src_credit=src_credit, status="queued", stage="transcript", done=[], title="", created=time.time())
+               upload=up, src_title=src_title, src_credit=src_credit, visual_review=visual_review if visual_review in ("auto", "every") else "auto", status="queued", stage="transcript", done=[], title="", created=time.time())
         what = url or (f"file {up}" if up else "pasted text")
         j.log(f"Job created for {what} (output: {mode}; long {minutes} min, short {short_secs:.0f}s)"); self.q.put(jid); return jid
 
@@ -69,6 +69,36 @@ class Studio:
         j = self.job(jid); s = j.state
         if s.get("status") == "awaiting_review":
             d = s.get("done", []); d.append("review"); j.save(done=d, status="queued"); j.log("Script approved"); self.q.put(jid)
+    def continue_visuals(self, jid):
+        """Visual review finished (every beat decided): render."""
+        from . import review
+        j = self.job(jid); review.close(j.dir)
+        d = j.state.get("done", [])
+        if "short_review" not in d: d.append("short_review")
+        j.save(done=d, status="queued"); j.log("Visual review done; rendering"); self.q.put(jid)
+
+    SMOKE_BEAT = {"id": "b0", "title": "Beat 1", "subject": None, "avoid": [],
+                  "vo": "A small passenger plane drops through dark storm clouds as it descends toward a coastal runway at dusk, its landing lights cutting through the rain.",
+                  "queries": ["airplane landing in storm", "plane descending through clouds"],
+                  "backdrop": {"kind": "headline", "kicker": "SMOKE TEST", "text": "A plane descends through a storm", "sub": ""},
+                  "still_prompt": "A small white twin-engine passenger plane with a plain grey tail descending through dark storm clouds toward a coastal runway at dusk, landing lights on, rain streaks, tense mood, photorealistic, vertical framing",
+                  "motion": "the plane descends slowly through the clouds, rain falls, camera tracks alongside",
+                  "visuals": [{"type": "chart", "chart": {"kind": "hook", "lines": ["SMOKE", "TEST"], "accent": 1}, "at": None}]}
+
+    def create_smoke(self, visual_review="every"):
+        """A one-beat Short with a fixed script (no YouTube, no script AI): exercises stock, the visual ladder, the review pause,
+        the render and the thumbnail in a couple of GPU minutes."""
+        jid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + "_smoke"
+        j = self.job(jid); (j.dir / "src").mkdir(parents=True)
+        (j.dir / "src" / "meta.json").write_text(json.dumps({"title": "Smoke test", "channel": "Video Studio", "webpage_url": ""}), encoding="utf-8")
+        (j.dir / "entities.json").write_text("[]", encoding="utf-8")
+        j.save_short_plan({"title": "Smoke test - visual review", "tag": "SMOKE TEST", "source_spoken": "a smoke test", "description": "Smoke test.",
+                           "mode": "short", "sections": [json.loads(json.dumps(self.SMOKE_BEAT))]})
+        j.save(url="", minutes=1.0, presenter=False, captions=False, auto_approve=True, provider="", mode="short", short_secs=120.0, upload="",
+               src_title="Smoke test", src_credit="", visual_review=visual_review if visual_review in ("auto", "every") else "every", smoke=True,
+               status="queued", stage="short_stock", done=["transcript", "short_script", "review"], title="Smoke test", created=time.time())
+        j.log(f"Smoke test job created (one beat, visual review: {visual_review})"); self.q.put(jid); return jid
+
     def resume(self, jid):
         j = self.job(jid); self.cancel.discard(jid); j.save(status="queued", error=""); j.log("Resumed"); self.q.put(jid)
     def stop(self, jid): self.cancel.add(jid); self.job(jid).log("Stop requested")
@@ -80,7 +110,7 @@ class Studio:
             except Exception as e:
                 j = self.job(jid); j.log("ERROR: " + str(e)); j.log(traceback.format_exc()[-1500:])
                 n = int(j.state.get("auto_retries", 0))
-                rendering = j.state.get("stage") in ("charts", "voice", "captions", "presenter", "motion", "stills", "assemble", "broll", "short_stock", "short_voice", "short_fallback", "short_render")
+                rendering = j.state.get("stage") in ("charts", "voice", "captions", "presenter", "motion", "stills", "assemble", "broll", "short_stock", "short_voice", "short_fallback", "short_review", "short_render")
                 if rendering and n < 3 and jid not in self.cancel:
                     j.save(status="queued", error="", auto_retries=n + 1)
                     j.log(f"Retrying automatically in 60s (attempt {n + 1} of 3); finished work is kept")
@@ -196,6 +226,15 @@ class Studio:
                 sp = short.write_short(cfg, meta, text, s.get("short_secs", 165), mode, lp["title"] if lp else "", log, stop, j.dir / "src")
                 j.save_short_plan(sp)
                 if not lp: j.save(title=sp["title"])
+            elif st == "short_review":
+                from . import review
+                vm = s.get("visual_review", "auto")
+                rv, pause = review.collect(j.dir, j.short_plan(), cfg, log, vm)
+                if pause:
+                    j.save(status="awaiting_visuals")
+                    log("Visual review: choose a treatment for each beat on the job page (or Approve all remaining)." if vm == "every" else
+                        "Visual review: some beats are uncertain; check them on the job page (or Approve all remaining)."); return
+                if rv: review.close(j.dir)
             elif st in ("short_stock", "short_voice", "short_fallback", "short_render"):
                 sp = j.short_plan()
                 if st == "short_stock":
@@ -215,10 +254,15 @@ class Studio:
                 elif st == "short_voice": _need_wangp(wg); short.do_voice(j.dir, sp, cfg, wg, log, stop)
                 elif st == "short_fallback":
                     if not wg.alive(): log("WanGP is not running: fallback beats get map/headline graphics instead of AI stills")
-                    short.do_fallback(j.dir, sp, cfg, wg, log, stop)
+                    short.do_fallback(j.dir, sp, cfg, wg, log, stop, full=s.get("visual_review") == "every")
                 else:
                     meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
                     out = short.do_render(j.dir, sp, cfg, meta, log, stop); j.save(short_output=str(out))
+                    from . import thumb916, review
+                    try: j.save(thumbnail=str(thumb916.make(j.dir, sp, cfg, log)))
+                    except Exception as e: log(f"  thumbnail failed ({str(e)[:200]})")
+                    try: review.prune(j.dir, log)
+                    except Exception as e: log(f"  pruning failed ({str(e)[:120]})")
             elif st == "review":
                 qs = [q for p in (j.plan(), j.short_plan()) if p for q in p.get("questions", [])]
                 if not s.get("auto_approve", True):

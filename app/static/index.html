@@ -24,6 +24,14 @@ pre{background:#0d1117;border:1px solid var(--line);border-radius:8px;padding:10
 video{width:100%;border-radius:8px;margin-top:10px}
 details summary{cursor:pointer;color:var(--mut);font-size:13px;margin-top:10px}
 .script-doc{margin-top:18px;background:#0d1117;border:1px solid var(--line);border-radius:10px;padding:22px 26px;max-height:none}.script-doc h1{font-size:22px;margin:6px 0 4px}.script-doc .sub{color:var(--mut,#9aa4b2);margin:0 0 14px;font-style:italic}.script-doc h3{font-size:16px;margin:20px 0 6px}.script-doc p{line-height:1.65;margin:0;font-size:15.5px}
+main>section{min-width:0}
+.rv-beat{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:12px 0;background:#0d1117}.rv-beat.unsure{border-color:#d29922}.rv-beat.done{opacity:.8}
+.rv-row{display:flex;gap:10px;overflow-x:auto;padding:8px 0}.rv-c{flex:0 0 120px;font-size:11.5px;line-height:1.3}
+.rv-c img{width:120px;height:213px;object-fit:cover;border-radius:6px;border:2px solid var(--line);cursor:pointer;display:block;background:#000}
+.rv-c.sel img{border-color:var(--acc)}.rv-c.auto img{box-shadow:0 0 0 2px var(--blue)}.rv-c .bad{color:var(--bad)}.rv-c .ok{color:var(--ok)}
+.rv-c .wrn{position:relative}.rv-c .wrn:after{content:"⚠";position:absolute;top:6px;right:8px;font-size:22px;color:#ffcc00;text-shadow:0 0 4px #000}
+.rv-badge{font-size:12px;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}.rv-prev{margin:6px 0}.rv-prev video,.rv-prev img{max-height:420px;width:auto;border-radius:8px}
+.rv-note{font-size:12.5px;color:var(--mut);border-left:2px solid var(--line);padding-left:8px;margin:4px 0}
 </style></head><body>
 <header><h1>Video Studio</h1><span class="mut">YouTube, NotebookLM audio or notes → explainer + Short</span><span style="flex:1"></span>
 <span id="pw" class="pill">WanGP …</span><span id="pk" class="pill">API key …</span><button class="sec" onclick="toggleSettings()">Settings</button></header>
@@ -47,7 +55,8 @@ details summary{cursor:pointer;color:var(--mut);font-size:13px;margin-top:10px}
   <label>Local vetting model (Ollama)</label><input id="vm" type="text">
   <label>WanGP MCP URL (leave blank to find it automatically)</label><input id="wu" type="text" placeholder="e.g. http://127.0.0.1:8000/mcp">
   <label><input id="poq" type="checkbox"> When review is skipped, still pause if the fact-check raises questions</label>
-  <div class="row" style="margin-top:12px"><button onclick="saveSettings()">Save</button><button class="sec" onclick="testKey()">Test saved keys</button><span id="ssaved" class="mut"></span></div>
+  <label>Channel name (shown on the Short's 9:16 thumbnail; blank = none)</label><input id="chn" type="text">
+  <div class="row" style="margin-top:12px"><button onclick="saveSettings()">Save</button><button class="sec" onclick="testKey()">Test saved keys</button><button class="sec" onclick="smoke()">Run smoke test (1 beat)</button><span id="ssaved" class="mut"></span></div>
  </div>
  <div class="card"><h2>New video</h2>
   <label>Source</label><select id="srck" onchange="srcUI()"><option value="yt">YouTube link</option><option value="file">Upload a file (NotebookLM audio, .mp3/.m4a/.wav, or .pdf/.docx/.txt/.md)</option><option value="text">Paste text (notes, briefing doc)</option></select>
@@ -63,6 +72,7 @@ details summary{cursor:pointer;color:var(--mut);font-size:13px;margin-top:10px}
    <label><input id="caps" type="checkbox" checked> Animated captions with icons</label>
    <label><input id="pres" type="checkbox"> On-screen presenter (small corner window, experimental)</label></div>
   <label>Script AI for this video</label><select id="jp"><option value="">Use Settings default</option><option value="zai">z.ai GLM</option><option value="deepseek">DeepSeek</option><option value="claude">Claude</option><option value="local">Local AI (Ollama)</option></select>
+  <div id="m_vr"><label>Visuals (Shorts)</label><select id="vrev"><option value="auto">Auto: pick automatically, pause only when unsure</option><option value="every">Review every beat: make every treatment, pause to choose</option></select></div>
   <label><input id="auto" type="checkbox" checked> Skip script review (render straight away; untick to read and edit the script first)</label>
   <div class="row" style="margin-top:12px"><button onclick="createJob()">Make video</button><span id="cmsg" class="mut"></span></div>
  </div>
@@ -75,14 +85,14 @@ let sel=null, stages=[], planCache=null, editing=false;
 const $=id=>document.getElementById(id);
 async function j(u,o){const r=await fetch(u,o);if(!r.ok)throw new Error(await r.text());return r.json()}
 function toggleSettings(){const s=$('settings');s.style.display=s.style.display=='none'?'block':'none';loadSettings()}
-async function loadSettings(){const s=await j('/api/settings');$('k').value=s.anthropic_api_key;$('sm').value=s.script_model;$('qm').value=s.qa_model;$('wpm').value=s.wpm;$('ms').value=s.motion_share;$('iqa').checked=s.image_qa;$('sp').value=s.script_provider;$('qp').value=s.qa_provider;$('zk').value=s.zai_api_key;$('zm').value=s.zai_model;$('zv').value=s.zai_vision_model;$('zu').value=s.zai_base_url;$('zo').value=s.zai_openai_url;$('dk').value=s.deepseek_api_key;$('dm').value=s.deepseek_model;$('vp').value=s.vet_provider;$('vm').value=s.vet_model;$('poq').checked=!!s.pause_on_questions;$('wu').value=s.wangp_mcp||''}
+async function loadSettings(){const s=await j('/api/settings');$('k').value=s.anthropic_api_key;$('sm').value=s.script_model;$('qm').value=s.qa_model;$('wpm').value=s.wpm;$('ms').value=s.motion_share;$('iqa').checked=s.image_qa;$('sp').value=s.script_provider;$('qp').value=s.qa_provider;$('zk').value=s.zai_api_key;$('zm').value=s.zai_model;$('zv').value=s.zai_vision_model;$('zu').value=s.zai_base_url;$('zo').value=s.zai_openai_url;$('dk').value=s.deepseek_api_key;$('dm').value=s.deepseek_model;$('vp').value=s.vet_provider;$('vm').value=s.vet_model;$('poq').checked=!!s.pause_on_questions;$('wu').value=s.wangp_mcp||'';$('chn').value=s.channel_name||''}
 async function testKey(){$('ssaved').textContent='Testing...';const st=await j('/api/status');const ps=[['zai',st.zai_key],['deepseek',st.deepseek_key],['claude',st.api_key]].filter(x=>x[1]).map(x=>x[0]);if(!ps.length){$('ssaved').textContent='No keys saved yet';return}let out=[];for(const p of ps){const r=await j('/api/test_key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:p})});out.push((r.ok?'✓ ':'✗ ')+r.msg)}$('ssaved').innerHTML=out.map(esc).join('<br>')}
-async function saveSettings(){await j('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({anthropic_api_key:$('k').value,script_model:$('sm').value,qa_model:$('qm').value,wpm:+$('wpm').value,motion_share:+$('ms').value,image_qa:$('iqa').checked,script_provider:$('sp').value,qa_provider:$('qp').value,zai_api_key:$('zk').value,zai_model:$('zm').value,zai_vision_model:$('zv').value,zai_base_url:$('zu').value,zai_openai_url:$('zo').value,deepseek_api_key:$('dk').value,deepseek_model:$('dm').value,vet_provider:$('vp').value,vet_model:$('vm').value,pause_on_questions:$('poq').checked,wangp_mcp:$('wu').value.trim()})});$('ssaved').textContent='Saved';status()}
+async function saveSettings(){await j('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({anthropic_api_key:$('k').value,script_model:$('sm').value,qa_model:$('qm').value,wpm:+$('wpm').value,motion_share:+$('ms').value,image_qa:$('iqa').checked,script_provider:$('sp').value,qa_provider:$('qp').value,zai_api_key:$('zk').value,zai_model:$('zm').value,zai_vision_model:$('zv').value,zai_base_url:$('zu').value,zai_openai_url:$('zo').value,deepseek_api_key:$('dk').value,deepseek_model:$('dm').value,vet_provider:$('vp').value,vet_model:$('vm').value,pause_on_questions:$('poq').checked,wangp_mcp:$('wu').value.trim(),channel_name:$('chn').value.trim()})});$('ssaved').textContent='Saved';status()}
 async function status(){try{const s=await j('/api/status');stages=s.stages;$('pw').textContent=s.wangp?'WanGP running':'WanGP not running';$('pw').className='pill '+(s.wangp?'ok':'bad');const pn={deepseek:'DeepSeek',zai:'z.ai',claude:'Claude',local:'Local AI'}[s.provider]||s.provider;const rdy=s.provider=='local'||(s.provider=='zai'?s.zai_key:s.provider=='deepseek'?s.deepseek_key:s.api_key);$('pk').textContent='Script: '+pn+(rdy?'':' (no key)');$('pk').className='pill '+(rdy?'ok':'bad')}catch(e){}}
 function fmt(x){return Math.floor(x/60)+':'+String(x%60).padStart(2,'0')}
-function srcUI(){const k=$('srck').value,m=$('mode').value;$('s_yt').style.display=k=='yt'?'':'none';$('s_file').style.display=k=='file'?'':'none';$('s_text').style.display=k=='text'?'':'none';$('s_meta').style.display=k=='yt'?'none':'';$('m_short').style.display=m=='long'?'none':'';$('m_long').style.display=m=='short'?'none':''}
+function srcUI(){const k=$('srck').value,m=$('mode').value;$('s_yt').style.display=k=='yt'?'':'none';$('s_file').style.display=k=='file'?'':'none';$('s_text').style.display=k=='text'?'':'none';$('s_meta').style.display=k=='yt'?'none':'';$('m_short').style.display=m=='long'?'none':'';$('m_long').style.display=m=='short'?'none':'';$('m_vr').style.display=m=='long'?'none':''}
 async function createJob(){$('cmsg').textContent='Starting...';const k=$('srck').value;const fd=new FormData();
- const f={mode:$('mode').value,short_secs:$('ssec').value,minutes:$('min').value,presenter:$('pres').checked,captions:$('caps').checked,auto_approve:$('auto').checked,provider:$('jp').value,src_title:$('stt').value,src_credit:$('scr').value,
+ const f={mode:$('mode').value,short_secs:$('ssec').value,minutes:$('min').value,presenter:$('pres').checked,captions:$('caps').checked,auto_approve:$('auto').checked,provider:$('jp').value,visual_review:$('vrev').value,src_title:$('stt').value,src_credit:$('scr').value,
   url:k=='yt'?$('url').value.trim():'',transcript:k=='yt'?$('tx').value:k=='text'?$('ptx').value:''};
  for(const x in f)fd.append(x,f[x]);
  if(k=='file'){if(!$('upf').files.length){$('cmsg').textContent='Choose a file first.';return}fd.append('file',$('upf').files[0])}
@@ -92,7 +102,7 @@ function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt
 let lastKey='';
 async function loadDetail(){if(editing)return;const s=await j('/api/jobs/'+sel);const done=s.done||[];
  const key=sel+'|'+s.status+'|'+s.stage;
- if((s.status=='awaiting_review'||(s.status=='error'&&s.stage=='transcript'))&&key==lastKey)return;   // don't redraw while you read/paste
+ if((s.status=='awaiting_review'||s.status=='awaiting_visuals'||s.status=='finished'||(s.status=='error'&&s.stage=='transcript'))&&key==lastKey)return;   // don't redraw while you read/paste
  lastKey=key;
  const mtxt={both:`long ${s.minutes} min + Short ${fmt(Math.round(s.short_secs||165))}`,short:`Short ${fmt(Math.round(s.short_secs||165))}`,long:`long ${s.minutes} min`}[s.mode||'long'];
  let h=`<h2>${esc(s.title||s.url)}</h2><div class="mut">${mtxt} · <b>${statusText(s)}</b>${s.error?` · <span style="color:var(--bad)">${esc(s.error)}</span>`:''}</div>`;
@@ -103,12 +113,13 @@ async function loadDetail(){if(editing)return;const s=await j('/api/jobs/'+sel);
  if(['error','stopped'].includes(s.status))h+=`<button onclick="act('resume')">Resume</button>`;
  h+=`</div>`;
  if(s.status=='error'&&s.stage=='transcript')h+=`<details open style="margin-top:12px"><summary>Paste transcript (continues without YouTube)</summary><textarea id="jptx" rows="8" style="width:100%" placeholder="Paste the video's transcript here"></textarea><button onclick="pasteTx()">Use this transcript and continue</button> <span id="jptxm" class="mut"></span></details>`;
- if(s.short_output){const rel=s.short_output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished Short: <code>${esc(s.short_output)}</code><br><span class="mut">YouTube description with credits: output/youtube_short_description.txt</span></p><video controls style="max-width:360px" src="/files/${sel}/${rel}"></video>`}
+ if(s.short_output){const rel=s.short_output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished Short: <code>${esc(s.short_output)}</code><br><span class="mut">YouTube description with credits: output/youtube_short_description.txt</span></p><div class="row" style="align-items:flex-start"><video controls style="max-width:360px" src="/files/${sel}/${rel}"></video><div id="thumbp" style="flex:1;min-width:260px"></div></div>`}
  if(s.output){const rel=s.output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished video: <code>${esc(s.output)}</code></p><video controls src="/files/${sel}/${rel}"></video>`}
- h+=`<div id="sdoc"></div><div id="doc"></div><div id="ed"></div>`;
+ h+=`<div id="rvp"></div><div id="sdoc"></div><div id="doc"></div><div id="ed"></div>`;
  h+=`<details ${s.status=='error'?'open':''} style="margin-top:18px"><summary class="mut">Technical log</summary><pre id="log">${esc((s.log||[]).join('\n'))}</pre></details>`;
  $('detail').innerHTML=h;const l=$('log');if(l)l.scrollTop=l.scrollHeight;
- if(s.plan_summary&&done.includes('script'))showScript(s);if(s.short_summary&&done.includes('short_script'))showShort(s)}
+ if(s.status=='awaiting_visuals')showReview();if(s.thumbnail)showThumb(s);
+ if(s.status!='awaiting_visuals'){if(s.plan_summary&&done.includes('script'))showScript(s);if(s.short_summary&&done.includes('short_script'))showShort(s)}}
 // fact-check questions: a to-do while the job waits for review; just notes once review was skipped
 function qbox(qs,st){const waiting=st&&st.status=='awaiting_review';
  return `<div style="border:1px solid ${waiting?'#d29922':'var(--line)'};border-radius:8px;padding:10px 14px;margin:10px 0"><b>${waiting?'Please check before approving:':'Fact-check notes (review was skipped, so the video was made without pausing):'}</b><ul>${qs.map(q=>`<li>${esc(q)}</li>`).join('')}</ul><span class="mut" style="font-size:13px">${waiting?"Fix with Edit script, or approve if it's fine.":"To fix these before rendering next time, untick Skip script review."}</span></div>`}
@@ -124,7 +135,7 @@ async function editShort(){editing=true;planCache=await j(`/api/jobs/${sel}/shor
  h+=`<div class="row" style="margin-top:12px"><button onclick="saveShort()">Save</button><button class="sec" onclick="editing=false;lastKey='';loadDetail()">Cancel</button></div>`;$('ed').innerHTML=h}
 async function saveShort(){planCache.title=$('pt').value;planCache.sections.forEach((x,i)=>{x.vo=$('sv'+i).value});
  await j(`/api/jobs/${sel}/short_plan`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(planCache)});editing=false;lastKey='';loadDetail()}
-function statusText(s){return {awaiting_review:'Script ready — read it below, then approve',running:'Working: '+s.stage,queued:'Queued',done:'Finished',error:'Stopped with an error',stopped:'Stopped'}[s.status]||s.status}
+function statusText(s){return {awaiting_visuals:'Visuals ready — choose a treatment for each beat below',awaiting_review:'Script ready — read it below, then approve',running:'Working: '+s.stage,queued:'Queued',done:'Finished',error:'Stopped with an error',stopped:'Stopped'}[s.status]||s.status}
 async function showScript(st){const p=await j(`/api/jobs/${sel}/plan`);const w=p.sections.reduce((a,x)=>a+x.vo.split(/\s+/).length,0);
  let h=`<div class="script-doc"><div class="mut" style="font-size:13px">${p.sections.length} sections · ${w} words · about ${(w/155).toFixed(1)} minutes</div>`;
  if(p.questions&&p.questions.length)h+=qbox(p.questions,st);else if(p.checked)h+=`<div class="mut" style="font-size:13px;margin-top:4px">✓ Checked against the transcript (names, speakers, claims)</div>`;
@@ -140,5 +151,57 @@ async function editPlan(){editing=true;planCache=await j(`/api/jobs/${sel}/plan`
  $('ed').innerHTML=h}
 async function savePlan(ap){planCache.title=$('pt').value;planCache.subtitle=$('ps').value;planCache.sections.forEach((x,i)=>{x.title=$('st'+i).value;x.vo=$('sv'+i).value});
  await j(`/api/jobs/${sel}/plan`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(planCache)});if(ap)await act('approve');else{editing=false;lastKey='';loadDetail()}}
+
+// ---------------- visual review
+const RUNG={stock:'Stock footage',photo:'Real photo',still:'AI still',animate:'AI animation',parallax:'Parallax',reconstruction:'3D reconstruction',headline:'Headline card',map:'Map',supplied:'Your file'};
+let RV=null,rvSel={},rvTimer=null,rvOpen={};
+async function showReview(){try{RV=await j(`/api/jobs/${sel}/review`)}catch(e){$('rvp').innerHTML='<p class="mut">Review data not ready yet.</p>';return}drawReview();
+ clearTimeout(rvTimer);if(Object.values(RV.beats).some(b=>b.busy))rvTimer=setTimeout(()=>{if($('rvp'))showReview()},4000)}
+function drawReview(){const bs=Object.entries(RV.beats);const left=bs.filter(([k,b])=>!b.decision).length;
+ const order=bs.sort((a,b)=>(b[1].uncertain&&!b[1].decision)-(a[1].uncertain&&!a[1].decision)||(+a[0].slice(1))-(+b[0].slice(1)));
+ let h=`<div class="card" style="margin-top:14px"><h2>Visual review · ${RV.mode=='every'?'every beat':'auto (uncertain beats first)'}</h2>
+ <div class="mut" style="font-size:13px">Available treatments for each beat. The blue outline is the pipeline's pick; click a thumbnail to preview it, tick <b>Use</b> on one or more (they play in the order you tick them).</div>
+ <div class="row" style="margin-top:10px"><button onclick="rvAll('approve_all')">Approve all remaining (${left})</button><button class="sec" ${left?'disabled':''} onclick="rvAll('continue')">Continue to render</button><span id="rvmsg" class="mut"></span></div>`;
+ for(const [bid,b] of order)h+=beatHTML(bid,b);
+ h+=`</div>`;$('rvp').innerHTML=h}
+function beatHTML(bid,b){const n=+bid.slice(1)+1;const dec=b.decision?{auto:'✓ auto pick',chosen:'✓ your choice',skip:'✓ skipped (headline card)'}[b.decision]:'needs a decision';
+ const autoTxt=b.auto.map(c=>RUNG[RV.cands[c].rung]||RV.cands[c].rung).join(' + ')||'nothing';
+ const s=rvSel[bid]||(b.decision=='chosen'?[...b.chosen]:[]);rvSel[bid]=s;
+ let h=`<div class="rv-beat ${b.uncertain&&!b.decision?'unsure':''} ${b.decision?'done':''}" id="rv_${bid}"><div class="row"><b>Beat ${n}</b><span class="rv-badge">${dec}</span>${b.uncertain?`<span class="rv-badge" style="color:#d29922">⚠ ${esc(b.why)}</span>`:''}${b.busy?`<span class="rv-badge" style="color:var(--acc)">${esc(b.busy)}</span>`:''}</div>
+ <p style="margin:6px 0">${esc(b.vo)}</p><div class="mut" style="font-size:13px">Pipeline pick: <b>${esc(autoTxt)}</b>${b.why&&!b.uncertain?' — '+esc(b.why):''}</div><div class="rv-row">`;
+ for(const cid of b.cands){const c=RV.cands[cid];const i=s.indexOf(cid);const tag=c.item.tag?` · ${esc(c.item.tag)}`:'';
+  h+=`<div class="rv-c ${i>=0?'sel':''} ${b.auto.includes(cid)?'auto':''}"><div class="${c.worst?'wrn':''}"><img loading="lazy" src="${c.thumb?`/files/${sel}/short/${c.thumb}`:''}" onclick="rvPrev('${bid}','${cid}')" title="Click to preview"></div>
+  <b>${esc(RUNG[c.rung]||c.rung)}</b>${tag}<br><span class="${c.ok?'ok':'bad'}">${c.ok?'✓':'✗'} ${esc(c.why)}</span><br>
+  <label style="margin:2px 0;color:var(--fg)"><input type="checkbox" ${i>=0?'checked':''} onchange="rvTick('${bid}','${cid}',this.checked)"> Use${i>=0&&s.length>1?' #'+(i+1):''}</label></div>`}
+ h+=`</div><div class="rv-prev" id="pv_${bid}"></div>
+ <div class="row"><button onclick="rvDo('${bid}','choose')" ${s.length?'':'disabled'}>Use selected (${s.length})</button><button class="sec" onclick="rvDo('${bid}','auto')">Approve auto</button><button class="sec" onclick="rvDo('${bid}','skip')">Skip (headline card)</button><button class="sec" onclick="rvDo('${bid}','expand')" ${b.busy?'disabled':''}>Show all options for this beat</button>${b.decision?`<button class="sec" onclick="rvDo('${bid}','undo')">Undo decision</button>`:''}</div>
+ <details ${rvOpen[bid]?'open':''} ontoggle="rvOpen['${bid}']=this.open" style="margin-top:6px"><summary>Refine / supply your own / history</summary>
+ <label>Tell it what to change (e.g. "nose down, storm clouds", "the plane is climbing but the narration says it dropped", or a file path / URL)</label>
+ <textarea id="rf_${bid}" rows="2"></textarea><div class="row"><button onclick="rvRefine('${bid}')" ${b.busy?'disabled':''}>Regenerate</button></div>
+ <label>Your own file (path on this PC or a URL) and its on-screen label</label><div class="row"><input type="text" id="sp_${bid}" style="flex:1" placeholder="F:\\clips\\plane.mp4 or https://..."><select id="st_${bid}" style="width:auto"><option value="">no label</option><option>FILE</option><option>ILLUSTRATIVE</option><option>GENERATED</option></select><button class="sec" onclick="rvSupply('${bid}')">Add</button></div>
+ ${(b.notes||[]).map(x=>`<div class="rv-note">${esc(x.t)} you: “${esc(x.you)}” → <b>${esc(x.intent)}</b>: ${esc(x.understood)} <span style="opacity:.7">[handled by ${esc(x.backend)}]</span></div>`).join('')}
+ ${b.history.length?`<label>Earlier option sets</label>${b.history.map((x,i)=>`<div class="row"><span class="mut" style="font-size:13px">${esc(x.label)} (${x.cands.length} options)</span><button class="sec" onclick="rvDo('${bid}','revert',${i})">Revert to this set</button></div>`).join('')}`:''}
+ </details>${b.msg?`<div class="mut" style="font-size:12.5px;margin-top:6px">${esc(b.msg)}</div>`:''}</div>`;return h}
+function rvTick(bid,cid,on){const s=rvSel[bid]||[];const i=s.indexOf(cid);if(on&&i<0)s.push(cid);if(!on&&i>=0)s.splice(i,1);rvSel[bid]=s;const el=$('rv_'+bid);el.outerHTML=beatHTML(bid,RV.beats[bid])}
+async function rvPost(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});const d=await r.json();if(!r.ok)throw new Error(d.error||'failed');return d}
+async function rvDo(bid,a,i){try{const body={action:a};if(a=='choose')body.cands=rvSel[bid];if(a=='revert')body.i=i;
+ if(['auto','skip','undo','revert'].includes(a))rvSel[bid]=a=='revert'?[]:rvSel[bid];if(a=='undo')rvSel[bid]=[];
+ RV=await rvPost(`/api/jobs/${sel}/review/${bid}`,body);if(a=='auto'||a=='skip')rvSel[bid]=[];drawReview();if(a=='expand')showReview()}catch(e){alert(e.message)}}
+async function rvRefine(bid){const t=$('rf_'+bid).value.trim();if(!t)return;try{RV=await rvPost(`/api/jobs/${sel}/review/${bid}`,{action:'refine',text:t,tag:$('st_'+bid).value});rvOpen[bid]=true;showReview()}catch(e){alert(e.message)}}
+async function rvSupply(bid){const t=$('sp_'+bid).value.trim();if(!t)return;$('rvmsg').textContent='Adding your file...';try{RV=await rvPost(`/api/jobs/${sel}/review/${bid}`,{action:'supply',src:t,tag:$('st_'+bid).value});rvSel[bid]=[...RV.beats[bid].chosen];$('rvmsg').textContent='';drawReview()}catch(e){$('rvmsg').textContent='';alert(e.message)}}
+async function rvPrev(bid,cid){const el=$('pv_'+bid);el.innerHTML='<span class="mut">Rendering a 2-second preview…</span>';
+ try{const d=await rvPost(`/api/jobs/${sel}/preview/${cid}`);el.innerHTML=d.video?`<video autoplay loop muted playsinline src="/files/${sel}/short/${d.video}"></video>`:`<img src="/files/${sel}/short/${d.image}">`;el.innerHTML+=` <button class="sec" onclick="this.parentElement.innerHTML=''">Close</button>`}catch(e){el.innerHTML=`<span style="color:var(--bad)">${esc(e.message)}</span>`}}
+async function rvAll(a){try{await rvPost(`/api/jobs/${sel}/review_all/${a}`);lastKey='';rvSel={};loadJobs()}catch(e){alert(e.message)}}
+// ---------------- 9:16 thumbnail
+async function showThumb(s){const o=await j(`/api/jobs/${sel}/thumbnail`);const el=$('thumbp');if(!el)return;
+ const beats=(await j(`/api/jobs/${sel}/short_plan`)).sections.filter(x=>!x.cta).map((x,i)=>`<option value="${x.id}" ${o.beat==x.id?'selected':''}>Beat ${i+1}</option>`).join('');
+ el.innerHTML=`<b>Thumbnail (9:16)</b> ${o.approved?'<span class="rv-badge" style="color:var(--ok)">approved</span>':''}<br><img src="/files/${sel}/output/thumbnail_9_16.png?t=${Date.now()}" style="width:200px;border-radius:8px;margin:6px 0"><br>
+ <span class="mut" style="font-size:12px">output/thumbnail_9_16.png · upload it in YouTube Studio (Content → Shorts → pencil → Thumbnail)</span>
+ <label>Picture from</label><select id="tb">${beats}</select><label>Text (lines split by /)</label><input type="text" id="tt" value="${esc(o.text||'')}" placeholder="leave blank for the hook">
+ <div class="row"><select id="tsz" style="width:auto">${['S','M','L'].map(x=>`<option ${(o.size||'M')==x?'selected':''}>${x}</option>`).join('')}</select><select id="tcol" style="width:auto">${['yellow','red','white','cyan'].map(x=>`<option ${(o.color||'yellow')==x?'selected':''}>${x}</option>`).join('')}</select></div>
+ <label>Or your own picture (path or URL)</label><input type="text" id="tsrc">
+ <div class="row" style="margin-top:8px"><button onclick="thumbGo()">Regenerate</button><button class="sec" onclick="thumbGo(true)">Approve</button><span id="tmsg" class="mut"></span></div>`}
+async function thumbGo(ap){$('tmsg').textContent='Working...';try{await rvPost(`/api/jobs/${sel}/thumbnail`,ap?{approve:true}:{beat:$('tb').value,text:$('tt').value,size:$('tsz').value,color:$('tcol').value,src:$('tsrc').value.trim()});$('tmsg').textContent='';showThumb()}catch(e){$('tmsg').textContent=e.message}}
+async function smoke(){$('ssaved').textContent='Starting smoke test...';const d=await rvPost('/api/smoke',{visual_review:'every'});sel=d.id;$('ssaved').textContent='Smoke test job '+d.id;loadJobs()}
 srcUI();status();loadJobs();setInterval(()=>{status();loadJobs()},5000);
 </script></body></html>

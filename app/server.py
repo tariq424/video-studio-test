@@ -73,8 +73,87 @@ def create():
     if not b.get("url") and not b.get("transcript") and not (f and f.filename): return jsonify(error="Give a YouTube link, a file, or paste some text."), 400
     jid = studio.create(b.get("url", "").strip(), b.get("minutes", 15), b.get("presenter", False), b.get("auto_approve", True), b.get("transcript", ""),
                         b.get("provider", ""), b.get("captions", True), b.get("mode", "both"), float(b.get("short_secs", 165) or 165),
-                        f if (f and f.filename) else None, f.filename if f else "", b.get("src_title", ""), b.get("src_credit", ""))
+                        f if (f and f.filename) else None, f.filename if f else "", b.get("src_title", ""), b.get("src_credit", ""),
+                        b.get("visual_review", "auto"))
     return jsonify(id=jid)
+
+@app.post("/api/smoke")
+def smoke():
+    """One-beat test job with a fixed script (exercises the visual ladder, the review pause, the render and the thumbnail)."""
+    b = request.get_json(silent=True) or {}
+    return jsonify(id=studio.create_smoke(b.get("visual_review", "every")))
+
+# ---- visual review (Shorts)
+def _rv_payload(jid):
+    from studio import review
+    rv = review.load(studio.job(jid).dir)
+    if not rv: abort(404)
+    return rv
+
+@app.get("/api/jobs/<jid>/review")
+def get_review(jid): return jsonify(_rv_payload(jid))
+
+@app.post("/api/jobs/<jid>/review/<bid>")
+def review_beat(jid, bid):
+    from studio import review
+    b = request.get_json(silent=True) or {}; a = b.get("action"); j = studio.job(jid); cfg = config.load()
+    try:
+        if a in ("auto", "skip", "choose", "undo", "revert"):
+            review.decide(j.dir, bid, a, b.get("cands") if a != "revert" else b.get("i"), cfg, j.log)
+            j.log(f"Visual review {bid}: {a}" + (f" {', '.join(b.get('cands') or [])}" if a == "choose" else ""))
+        elif a == "supply": review.supply(j.dir, bid, b.get("src", ""), b.get("tag", ""), cfg, j.log); j.log(f"Visual review {bid}: your file added")
+        elif a in ("expand", "refine"):
+            err = review.start(studio, jid, bid, a, {"text": b.get("text", ""), "tag": b.get("tag", "")})
+            if err: return jsonify(error=err), 409
+        else: return jsonify(error="unknown action"), 400
+    except Exception as e: return jsonify(error=str(e)[:300]), 400
+    return jsonify(_rv_payload(jid))
+
+@app.post("/api/jobs/<jid>/review_all/<action>")
+def review_all(jid, action):
+    from studio import review
+    j = studio.job(jid)
+    try:
+        if action == "approve_all": review.approve_all(j.dir); j.log("Visual review: approved the auto picks for all remaining beats")
+        elif action != "continue": return jsonify(error="unknown action"), 400
+        studio.continue_visuals(jid)
+    except Exception as e: return jsonify(error=str(e)[:300]), 400
+    return jsonify(ok=True)
+
+@app.post("/api/jobs/<jid>/preview/<cid>")
+def review_preview(jid, cid):
+    from studio import review
+    j = studio.job(jid)
+    try: return jsonify(review.preview(j.dir, cid, config.load(), j.log))
+    except Exception as e: return jsonify(error=str(e)[:300]), 400
+
+@app.get("/api/jobs/<jid>/thumbnail")
+def get_thumb(jid):
+    from studio import thumb916
+    return jsonify(thumb916.options(studio.job(jid).dir))
+
+@app.post("/api/jobs/<jid>/thumbnail")
+def set_thumb(jid):
+    from studio import thumb916
+    j = studio.job(jid); b = request.get_json(silent=True) or {}
+    try:
+        if b.get("approve"):
+            o = thumb916.options(j.dir); o["approved"] = True
+            (j.dir / "short" / "thumb.json").write_text(json.dumps(o, indent=1), encoding="utf-8"); j.log("Thumbnail approved"); return jsonify(o)
+        opts = {k: b.get(k) for k in ("beat", "size", "color", "text")}
+        if b.get("src"):   # your own picture (a path on this PC or a URL)
+            from studio import review
+            src = b["src"].strip().strip('"')
+            if src.lower().startswith("http"):
+                import requests
+                r = requests.get(src, timeout=60, headers={"User-Agent": "VideoStudio/1.0"})
+                if r.status_code != 200 or "text/html" in r.headers.get("content-type", ""): raise RuntimeError("couldn't download that image")
+                p = j.dir / "short" / "thumb_src.jpg"; p.write_bytes(r.content); src = str(p)
+            opts["image"] = src
+        elif "beat" in b and b.get("beat"): opts["image"] = ""
+        thumb916.make(j.dir, j.short_plan(), config.load(), j.log, opts)
+        return jsonify(thumb916.options(j.dir))
+    except Exception as e: return jsonify(error=str(e)[:300]), 400
 
 @app.get("/api/jobs/<jid>")
 def job(jid):

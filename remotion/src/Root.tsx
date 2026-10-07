@@ -4,6 +4,11 @@ import { Teaser } from "./Teaser";
 import { FPS, W, H } from "./theme";
 import { TeaserProps } from "./types";
 import { ReconBackdrop, Recon } from "./Recon";
+import { Shot } from "./Background";
+
+// one background shot on its own (visual-review thumbnails and 2-second previews): props {bg, secs}; --public-dir = the job's short folder
+type ShotProps = { bg: any; secs: number };
+const ShotClip: React.FC<ShotProps> = ({ bg, secs }) => <Shot bg={{ ...bg, from: 0 }} dur={secs} seed={1} />;
 
 // standalone reconstruction clip (long videos render these as B-roll): props {g, secs, w, h}
 type ReconProps = { g: Recon; secs: number; w?: number; h?: number };
@@ -23,6 +28,16 @@ const Root: React.FC = () => (
       const p = props as ReconProps;
       return { durationInFrames: Math.ceil(p.secs * FPS), width: p.w || 1920, height: p.h || 1080 };
     }}
+  />
+  <Composition
+    id="ShotPreview"
+    component={ShotClip as React.FC<any>}
+    fps={FPS}
+    width={W}
+    height={H}
+    durationInFrames={FPS * 7}
+    defaultProps={{ bg: { type: "graphic", g: { kind: "headline", kicker: "", text: "Preview", sub: "" } }, secs: 7 } as ShotProps}
+    calculateMetadata={async ({ props }) => ({ durationInFrames: Math.max(1, Math.ceil((props as ShotProps).secs * FPS)) })}
   />
   <Composition
     id="Teaser"

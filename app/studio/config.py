@@ -39,6 +39,7 @@ DEFAULTS = {
     "motion_share": 0.10,
     "still_model": "flux2_klein_9b",
     "video_model": "ltx2_distilled",
+    "channel_name": "",              # shown on the Short's 9:16 thumbnail when set
     "short_i2v": True,                # Short visual ladder step 3: animate the AI still with WanGP image-to-video
     "short_i2v_frames": 169,          # ~7 s at 24 fps
     "tts_model": "qwen3_tts_base",

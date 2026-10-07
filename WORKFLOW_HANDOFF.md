@@ -219,3 +219,17 @@ This is the human or AI step the app can't do for itself:
   - word timings with whisper on the GPU instead of the CPU, to save about 30–60 s;
   - brand rejection is now in the vision check; watch whether small logos still get past `qwen2.5vl:7b`.
 - Upload the Moonshots long video, and put its link in the Short descriptions.
+
+## Visual review for Shorts (Phase 1, Oct 2026)
+- Job form "Visuals (Shorts)": **Auto** (ladder stops at the first passing step; pauses only when a beat is uncertain: the check
+  couldn't run, or the AI still failed and the beat fell back to reconstruction/headline) or **Review every beat** (ladder runs every
+  treatment for every beat, then pauses).
+- Stage `short_review` (after short_fallback): `review.collect` writes `short/review/review.json` (candidates per beat, auto pick,
+  decisions, history); job status `awaiting_visuals`. Survives restarts.
+- Review panel on the job page: thumbnails (coarse stills; garbled animations show the worst frame with ⚠), click = 2-second middle
+  preview (ffmpeg for clips, Remotion `ShotPreview` composition for parallax/reconstruction/map), Use (multi, ordered), Approve auto,
+  Skip (headline card), Show all options for this beat (GPU, one beat), Refine (DeepSeek: descriptive / correction / supply ->
+  new prompts + stock searches -> new option set; History -> Revert), your own file (path on the PC or URL, with a label).
+- After the render: `output/thumbnail_9_16.png` (thumb916.py; options in short/thumb.json; regenerate/approve on the job page;
+  Settings "Channel name"), then unused treatment files and previews are deleted (thumbnails kept; used files listed in short/used.json).
+- Smoke test: Settings -> "Run smoke test (1 beat)" or `POST /api/smoke {"visual_review":"every"}`: fixed one-beat script, no YouTube.

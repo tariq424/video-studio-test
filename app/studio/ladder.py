@@ -20,12 +20,13 @@ Judge the picture and reply with ONLY JSON:
   (tense for an emergency, never cheerful)?,
  "marks": true or false - any readable text, letters, numbers, logo, brand name, airline name or livery lettering, flag or registration?,
  "garbled": true or false - melted or deformed objects, broken shapes, extra or missing limbs, warped faces, impossible geometry{extra}?,
- "why": "max 12 words"}}"""
+ "why": "max 12 words"{worst}}}"""
 
 def _yes(v): return str(v).strip().lower() in ("true", "yes", "1")
 
-def check(cfg, img, narration, subject=None, video=False):
-    """-> (ok, reason). Fails closed: if the vision model can't judge it, the visual isn't used."""
+def check(cfg, img, narration, subject=None, video=False, info=None):
+    """-> (ok, reason). Fails closed: if the vision model can't judge it, the visual isn't used.
+    info (dict) receives extras: "worst" (1-3, the worst frame of a video strip)."""
     from .footage import _vision
     if cfg.get("vet_provider", "local") == "off": return True, "unchecked (vetting off)"
     subj = ""
@@ -34,10 +35,14 @@ def check(cfg, img, narration, subject=None, video=False):
                 f"but it must NOT show its name or logo.")
     prompt = CHECK.format(what="video clip (three frames from it, left to right)" if video else "AI-generated picture",
                           narration=narration[:500].replace('"', "'"), subject=subj,
-                          extra=", or the subject changing shape between the frames" if video else "")
+                          extra=", or the subject changing shape between the frames" if video else "",
+                          worst=',\n "worst_frame": 1, 2 or 3 - the frame that looks worst' if video else "")
     try: j = parse_json(_vision(cfg, img, prompt))
     except Exception as e: return False, f"check unavailable ({str(e)[:50]})"
     why = str(j.get("why", ""))[:80]
+    if info is not None:
+        try: info["worst"] = max(1, min(3, int(j.get("worst_frame", 2))))
+        except (TypeError, ValueError): info["worst"] = 2
     if _yes(j.get("garbled", False)): return False, "garbled" + (f": {why}" if why else "")
     if _yes(j.get("marks", False)): return False, "shows text/logo/flag"
     if str(j.get("fits", "no")).strip().lower() != "yes": return False, "doesn't fit the narration" + (f": {why}" if why else "")
@@ -45,9 +50,11 @@ def check(cfg, img, narration, subject=None, video=False):
 
 def _rel(p, sd): return str(Path(p).relative_to(sd)).replace("\\", "/")
 
-def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100):
+def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False):
     """slots: [{"key", "beat", "vo", "still_prompt", "motion", "subject"}] -> {key: {"still": path|None, "still_ok", "still_why",
-    "clip": path|None, "clip_ok", "clip_why", "clip_secs"}}. State is kept in fallback/ladder.json so Resume doesn't redo work."""
+    "clip": path|None, "clip_ok", "clip_why", "clip_secs", "clip_worst"}}. State is kept in fallback/ladder.json so Resume doesn't redo work.
+    full=True (Review every beat / Show all options): animate every still, also the ones that failed their check, so the
+    reviewer sees every treatment; otherwise the ladder stops at the first step that passes."""
     from . import render, footage
     sf = fd / "ladder.json"
     st = json.loads(sf.read_text(encoding="utf-8")) if sf.exists() else {}
@@ -85,7 +92,7 @@ def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100):
         for i, s in enumerate(slots):
             if stop(): raise RuntimeError("cancelled")
             r = st[s["key"]]; mp = fd / f"{s['key']}_i2v.mp4"
-            if not r.get("still_ok") or "clip" in r and (r["clip"] is None or mp.exists()): continue
+            if not (r.get("still_ok") or (full and r.get("still"))) or "clip" in r and (r["clip"] is None or mp.exists()): continue
             if not media.ok(mp):
                 try:
                     g = wg.gen({"model_type": cfg["video_model"], "prompt": (s.get("motion") or s["still_prompt"]) + render.STYLE,
@@ -104,9 +111,10 @@ def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100):
             except Exception as e: log(f"  {str(e)[:160]}")
             for s in todo:
                 r = st[s["key"]]; strip = fd / f"{s['key']}_i2v_strip.jpg"
-                try: media.frames_strip(sd / r["clip"], strip); ok, why = check(cfg, strip, s["vo"], s.get("subject"), video=True)
+                info = {}
+                try: media.frames_strip(sd / r["clip"], strip); ok, why = check(cfg, strip, s["vo"], s.get("subject"), video=True, info=info)
                 except Exception as e: ok, why = False, f"frame check failed ({str(e)[:50]})"
-                r["clip_ok"], r["clip_why"] = ok, why; save()
+                r["clip_ok"], r["clip_why"], r["clip_worst"] = ok, why, info.get("worst", 2); save()
             footage.unload_vet_model(cfg)
     else:
         for s in slots: st[s["key"]].setdefault("clip_why", "image-to-video off in settings")

@@ -242,7 +242,7 @@ def depth_free(img, prefix):
     p = Path(f"{prefix}_L0.jpg"); im.crop((x0, y0, x0 + W, y0 + H)).save(p, quality=92)
     return [p]
 
-def do_fallback(job, plan, cfg, wg, log, stop):
+def do_fallback(job, plan, cfg, wg, log, stop, full=False):
     """The visual ladder for beats that step 1 didn't cover (stock footage for generic beats, real photos for subject beats):
     2 WanGP still -> 3 WanGP image-to-video (GENERATED) -> 4 parallax of the still (PARALLAX) -> 5 3D reconstruction / headline card.
     Every step is checked against the beat's narration (ladder.py); a failed check escalates. A beat's map backdrop (geography)
@@ -253,10 +253,12 @@ def do_fallback(job, plan, cfg, wg, log, stop):
     pick = json.loads((sd / "stock" / "pick.json").read_text(encoding="utf-8"))
     ff = sd / "fallback.json"; out = json.loads(ff.read_text(encoding="utf-8")) if ff.exists() else {}
     allneeds = _needs(plan, tm, pick, sd, cfg)
+    if full:   # Review every beat: every beat gets the whole menu, also the ones stock footage already covers (one slot)
+        allneeds = {s["id"]: allneeds.get(s["id"], 1) for s in plan["sections"] if not s.get("cta") and s["id"] in tm}
     needs = {k: v for k, v in allneeds.items() if k not in out}
     log("Visual ladder per beat (1 stock/photo -> 2 still -> 3 animate -> 4 parallax -> 5 reconstruction):")
     for s in plan["sections"]:   # beats step 1 covered on its own
-        if s.get("cta") or s["id"] not in tm or s["id"] in allneeds: continue
+        if s.get("cta") or s["id"] not in tm or s["id"] in _needs(plan, tm, pick, sd, cfg): continue
         log(f"  {s['id']}: stock ({len(pick.get(s['id'], []))} clip(s), coherent)")
     if not needs:
         log("  no other beats need visuals"); ff.write_text(json.dumps(out, indent=1), encoding="utf-8"); return
@@ -297,7 +299,7 @@ def do_fallback(job, plan, cfg, wg, log, stop):
                           "motion": s.get("motion", ""), "subject": s.get("subject")})
     gpu = bool(slots) and wg.alive()
     if slots and not gpu: log("  WanGP isn't reachable: skipping steps 2-4")
-    st = ladder.run(cfg, wg, sd, fd, slots, log, stop, gpu) if slots else {}
+    st = ladder.run(cfg, wg, sd, fd, slots, log, stop, gpu, full=full) if slots else {}
     for s in plan["sections"]:
         if s["id"] not in needs: continue
         items = pre[s["id"]]; bd = s.get("backdrop") or {}
@@ -435,7 +437,9 @@ def build(job, plan, cfg, log):
     ef = job / "entities.json"
     story_subjects = any(e.get("kind") != "person" for e in (json.loads(ef.read_text(encoding="utf-8")) if ef.exists() else []))
     (pub / "media" / "fb").mkdir(parents=True, exist_ok=True)
-    beats, parts, t = [], [], 0.0
+    from . import review
+    rv = review.load(job)
+    beats, parts, t, used = [], [], 0.0, []
     for i, s in enumerate(secs):
         last = i == len(secs) - 1
         d = (tm[s["id"]]["dur"] + (TAIL if last else GAP)) / speed
@@ -454,27 +458,37 @@ def build(job, plan, cfg, log):
         clips = [c for c in clips if _clip_len(sd, c) > 0]
         fb = fallback.get(s["id"], []) if cap(clips) < d - 0.5 else []
         items = [("clip", c, _clip_len(sd, c) / 0.85) for c in clips] + [("fb", x, x.get("secs", FB_SECS)) for x in fb]
+        dec = review.final_items(rv, s) if rv else None   # the reviewer's choice for this beat (visual review)
+        if dec is not None:
+            items = [("clip", x["clip"], _clip_len(sd, x["clip"]) / 0.85) if x["type"] == "stock" else ("fb", x, x.get("secs", FB_SECS)) for x in dec]
+            items = [it for it in items if it[0] != "clip" or it[2] > 0]
+            if items and sum(it[2] for it in items) < d - 0.3 and any(it[0] == "clip" or it[1]["type"] == "video" for it in items):
+                base = list(items)   # chosen footage shorter than the beat: play the choice again rather than run out
+                while sum(it[2] for it in items) < d - 0.3 and len(items) < 12: items += base
         caps = [it[2] for it in items]; tot = sum(caps) or 1.0; t0 = 0.0
         for k, (kind, c, cp) in enumerate(items):   # screen time in proportion to length, so no clip runs out early
             if kind == "clip":
                 src = sd / "stock" / "clips" / f"{c['id']}.mp4"
                 dst = pub / "media" / "stock" / f"{c['id']}.mp4"
                 if not dst.exists(): shutil.copy2(src, dst)
+                used.append(f"stock/clips/{c['id']}.mp4")
                 bg = {"src": f"media/stock/{c['id']}.mp4", "type": "video", "from": round(t0, 3)}
                 if story_subjects: bg["tag"] = "ILLUSTRATIVE"   # generic footage in a story about a specific event
                 if c.get("orient") == "landscape": bg["fit"] = "frame"
             elif c["type"] == "image":
-                dst = pub / "media" / "fb" / Path(c["src"]).name
+                used.append(c["src"]); dst = pub / "media" / "fb" / Path(c["src"]).name
                 if not dst.exists(): shutil.copy2(sd / c["src"], dst)
-                bg = {"type": "image", "src": f"media/fb/{Path(c['src']).name}", "fit": "frame", "credit": c.get("short_credit", ""), "tag": "FILE", "from": round(t0, 3)}
-            elif c["type"] == "video":   # WanGP image-to-video (ladder step 3)
-                dst = pub / "media" / "fb" / Path(c["src"]).name
+                bg = {"type": "image", "src": f"media/fb/{Path(c['src']).name}", "fit": "frame", "credit": c.get("short_credit", ""), "tag": c.get("tag", "FILE"), "from": round(t0, 3)}
+                if not bg["tag"]: del bg["tag"]
+            elif c["type"] == "video":   # WanGP image-to-video (ladder step 3), or your own clip
+                used.append(c["src"]); dst = pub / "media" / "fb" / Path(c["src"]).name
                 if not dst.exists(): shutil.copy2(sd / c["src"], dst)
                 bg = {"type": "video", "src": f"media/fb/{Path(c['src']).name}", "tag": c.get("tag", "GENERATED"), "from": round(t0, 3)}
+                if not bg["tag"]: del bg["tag"]
             elif c["type"] == "layers":
                 srcs = []
                 for lp in c["layers"]:
-                    dst = pub / "media" / "fb" / Path(lp).name
+                    used.append(lp); dst = pub / "media" / "fb" / Path(lp).name
                     if not dst.exists(): shutil.copy2(sd / lp, dst)
                     srcs.append(f"media/fb/{Path(lp).name}")
                 bg = {"type": "layers", "layers": srcs, "from": round(t0, 3)}
@@ -502,6 +516,7 @@ def build(job, plan, cfg, log):
     args = sum([["-i", p] for p, _ in parts], [])
     media.ff(*args, "-filter_complex", flt, "-map", "[out]", "-ar", 48000, pub / "voice.wav")
     data = {"audio": "voice.wav", "total": round(t, 3), "tag": plan.get("tag", ""), "beats": beats}
+    (sd / "used.json").write_text(json.dumps(sorted(set(used)), indent=1), encoding="utf-8")
     (pub / "teaser.json").write_text(json.dumps(data, indent=1, ensure_ascii=False), encoding="utf-8")
     log(f"Short timeline: {t:.1f}s, {len(beats)} beats, {sum(len(b['bgs']) for b in beats)} clips")
     return t
