@@ -47,17 +47,22 @@ def _rules(text):
     tm = re.search(r"(?:text|notes|article|transcript)\s*:\s*(.{40,})", t, re.S | re.I)
     if tm and not m and not p: out["input"].update(type="text", source=tm.group(1).strip())
     if re.search(r"notebook ?lm", low) and not m and "type" not in out["input"]: out["input"]["type"] = "local_file"
-    both = re.search(r"\bboth\b|short and (an? )?(long|explainer)|(explainer|long[- ]form|long video) and (a )?short", low)
-    if both: out["output"]["mode"] = "both"
-    elif re.search(r"\bexplainer\b|long[- ]form|long video|full video", low): out["output"]["mode"] = "explainer"
-    elif re.search(r"\bshorts?\b", low): out["output"]["mode"] = "short"
+    SHORTISH = r"\bshorts?\b|vertical (clip|video|cut)|\breels?\b|tiktok|9:16"
+    LONGISH = r"\bexplainer\b|long[- ]?form|long video|full(-length)? video|16:9"
+    WORDS = {"three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "twelve": 12, "fifteen": 15, "twenty": 20}
+    mins = [int(x) for x in re.findall(r"\b(\d{1,2})[- ]?(?:min|mins|minutes?)\b", low)] + \
+           [WORDS[w] for w in re.findall(r"\b(" + "|".join(WORDS) + r")[- ]?(?:min|mins|minutes?)\b", low)]
+    longish = bool(re.search(LONGISH, low)) or any(m >= 3 for m in mins)   # "a 2 minute Short" is still a Short
+    if mins and any(m >= 3 for m in mins): out["output"]["long_minutes"] = max(m for m in mins if m >= 3)
+    if any(m < 3 for m in mins): out["output"]["short_length"] = min(m for m in mins if m < 3) * 60   # "a 2 minute Short"
+    if re.search(r"\bboth\b", low) or (re.search(SHORTISH, low) and longish): out["output"]["mode"] = "both"
+    elif longish: out["output"]["mode"] = "explainer"
+    elif re.search(SHORTISH, low): out["output"]["mode"] = "short"
     mm = re.search(r"\b(\d):([0-5]\d)\b", t)
     if mm: out["output"]["short_length"] = int(mm.group(1)) * 60 + int(mm.group(2))
     sm = re.search(r"\b(\d{2,3})\s*(?:s|sec|secs|seconds)\b", low)
     if sm: out["output"]["short_length"] = int(sm.group(1))
-    lm = re.search(r"\b(\d{1,2})[- ]?(?:min|mins|minutes|minute)\b", low)
-    if lm: out["output"]["long_minutes"] = int(lm.group(1))
-    if re.search(r"review (mode|every beat|each beat|the visuals|visuals)|pick (the )?visuals|choose (the )?visuals", low): out["pipeline"]["visuals"] = "review"
+    if re.search(r"review (mode|every beat|each beat|the visuals|visuals)|(pick|choose|approve|check) (the )?(visuals|footage|images|pictures)", low): out["pipeline"]["visuals"] = "review"
     if re.search(r"\bauto(matic)? (mode|visuals)\b|\bdraft\b", low) and "visuals" not in out["pipeline"]: out["pipeline"]["visuals"] = "auto"
     if re.search(r"(review|read|check|approve|see|edit) (the |my )?script|script review", low): out["pipeline"]["script_review"] = True
     if re.search(r"(skip|no) script review|don'?t (need to )?review the script", low): out["pipeline"]["script_review"] = False
@@ -122,9 +127,12 @@ def parse(text, cfg):
             try:
                 if j.get(k) is not None: spec["output"][dst] = max(lo, min(hi, int(float(j[k]))))
             except (TypeError, ValueError): pass
+        low = text.lower()   # a small model invents switches: only take one when the text talks about that topic
+        topic = {"script_review": r"script", "captions": r"caption|subtitle", "presenter": r"presenter|host|avatar"}
         for k in ("script_review", "captions", "presenter"):
-            if isinstance(j.get(k), bool): spec["pipeline"][k] = j[k]
-        if isinstance(j.get("visuals_review"), bool): spec["pipeline"]["visuals"] = "review" if j["visuals_review"] else "auto"
+            if isinstance(j.get(k), bool) and re.search(topic[k], low): spec["pipeline"][k] = j[k]
+        if isinstance(j.get("visuals_review"), bool) and re.search(r"visual|beat|footage|image|picture|review", low):
+            spec["pipeline"]["visuals"] = "review" if j["visuals_review"] else "auto"
         if j.get("script_ai") in AIS: spec["pipeline"]["script_ai"] = j["script_ai"]
         for k in ("title", "credit"):
             if isinstance(j.get(k), str): spec["input"][k] = j[k][:120]
