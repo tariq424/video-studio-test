@@ -374,7 +374,8 @@ def _render(job, comp, props, out, cfg, log, frames=None, scale=1.0, audio=True)
 def _nframes(p):
     o = subprocess.run([media._bin("ffprobe"), "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries", "stream=nb_read_packets",
                         "-of", "csv=p=0", str(p)], capture_output=True, text=True).stdout.strip()
-    return int(o or 0)
+    m = re.search(r"\d+", o or "")   # some ffprobe builds print "412," here
+    return int(m.group()) if m else 0
 
 def ensure_keyframes(job, log):
     """Shorts: one re-encode that puts a keyframe exactly on every beat boundary, so a beat can be swapped without re-encoding the
