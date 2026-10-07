@@ -571,10 +571,12 @@ def do_render(job, plan, cfg, meta, log, stop):
     log(f"Rendering the Short with Remotion ({total:.0f}s of video)...")
     for attempt in range(3):
         p = subprocess.Popen(cmd, cwd=rdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
-        last, t0, tail = "", time.time(), []
+        last, t0, tail, errline = "", time.time(), [], ""
         for line in p.stdout:
             line = line.strip()
-            if line: last = line; tail = (tail + [line])[-40:]
+            if line:
+                last = line; tail = (tail + [line])[-40:]
+                if re.search(r"\b\w*Error\b|error:", line) and "│" not in line and not line.lstrip().startswith("at "): errline = line[:300]
             if time.time() - t0 > 30 and last: log("  " + last[:160]); t0 = time.time()
             if stop(): p.kill(); raise RuntimeError("cancelled")
         if p.wait() == 0: break
@@ -582,7 +584,7 @@ def do_render(job, plan, cfg, meta, log, stop):
             # headless Chrome sometimes starts slowly (busy GPU/disk); Remotion gives it 25 s - just start again
             log(f"  Remotion couldn't connect to its browser in time; retrying the render ({attempt + 2} of 3)"); time.sleep(10); continue
         for l in tail[-15:]: log("  | " + l[:200])
-        raise RuntimeError("Remotion render failed: " + " / ".join(x for x in tail[-6:] if x)[:400])
+        raise RuntimeError("Remotion render failed: " + (re.sub(r"\x1b\[[0-9;]*m", "", errline) or " / ".join(x for x in tail[-6:] if x)[:400]))
     if out.exists(): out.unlink()
     tmp.rename(out)
     # YouTube description: credit the source we summarised; stock libraries need no credit (NASA asks for a courtesy credit)
