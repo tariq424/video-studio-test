@@ -252,13 +252,13 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False):
     tm = json.loads((sd / "timings.json").read_text(encoding="utf-8"))
     pick = json.loads((sd / "stock" / "pick.json").read_text(encoding="utf-8"))
     ff = sd / "fallback.json"; out = json.loads(ff.read_text(encoding="utf-8")) if ff.exists() else {}
-    allneeds = _needs(plan, tm, pick, sd, cfg)
+    allneeds = base_needs = _needs(plan, tm, pick, sd, cfg)
     if full:   # Review every beat: every beat gets the whole menu, also the ones stock footage already covers (one slot)
         allneeds = {s["id"]: allneeds.get(s["id"], 1) for s in plan["sections"] if not s.get("cta") and s["id"] in tm}
     needs = {k: v for k, v in allneeds.items() if k not in out}
     log("Visual ladder per beat (1 stock/photo -> 2 still -> 3 animate -> 4 parallax -> 5 reconstruction):")
     for s in plan["sections"]:   # beats step 1 covered on its own
-        if s.get("cta") or s["id"] not in tm or s["id"] in _needs(plan, tm, pick, sd, cfg): continue
+        if s.get("cta") or s["id"] not in tm or s["id"] in base_needs: continue
         log(f"  {s['id']}: stock ({len(pick.get(s['id'], []))} clip(s), coherent)")
     if not needs:
         log("  no other beats need visuals"); ff.write_text(json.dumps(out, indent=1), encoding="utf-8"); return
@@ -273,6 +273,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False):
         if bd.get("kind") == "map": items.append({"type": "graphic", "g": bd, "rung": "map"})
         have = len(pick.get(s["id"], []))
         why1 = f"only {have} coherent stock clip(s)" if have else "no coherent stock"
+        if s["id"] not in base_needs: why1 = ""   # stock covers this beat; the other treatments are made for the review menu
         if s.get("subject"):   # step 1 for a subject beat: real licensed photos of it (FILE), only where a photo can show this moment
             inside = s["subject"].get("interior") or re.search(r"\b(cockpit|flight deck|pilots?|captain)\b", " ".join(s["queries"]), re.I)
             bp = phases.get(s["id"], ""); pics = []

@@ -1,5 +1,6 @@
 import React from "react";
 import { AbsoluteFill, Img, interpolate, staticFile, useCurrentFrame, useVideoConfig, Easing } from "remotion";
+import { asset } from "./asset";
 import { geoMercator, geoPath, geoInterpolate } from "d3-geo";
 import { feature } from "topojson-client";
 // Natural Earth 1:50m country outlines (public domain), bundled offline
@@ -113,7 +114,7 @@ export const LayersBackdrop: React.FC<{ layers: string[]; dur: number; seed: num
         const x = dir * interpolate(e, [0, 1], [-40, 40]) * depth;
         const y = interpolate(e, [0, 1], [10, -10]) * depth;
         const s = 1.08 + 0.05 * depth * e;
-        return <Img key={i} src={staticFile(src)} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover",
+        return <Img key={i} src={asset(src)} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover",
           transform: `translate(${x}px, ${y}px) scale(${s})` }} />;
       })}
     </AbsoluteFill>

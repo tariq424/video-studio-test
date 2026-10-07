@@ -163,15 +163,16 @@ def collect(job, plan, cfg, log, mode="auto"):
 def _card(text, sub, out, size=(270, 480)):
     from PIL import Image, ImageDraw
     from .photos import _font
+    k = size[0] / 270
     im = Image.new("RGB", size, (14, 20, 32)); dr = ImageDraw.Draw(im)
-    f1, f2 = _font(16, True), _font(13)
-    dr.text((14, 16), sub.upper()[:28], font=f2, fill=(245, 165, 36))
+    f1, f2 = _font(int(16 * k), True), _font(int(13 * k))
+    dr.text((14 * k, 16 * k), sub.upper()[:28], font=f2, fill=(245, 165, 36))
     words, lines, cur = str(text).split(), [], ""
     for w in words:
         if len(cur) + len(w) > 20: lines.append(cur); cur = w
         else: cur = (cur + " " + w).strip()
     if cur: lines.append(cur)
-    for i, ln in enumerate(lines[:9]): dr.text((14, 60 + i * 24), ln, font=f1, fill=(230, 237, 243))
+    for i, ln in enumerate(lines[:9]): dr.text((14 * k, (60 + i * 24) * k), ln, font=f1, fill=(230, 237, 243))
     im.save(out, quality=85)
 
 def _cover(src, out, size=(270, 480), crop=None):
@@ -191,12 +192,38 @@ def _contain(src, out, size=(270, 480)):
 def _frame(src, t, out, w=540):
     media.ff("-ss", f"{max(0.0, t):.2f}", "-i", src, "-frames:v", 1, "-vf", f"scale={w}:-2", out)
 
+_bundle_lock = threading.Lock()
+
+def _bundle(log):
+    """One pre-built Remotion bundle for all previews (rebuilt when remotion/src changes): bundling is most of a render's
+    start-up time, and previews load their media over http from Video Studio itself, so no per-job public dir is needed."""
+    from . import short, config
+    rdir = short._ensure_remotion(log); out = rdir / "_preview_bundle"; stamp = out / "_src_mtime.txt"
+    newest = str(max(f.stat().st_mtime for f in (rdir / "src").rglob("*") if f.is_file()))
+    with _bundle_lock:
+        if not (stamp.exists() and stamp.read_text() == newest):
+            log("  preparing the preview renderer (once after each update)...")
+            p = subprocess.run([short._npx(), "remotion", "bundle", "src/Root.tsx", f"--out-dir={out}", "--log=error"], cwd=rdir,
+                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900)
+            if p.returncode != 0: raise RuntimeError("preview bundle failed: " + (p.stdout + p.stderr).strip()[-300:])
+            stamp.write_text(newest)
+    return rdir, out
+
+def _urlify(bg, sd):
+    """Media paths (relative to the job's short folder) -> http URLs served by Video Studio (/files/<job>/short/...)."""
+    import os
+    base = f"http://127.0.0.1:{os.environ.get('PORT') or 42020}/files/{Path(sd).parent.name}/short/"
+    bg = json.loads(json.dumps(bg))
+    if bg.get("src"): bg["src"] = base + bg["src"]
+    if bg.get("layers"): bg["layers"] = [base + x for x in bg["layers"]]
+    return bg
+
 def _remotion(sd, bg, secs, out, cfg, log, frame=None, frames=None, scale=0.25):
     from . import short
-    rdir = short._ensure_remotion(log); out = Path(out); out.parent.mkdir(parents=True, exist_ok=True)
-    pf = out.with_name(out.stem + "_props.json"); pf.write_text(json.dumps({"bg": bg, "secs": secs}), encoding="utf-8")
-    cmd = [short._npx(), "remotion", "still" if frame is not None else "render", "src/Root.tsx", "ShotPreview", str(out), f"--props={pf}",
-           f"--public-dir={sd}", f"--gl={short._gl(cfg)}", f"--scale={scale}", "--log=error"]
+    rdir, bundle = _bundle(log); out = Path(out); out.parent.mkdir(parents=True, exist_ok=True)
+    pf = out.with_name(out.stem + "_props.json"); pf.write_text(json.dumps({"bg": _urlify(bg, sd), "secs": secs}), encoding="utf-8")
+    cmd = [short._npx(), "remotion", "still" if frame is not None else "render", str(bundle), "ShotPreview", str(out), f"--props={pf}",
+           f"--gl={short._gl(cfg)}", f"--scale={scale}", "--log=error"]
     cmd += [f"--frame={frame}"] if frame is not None else [f"--frames={frames[0]}-{frames[1]}", "--crf=26", "--concurrency=2"]
     for attempt in range(2):
         p = subprocess.run(cmd, cwd=rdir, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900)
@@ -251,9 +278,9 @@ def preview(job, cid, cfg, log):
     out = pd / f"{cid}.mp4"
     if c["rung"] in STATIC or (t == "graphic" and it["g"].get("kind") in ("headline",)):
         src = sd / (it["src"] if t == "image" else it["layers"][0] if t == "layers" else c["thumb"])
-        if t == "graphic":
-            big = pd / f"{cid}.jpg"
-            if not big.exists(): _remotion(sd, it, 4, big, cfg, log, frame=FPS * 2, scale=0.5)
+        if t == "graphic":   # a headline card: drawn larger here (no renderer needed for a static card)
+            big = pd / f"{cid}.jpg"; g = it.get("g", {})
+            if not big.exists(): _card(g.get("text", ""), g.get("kicker") or "headline card", big, size=(540, 960))
             src = big
         return {"image": _rel(src, sd)}
     if out.exists(): return {"video": _rel(out, sd)}
