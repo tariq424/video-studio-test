@@ -576,7 +576,7 @@ def do_render(job, plan, cfg, meta, log, stop):
             line = line.strip()
             if line:
                 last = line; tail = (tail + [line])[-40:]
-                if re.search(r"\b\w*Error\b|error:", line) and "│" not in line and not line.lstrip().startswith("at "): errline = line[:300]
+                if not errline and re.search(r"\b\w*Error\b|error:", line) and "│" not in line and not line.lstrip().startswith("at "): errline = line[:300]
             if time.time() - t0 > 30 and last: log("  " + last[:160]); t0 = time.time()
             if stop(): p.kill(); raise RuntimeError("cancelled")
         if p.wait() == 0: break
