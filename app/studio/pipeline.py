@@ -99,6 +99,14 @@ class Studio:
                status="queued", stage="short_stock", done=["transcript", "short_script", "review"], title="Smoke test", created=time.time())
         j.log(f"Smoke test job created (one beat, visual review: {visual_review})"); self.q.put(jid); return jid
 
+    def rerender(self, jid):
+        """Full re-render on request (post-render edits are kept: Shorts from the review decisions, long videos from edit_clip)."""
+        j = self.job(jid); st = "short_render" if j.state.get("short_output") else "assemble"
+        if st == "assemble":
+            for p in (j.dir / "build").glob("sec_*.mp4"): p.unlink(missing_ok=True)
+        d = [x for x in j.state.get("done", []) if x != st]
+        j.save(done=d, status="queued"); j.log("Full re-render requested"); self.q.put(jid)
+
     def resume(self, jid):
         j = self.job(jid); self.cancel.discard(jid); j.save(status="queued", error=""); j.log("Resumed"); self.q.put(jid)
     def stop(self, jid): self.cancel.add(jid); self.job(jid).log("Stop requested")
@@ -261,7 +269,7 @@ class Studio:
                     from . import thumb916, review
                     try: j.save(thumbnail=str(thumb916.make(j.dir, sp, cfg, log)))
                     except Exception as e: log(f"  thumbnail failed ({str(e)[:200]})")
-                    try: review.prune(j.dir, log)
+                    try: review.prune(j.dir, log, full=False)
                     except Exception as e: log(f"  pruning failed ({str(e)[:120]})")
             elif st == "review":
                 qs = [q for p in (j.plan(), j.short_plan()) if p for q in p.get("questions", [])]

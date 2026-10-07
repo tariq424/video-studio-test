@@ -32,6 +32,7 @@ main>section{min-width:0}
 .rv-c .wrn{position:relative}.rv-c .wrn:after{content:"⚠";position:absolute;top:6px;right:8px;font-size:22px;color:#ffcc00;text-shadow:0 0 4px #000}
 .rv-badge{font-size:12px;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}.rv-prev{margin:6px 0}.rv-prev video,.rv-prev img{max-height:420px;width:auto;border-radius:8px}
 .rv-note{font-size:12.5px;color:var(--mut);border-left:2px solid var(--line);padding-left:8px;margin:4px 0}
+.ed-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}.ed-fit button{padding:5px 10px;font-size:12.5px}.ed-fit button.on{background:var(--acc);color:#111;border-color:var(--acc)}
 </style></head><body>
 <header><h1>Video Studio</h1><span class="mut">YouTube, NotebookLM audio or notes → explainer + Short</span><span style="flex:1"></span>
 <span id="pw" class="pill">WanGP …</span><span id="pk" class="pill">API key …</span><button class="sec" onclick="toggleSettings()">Settings</button></header>
@@ -113,12 +114,12 @@ async function loadDetail(){if(editing)return;const s=await j('/api/jobs/'+sel);
  if(['error','stopped'].includes(s.status))h+=`<button onclick="act('resume')">Resume</button>`;
  h+=`</div>`;
  if(s.status=='error'&&s.stage=='transcript')h+=`<details open style="margin-top:12px"><summary>Paste transcript (continues without YouTube)</summary><textarea id="jptx" rows="8" style="width:100%" placeholder="Paste the video's transcript here"></textarea><button onclick="pasteTx()">Use this transcript and continue</button> <span id="jptxm" class="mut"></span></details>`;
- if(s.short_output){const rel=s.short_output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished Short: <code>${esc(s.short_output)}</code><br><span class="mut">YouTube description with credits: output/youtube_short_description.txt</span></p><div class="row" style="align-items:flex-start"><video controls style="max-width:360px" src="/files/${sel}/${rel}"></video><div id="thumbp" style="flex:1;min-width:260px"></div></div>`}
- if(s.output){const rel=s.output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished video: <code>${esc(s.output)}</code></p><video controls src="/files/${sel}/${rel}"></video>`}
+ if(s.short_output){const rel=s.short_output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished Short: <code>${esc(s.short_output)}</code><br><span class="mut">YouTube description with credits: output/youtube_short_description.txt</span></p><div class="row" style="align-items:flex-start"><div><video id="ov" controls style="max-width:360px" src="/files/${sel}/${rel}?t=${Date.now()}" ontimeupdate="edTick()"></video><div id="edbar"></div></div><div id="thumbp" style="flex:1;min-width:260px"></div></div><div id="edp"></div>`}
+ if(s.output&&!s.short_output){const rel=s.output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished video: <code>${esc(s.output)}</code></p><video id="ov" controls src="/files/${sel}/${rel}?t=${Date.now()}" ontimeupdate="edTick()"></video><div id="edbar"></div><div id="edp"></div>`}
  h+=`<div id="rvp"></div><div id="sdoc"></div><div id="doc"></div><div id="ed"></div>`;
  h+=`<details ${s.status=='error'?'open':''} style="margin-top:18px"><summary class="mut">Technical log</summary><pre id="log">${esc((s.log||[]).join('\n'))}</pre></details>`;
  $('detail').innerHTML=h;const l=$('log');if(l)l.scrollTop=l.scrollHeight;
- if(s.status=='awaiting_visuals')showReview();if(s.thumbnail)showThumb(s);
+ if(s.status=='awaiting_visuals')showReview();if(s.thumbnail)showThumb(s);if(s.status=='finished'&&(s.short_output||s.output))edInit();
  if(s.status!='awaiting_visuals'){if(s.plan_summary&&done.includes('script'))showScript(s);if(s.short_summary&&done.includes('short_script'))showShort(s)}}
 // fact-check questions: a to-do while the job waits for review; just notes once review was skipped
 function qbox(qs,st){const waiting=st&&st.status=='awaiting_review';
@@ -203,5 +204,63 @@ async function showThumb(s){const o=await j(`/api/jobs/${sel}/thumbnail`);const 
  <div class="row" style="margin-top:8px"><button onclick="thumbGo()">Regenerate</button><button class="sec" onclick="thumbGo(true)">Approve</button><span id="tmsg" class="mut"></span></div>`}
 async function thumbGo(ap){$('tmsg').textContent='Working...';try{await rvPost(`/api/jobs/${sel}/thumbnail`,ap?{approve:true}:{beat:$('tb').value,text:$('tt').value,size:$('tsz').value,color:$('tcol').value,src:$('tsrc').value.trim()});$('tmsg').textContent='';showThumb()}catch(e){$('tmsg').textContent=e.message}}
 async function smoke(){$('ssaved').textContent='Starting smoke test...';const d=await rvPost('/api/smoke',{visual_review:'every'});sel=d.id;$('ssaved').textContent='Smoke test job '+d.id;loadJobs()}
+
+// ---------------- post-render editing (every output type)
+let ED={beats:[],kind:null,cur:null,open:null,space:'short',rv:null,sel:[],fit:'auto',timer:null};
+const FITS=[['auto','Auto'],['freeze','Freeze'],['slow','Slow down'],['loop','Loop'],['trim','Trim'],['speed','Speed up'],['still','Add still']];
+function fmtT(x){return Math.floor(x/60)+':'+String(Math.floor(x%60)).padStart(2,'0')}
+async function edInit(){try{const d=await j(`/api/jobs/${sel}/edit/beats`);ED.beats=d.beats||[];ED.kind=d.kind;edBar(d)}catch(e){}}
+function edAt(t){return ED.beats.find(b=>t>=b.start&&t<b.start+b.dur)}
+function edTick(){const v=$('ov');if(!v||!ED.beats.length)return;const b=edAt(v.currentTime);const k=b?b.id:'';if(k!==ED.cur){ED.cur=k;edBar()}}
+function edBar(d){const el=$('edbar');if(!el)return;const v=$('ov');const b=v?edAt(v.currentTime):null;d=d||ED.last||{};ED.last=d;
+ let h=`<div class="ed-bar">`;
+ if(d.busy)h+=`<span class="rv-badge" style="color:var(--acc)">${esc(d.busy)}</span>`;
+ else if(b&&b.editable)h+=`<button onclick="edOpen('${b.id}')">Edit at ${fmtT(v.currentTime)} (${esc(b.label)}${ED.kind=='long'?' · '+b.id:''})</button>`;
+ else if(b)h+=`<span class="mut" style="font-size:13px">${esc(b.label)}: not editable (title/end card)</span>`;
+ else h+=`<span class="mut" style="font-size:13px">Play or scrub to a beat to edit it</span>`;
+ if(d.undo&&!d.busy)h+=`<button class="sec" onclick="edAll('undo')">Undo last edit</button>`;
+ h+=`<button class="sec" onclick="if(confirm('Re-render the whole video? Your edits are kept.'))edAll('rerender')">Full re-render</button><button class="sec" onclick="edAll('cleanup')" title="Deletes previews and unused treatment files; thumbnails stay">Done editing (clean up)</button>`;
+ if(d.error)h+=`<span style="color:var(--bad);font-size:13px">Last edit failed: ${esc(d.error)}</span>`;
+ if(d.edits&&d.edits.length)h+=`<span class="mut" style="font-size:12px">${d.edits.length} edit(s) applied</span>`;
+ el.innerHTML=h+`</div>`}
+async function edAll(a){try{await rvPost(`/api/jobs/${sel}/edit_all/${a}`);if(a=='undo'){edReload()}else{lastKey='';loadJobs()}}catch(e){alert(e.message)}}
+function edReload(){const v=$('ov');if(v){const t=v.currentTime;v.src=v.src.split('?')[0]+'?t='+Date.now();v.currentTime=t}edInit()}
+const edQ=()=>ED.space=='long'?'?space=long':'';const edBase=()=>`/files/${sel}/${ED.space=='long'?'longedit/':''}short/`;
+async function edOpen(bid){const v=$('ov');if(v)v.pause();$('edp').innerHTML='<p class="mut">Opening the beat…</p>';
+ try{const r=await fetch(`/api/jobs/${sel}/edit/open/${bid}`,{method:'POST'});const d=await r.json();if(!r.ok)throw new Error(d.error);
+  ED.open=bid;ED.space=d.space;ED.rv=d.rv;const b=ED.rv.beats[bid];ED.sel=[...(b.current||[])];ED.fit='auto';edDraw()}catch(e){$('edp').innerHTML=`<p style="color:var(--bad)">${esc(e.message)}</p>`}}
+function edDraw(){const bid=ED.open,b=ED.rv.beats[bid],bt=ED.beats.find(x=>x.id==bid)||{};
+ let h=`<div class="card" style="margin-top:12px"><div class="row"><h2 style="margin:0">Edit ${esc(bt.label||bid)} <span class="mut" style="font-weight:400;font-size:13px">${fmtT(bt.start||0)}–${fmtT((bt.start||0)+(bt.dur||0))} · ${(bt.dur||0).toFixed(1)}s</span></h2><span style="flex:1"></span><button class="sec" onclick="ED.open=null;$('edp').innerHTML=''">Close</button></div>
+ <p style="margin:6px 0">${esc(b.vo)}</p>${b.busy?`<span class="rv-badge" style="color:var(--acc)">${esc(b.busy)}</span>`:''}
+ <div class="mut" style="font-size:13px">Tick the treatment(s) to use (they play in the order ticked); click a thumbnail to preview it. Blue outline = in the video now.</div><div class="rv-row">`;
+ for(const cid of b.cands){const c=ED.rv.cands[cid];if(c.missing)continue;const i=ED.sel.indexOf(cid);const tag=c.item.tag?` · ${esc(c.item.tag)}`:'';
+  h+=`<div class="rv-c ${i>=0?'sel':''} ${(b.current||[]).includes(cid)?'auto':''}"><div class="${c.worst?'wrn':''}"><img loading="lazy" src="${c.thumb?edBase()+c.thumb:''}" onclick="edCand('${cid}')" style="${ED.space=='long'?'width:213px;height:120px':''}"></div>
+  <b>${esc(RUNG[c.rung]||(c.rung=='current'?'In the video now':c.rung))}</b>${tag}<br><span class="${c.ok?'ok':'bad'}">${c.ok?'✓':'✗'} ${esc(c.why)}</span><br>
+  <label style="margin:2px 0;color:var(--fg)"><input type="checkbox" ${i>=0?'checked':''} onchange="edTickC('${cid}',this.checked)"> Use${i>=0&&ED.sel.length>1?' #'+(i+1):''}</label></div>`}
+ h+=`</div><div id="edpv" class="rv-prev"></div>
+ <div class="row ed-fit"><span class="mut" style="font-size:13px">Fit to the ${(bt.dur||0).toFixed(1)}s slot:</span>${FITS.map(([k,n])=>`<button class="sec ${ED.fit==k?'on':''}" onclick="ED.fit='${k}';edDraw()">${n}</button>`).join('')}</div>
+ <div class="row" style="margin-top:8px"><button onclick="edPreview()" ${ED.sel.length?'':'disabled'}>Preview in the video</button><button onclick="edApply()" ${ED.sel.length?'':'disabled'}>Apply to video</button>
+ <button class="sec" onclick="edSkip()">Skip (headline card)</button><button class="sec" onclick="edRv('expand')" ${b.busy?'disabled':''}>Show all options for this beat</button><button class="sec" onclick="edRv('animate')" ${b.busy?'disabled':''}>Add animation</button><span id="edmsg" class="mut"></span></div>
+ <details style="margin-top:8px"><summary>Refine / supply your own</summary>
+ <label>Tell it what to change (e.g. "nose down, storm clouds", or a file path / URL)</label><textarea id="edrf" rows="2"></textarea><div class="row"><button onclick="edRv('refine')" ${b.busy?'disabled':''}>Regenerate</button></div>
+ <label>Your own file (path on this PC or a URL) and its on-screen label</label><div class="row"><input type="text" id="edsp" style="flex:1"><select id="edst" style="width:auto"><option value="">no label</option><option>FILE</option><option>ILLUSTRATIVE</option><option>GENERATED</option></select><button class="sec" onclick="edSupply()">Add</button></div>
+ ${(b.notes||[]).map(x=>`<div class="rv-note">${esc(x.t)} you: “${esc(x.you)}” → <b>${esc(x.intent)}</b>: ${esc(x.understood)} <span style="opacity:.7">[handled by ${esc(x.backend)}]</span></div>`).join('')}</details>
+ ${b.msg?`<div class="mut" style="font-size:12.5px;margin-top:6px">${esc(b.msg)}</div>`:''}</div>`;
+ $('edp').innerHTML=h;clearTimeout(ED.timer);if(b.busy)ED.timer=setTimeout(edRefresh,4000)}
+async function edRefresh(){if(!ED.open)return;try{ED.rv=await j(`/api/jobs/${sel}/review${edQ()}`);const r=await fetch(`/api/jobs/${sel}/edit/open/${ED.open}`,{method:'POST'});const d=await r.json();if(r.ok)ED.rv=d.rv;edDraw()}catch(e){}}
+function edTickC(cid,on){const i=ED.sel.indexOf(cid);if(on&&i<0)ED.sel.push(cid);if(!on&&i>=0)ED.sel.splice(i,1);edDraw()}
+async function edCand(cid){const el=$('edpv');el.innerHTML='<span class="mut">Rendering a 2-second preview…</span>';
+ try{const d=await rvPost(`/api/jobs/${sel}/preview/${cid}${edQ()}`);el.innerHTML=(d.video?`<video autoplay loop muted playsinline src="${edBase()}${d.video}"></video>`:`<img src="${edBase()}${d.image}">`)+` <button class="sec" onclick="this.parentElement.innerHTML=''">Close</button>`}catch(e){el.innerHTML=`<span style="color:var(--bad)">${esc(e.message)}</span>`}}
+async function edPreview(){const el=$('edpv');el.innerHTML='<span class="mut">Rendering the beat as it will look in the video (half resolution)…</span>';
+ try{const d=await rvPost(`/api/jobs/${sel}/edit/preview/${ED.open}`,{cands:ED.sel,fit:ED.fit});el.innerHTML=`<div class="mut" style="font-size:13px">Fit: <b>${esc(d.fit)}</b> — ${esc(d.why)}</div><video controls autoplay playsinline src="/files/${sel}/${d.video}" style="max-height:480px"></video> <button class="sec" onclick="this.parentElement.innerHTML=''">Close</button>`}catch(e){el.innerHTML=`<span style="color:var(--bad)">${esc(e.message)}</span>`}}
+async function edApply(){if(!ED.sel.length)return;$('edmsg').textContent='Applying…';try{await rvPost(`/api/jobs/${sel}/edit/apply/${ED.open}`,{cands:ED.sel,fit:ED.fit});edWait()}catch(e){$('edmsg').textContent='';alert(e.message)}}
+async function edSkip(){const b=ED.rv.beats[ED.open];const cid=b.cands.find(c=>ED.rv.cands[c].rung=='headline');if(!cid){alert('No headline card for this beat');return}ED.sel=[cid];ED.fit='auto';edApply()}
+async function edWait(){const d=await j(`/api/jobs/${sel}/edit/beats`);edBar(d);if(d.busy){setTimeout(edWait,3000);if($('edmsg'))$('edmsg').textContent=d.busy;return}
+ if(d.error){if($('edmsg'))$('edmsg').textContent='';alert('Edit failed: '+d.error);return}
+ if($('edmsg'))$('edmsg').textContent='Applied. The video below is updated.';edReload();const bid=ED.open;if(bid){const r=await fetch(`/api/jobs/${sel}/edit/open/${bid}`,{method:'POST'});const x=await r.json();if(r.ok){ED.rv=x.rv;ED.sel=[...(ED.rv.beats[bid].current||[])];edDraw();$('edmsg').textContent='Applied. The video is updated.'}}}
+async function edRv(a){const body={action:a};if(a=='refine'){body.text=$('edrf').value.trim();if(!body.text)return}
+ try{ED.rv=await rvPost(`/api/jobs/${sel}/review/${ED.open}${edQ()}`,body);edDraw();setTimeout(edRefresh,1500)}catch(e){alert(e.message)}}
+async function edSupply(){const t=$('edsp').value.trim();if(!t)return;$('edmsg').textContent='Adding your file…';
+ try{ED.rv=await rvPost(`/api/jobs/${sel}/review/${ED.open}${edQ()}`,{action:'supply',src:t,tag:$('edst').value});ED.sel=[...ED.rv.beats[ED.open].chosen];$('edmsg').textContent='';edDraw()}catch(e){$('edmsg').textContent='';alert(e.message)}}
 srcUI();status();loadJobs();setInterval(()=>{status();loadJobs()},5000);
 </script></body></html>

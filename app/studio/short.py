@@ -233,10 +233,10 @@ def _needs(plan, tm, pick, sd, cfg):
             out[s["id"]] = max(1, min(3, math.ceil(rem / FB_SECS)))
     return out
 
-def depth_free(img, prefix):
+def depth_free(img, prefix, size=(1080, 1920)):
     """Single-layer fallback when depth estimation is unavailable: the still, cropped to the frame."""
     from PIL import Image
-    im = Image.open(img).convert("RGB"); W, H = 1080, 1920; r = max(W / im.width, H / im.height)
+    im = Image.open(img).convert("RGB"); W, H = size; r = max(W / im.width, H / im.height)
     im = im.resize((int(im.width * r + 0.5), int(im.height * r + 0.5)))
     x0, y0 = (im.width - W) // 2, (im.height - H) // 2
     p = Path(f"{prefix}_L0.jpg"); im.crop((x0, y0, x0 + W, y0 + H)).save(p, quality=92)
@@ -466,6 +466,11 @@ def build(job, plan, cfg, log):
             if items and sum(it[2] for it in items) < d - 0.3 and any(it[0] == "clip" or it[1]["type"] == "video" for it in items):
                 base = list(items)   # chosen footage shorter than the beat: play the choice again rather than run out
                 while sum(it[2] for it in items) < d - 0.3 and len(items) < 12: items += base
+        eb = rv["beats"].get(s["id"], {}).get("edit") if rv else None   # replaced in the post-render editor: same visual, same fit
+        if eb and all(c in rv["cands"] for c in eb["cands"]):
+            from . import edit
+            lay, _, _ = edit.layout(sd, [rv["cands"][c]["item"] for c in eb["cands"]], d, eb["fit"], s["vo"], edit.filler_for(rv, s["id"]))
+            bgs = [edit.to_bg(sd, it, p, s0, story_subjects, dest=pub, used=used) for it, p, s0, _ in lay]; items = []
         caps = [it[2] for it in items]; tot = sum(caps) or 1.0; t0 = 0.0
         for k, (kind, c, cp) in enumerate(items):   # screen time in proportion to length, so no clip runs out early
             if kind == "clip":
@@ -587,6 +592,11 @@ def do_render(job, plan, cfg, meta, log, stop):
         raise RuntimeError("Remotion render failed: " + (re.sub(r"\x1b\[[0-9;]*m", "", errline) or " / ".join(x for x in tail[-6:] if x)[:400]))
     if out.exists(): out.unlink()
     tmp.rename(out)
+    try:   # keyframes on beat boundaries, so a beat can be replaced later without re-encoding the whole Short
+        from . import edit
+        from .pipeline import Job
+        Job(job).save(short_output=str(out)); edit.ensure_keyframes(job, log)
+    except Exception as e: log(f"  couldn't prepare the Short for editing ({str(e)[:150]}); the first edit will do it")
     # YouTube description: credit the source we summarised; stock libraries need no credit (NASA asks for a courtesy credit)
     pick = json.loads((job / "short" / "stock" / "pick.json").read_text(encoding="utf-8"))
     srcs = {c.get("src", "Pexels") for cs in pick.values() for c in cs}

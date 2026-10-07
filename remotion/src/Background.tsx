@@ -1,5 +1,5 @@
 import React from "react";
-import { AbsoluteFill, Img, OffthreadVideo, interpolate, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Freeze, Img, Loop, OffthreadVideo, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
 import { Bg } from "./types";
 import { asset } from "./asset";
 import { MapBackdrop, HeadlineBackdrop, LayersBackdrop } from "./Backdrops";
@@ -21,6 +21,16 @@ export const Shot: React.FC<{ bg: Bg; dur: number; seed: number }> = (props) => 
   );
 };
 
+// a video background, optionally fitted to its slot (beat editing): rate = playback speed (default 0.85), start = seconds
+// into the source, freezeAt = hold the frame shown at that many seconds, loop = repeat every that many seconds
+const Vid: React.FC<{ bg: any; style: React.CSSProperties }> = ({ bg, style }) => {
+  const f = useCurrentFrame(); const { fps } = useVideoConfig();
+  const v = <OffthreadVideo src={asset(bg.src)} muted playbackRate={bg.rate ?? 0.85} trimBefore={bg.start ? Math.round(bg.start * fps) : undefined} style={style} />;
+  if (bg.loop) return <Loop durationInFrames={Math.max(1, Math.round(bg.loop * fps))} layout="none">{v}</Loop>;
+  if (bg.freezeAt != null) { const n = Math.max(0, Math.round(bg.freezeAt * fps) - 1); if (f > n) return <Freeze frame={n}>{v}</Freeze>; }
+  return v;
+};
+
 const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, seed }) => {
   const f = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
@@ -37,11 +47,10 @@ const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, s
     const z = interpolate(p, [0, 1], [1.0, 1.03]);
     return (
       <AbsoluteFill style={{ opacity: fadeIn, overflow: "hidden", background: "#000" }}>
-        <OffthreadVideo src={asset(bg.src)} muted playbackRate={0.85}
-          style={{ width: "100%", height: "100%", objectFit: "cover", filter: "blur(38px) brightness(0.55)", transform: "scale(1.15)" }} />
+        <Vid bg={bg} style={{ width: "100%", height: "100%", objectFit: "cover", filter: "blur(38px) brightness(0.55)", transform: "scale(1.15)" }} />
         <AbsoluteFill style={{ alignItems: "center", justifyContent: "center" }}>
           <div style={{ width: width, height: (width * 9) / 16, overflow: "hidden", boxShadow: "0 30px 80px rgba(0,0,0,0.6)", transform: `translateY(40px) scale(${z})` }}>
-            <OffthreadVideo src={asset(bg.src)} muted playbackRate={0.85} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <Vid bg={bg} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           </div>
         </AbsoluteFill>
       </AbsoluteFill>
@@ -51,8 +60,7 @@ const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, s
     const z = interpolate(p, [0, 1], [1.0, 1.04]);   // gentle: every % of zoom softens the picture
     return (
       <AbsoluteFill style={{ opacity: fadeIn, overflow: "hidden" }}>
-        <OffthreadVideo src={asset(bg.src)} muted playbackRate={0.85}
-          style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${z})` }} />
+        <Vid bg={bg} style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${z})` }} />
         <AbsoluteFill style={{ background: shade }} />
       </AbsoluteFill>
     );

@@ -5,6 +5,7 @@ import { GraphicView } from "./Graphics";
 import { Captions } from "./Captions";
 import { C, BODY } from "./theme";
 import { TeaserProps } from "./types";
+import { asset } from "./asset";
 
 const Progress: React.FC<{ total: number }> = ({ total }) => {
   const f = useCurrentFrame(); const { fps } = useVideoConfig();
@@ -58,7 +59,7 @@ export const Teaser: React.FC<TeaserProps> = ({ audio, total, tag, beats }) => {
       ))}
       <Tag tag={tag} hideFrom={(beats.find((b) => b.graphics.some((g) => g.g.kind === "cta"))?.start ?? 1e9)} />
       <Progress total={total} />
-      <Audio src={staticFile(audio)} />
+      <Audio src={asset(audio)} />
     </AbsoluteFill>
   );
 };

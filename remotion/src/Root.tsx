@@ -5,9 +5,10 @@ import { FPS, W, H } from "./theme";
 import { TeaserProps } from "./types";
 import { ReconBackdrop, Recon } from "./Recon";
 import { Shot } from "./Background";
+import { BeatClip, BeatClipProps } from "./BeatClip";
 
 // one background shot on its own (visual-review thumbnails and 2-second previews): props {bg, secs}; --public-dir = the job's short folder
-type ShotProps = { bg: any; secs: number };
+type ShotProps = { bg: any; secs: number; w?: number; h?: number };
 const ShotClip: React.FC<ShotProps> = ({ bg, secs }) => <Shot bg={{ ...bg, from: 0 }} dur={secs} seed={1} />;
 
 // standalone reconstruction clip (long videos render these as B-roll): props {g, secs, w, h}
@@ -37,7 +38,21 @@ const Root: React.FC = () => (
     height={H}
     durationInFrames={FPS * 7}
     defaultProps={{ bg: { type: "graphic", g: { kind: "headline", kicker: "", text: "Preview", sub: "" } }, secs: 7 } as ShotProps}
-    calculateMetadata={async ({ props }) => ({ durationInFrames: Math.max(1, Math.ceil((props as ShotProps).secs * FPS)) })}
+    calculateMetadata={async ({ props }) => ({ durationInFrames: Math.max(1, Math.ceil((props as ShotProps).secs * FPS)),
+      width: (props as ShotProps).w || W, height: (props as ShotProps).h || H })}
+  />
+  <Composition
+    id="BeatClip"
+    component={BeatClip as React.FC<any>}
+    fps={FPS}
+    width={1920}
+    height={1080}
+    durationInFrames={FPS * 7}
+    defaultProps={{ bgs: [], dur: 7 } as BeatClipProps}
+    calculateMetadata={async ({ props }) => {
+      const p = props as BeatClipProps;
+      return { durationInFrames: Math.max(1, Math.round(p.dur * FPS)), width: p.w || 1920, height: p.h || 1080 };
+    }}
   />
   <Composition
     id="Teaser"

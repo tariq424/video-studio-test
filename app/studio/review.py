@@ -19,6 +19,11 @@ STATIC = {"still", "headline", "photo"}          # click enlarges instead of pla
 _locks, _gpu = {}, threading.Lock()
 
 def _p(job): sd = Path(job) / "short"; return sd, sd / "review"
+def _sp(sd):
+    from .ladder import space
+    return space(sd)
+def _fsize(sd): sp = _sp(sd); return (sp["w"], sp["h"])
+def _tsize(sd): w, h = _fsize(sd); return (270, 480) if h > w else (480, 270)
 def _lock(job): return _locks.setdefault(str(job), threading.RLock())
 
 def load(job):
@@ -65,7 +70,7 @@ def _slot_cands(rv, sec, key, r, sd, full, log):
     if r.get("still") and (sd / r["still"]).exists():
         img = sd / r["still"]
         pre = fd / f"{key}_still"
-        lay = [Path(f"{pre}_L0.jpg")] if Path(f"{pre}_L0.jpg").exists() else short.depth_free(img, pre)
+        lay = [Path(f"{pre}_L0.jpg")] if Path(f"{pre}_L0.jpg").exists() else short.depth_free(img, pre, _fsize(sd))
         _add(rv, bid, {"type": "layers", "layers": [_rel(p, sd) for p in lay], "tag": "GENERATED"}, "still", r.get("still_ok"),
              "matches the narration" if r.get("still_ok") else (r.get("still_why") or "not checked"))
         if r.get("clip") and (sd / r["clip"]).exists():
@@ -74,7 +79,7 @@ def _slot_cands(rv, sec, key, r, sd, full, log):
                  worst=(0 if r.get("clip_ok") else r.get("clip_worst", 2)), secs=round((r.get("clip_secs") or 7) / 0.85, 2))
         par = Path(f"{fd / key}_L0.jpg")
         if not par.exists() and full:
-            try: depth.layers(img, fd / key, log)
+            try: depth.layers(img, fd / key, log, size=_fsize(sd))
             except Exception as e: log(f"  parallax for {key} failed ({str(e)[:80]})")
         if par.exists():
             lays = [par] + [Path(f"{fd / key}_L{i}.png") for i in (1, 2) if Path(f"{fd / key}_L{i}.png").exists()]
@@ -163,7 +168,7 @@ def collect(job, plan, cfg, log, mode="auto"):
 def _card(text, sub, out, size=(270, 480)):
     from PIL import Image, ImageDraw
     from .photos import _font
-    k = size[0] / 270
+    k = min(size) / 270
     im = Image.new("RGB", size, (14, 20, 32)); dr = ImageDraw.Draw(im)
     f1, f2 = _font(int(16 * k), True), _font(int(13 * k))
     dr.text((14 * k, 16 * k), sub.upper()[:28], font=f2, fill=(245, 165, 36))
@@ -209,10 +214,16 @@ def _bundle(log):
             stamp.write_text(newest)
     return rdir, out
 
-def _urlify(bg, sd):
-    """Media paths (relative to the job's short folder) -> http URLs served by Video Studio (/files/<job>/short/...)."""
+def files_url(path):
+    """http URL (Video Studio's /files/<job>/<path>) for a file inside a job folder."""
     import os
-    base = f"http://127.0.0.1:{os.environ.get('PORT') or 42020}/files/{Path(sd).parent.name}/short/"
+    from . import config
+    rel = Path(path).resolve().relative_to(Path(config.load()["jobs_dir"]).resolve()).as_posix()
+    return f"http://127.0.0.1:{os.environ.get('PORT') or 42020}/files/{rel}"
+
+def _urlify(bg, sd):
+    """Media paths (relative to the workspace's short folder) -> http URLs served by Video Studio."""
+    base = files_url(sd) + "/"
     bg = json.loads(json.dumps(bg))
     if bg.get("src"): bg["src"] = base + bg["src"]
     if bg.get("layers"): bg["layers"] = [base + x for x in bg["layers"]]
@@ -221,7 +232,8 @@ def _urlify(bg, sd):
 def _remotion(sd, bg, secs, out, cfg, log, frame=None, frames=None, scale=0.25):
     from . import short
     rdir, bundle = _bundle(log); out = Path(out); out.parent.mkdir(parents=True, exist_ok=True)
-    pf = out.with_name(out.stem + "_props.json"); pf.write_text(json.dumps({"bg": _urlify(bg, sd), "secs": secs}), encoding="utf-8")
+    w, h = _fsize(sd)
+    pf = out.with_name(out.stem + "_props.json"); pf.write_text(json.dumps({"bg": _urlify(bg, sd), "secs": secs, "w": w, "h": h}), encoding="utf-8")
     cmd = [short._npx(), "remotion", "still" if frame is not None else "render", str(bundle), "ShotPreview", str(out), f"--props={pf}",
            f"--gl={short._gl(cfg)}", f"--scale={scale}", "--log=error"]
     cmd += [f"--frame={frame}"] if frame is not None else [f"--frames={frames[0]}-{frames[1]}", "--crf=26", "--concurrency=2"]
@@ -236,30 +248,30 @@ def _remotion(sd, bg, secs, out, cfg, log, frame=None, frames=None, scale=0.25):
     return out
 
 def _thumb(job, c, cfg, log):
-    sd, rd = _p(job); td = rd / "thumbs"; td.mkdir(parents=True, exist_ok=True)
+    sd, rd = _p(job); td = rd / "thumbs"; td.mkdir(parents=True, exist_ok=True); ts = _tsize(sd)
     out = td / f"{c['id']}.jpg"
     if out.exists(): return _rel(out, sd)
     it = c["item"]; t = it["type"]
     try:
         if t == "stock":
             src = sd / "stock" / "clips" / f"{it['clip']['id']}.mp4"; _frame(src, media.dur(src) / 2, out.with_suffix(".tmp.jpg"))
-            _cover(out.with_suffix(".tmp.jpg"), out); out.with_suffix(".tmp.jpg").unlink()
-        elif t == "stock_rejected": _contain(it["sheet"], out)
+            _cover(out.with_suffix(".tmp.jpg"), out, ts); out.with_suffix(".tmp.jpg").unlink()
+        elif t == "stock_rejected": _contain(it["sheet"], out, ts)
         elif t == "video":
             src = sd / it["src"]; D = media.dur(src)
             tt = D * c["worst"] / 4 if c.get("worst") else D / 2   # garbled: the frame the check judged worst
-            _frame(src, tt, out.with_suffix(".tmp.jpg")); _cover(out.with_suffix(".tmp.jpg"), out); out.with_suffix(".tmp.jpg").unlink()
-        elif t == "image": _contain(sd / it["src"], out) if it.get("fit") == "frame" else _cover(sd / it["src"], out)
-        elif t == "layers": _cover(sd / it["layers"][0], out)
+            _frame(src, tt, out.with_suffix(".tmp.jpg")); _cover(out.with_suffix(".tmp.jpg"), out, ts); out.with_suffix(".tmp.jpg").unlink()
+        elif t == "image": _contain(sd / it["src"], out, ts) if it.get("fit") == "frame" else _cover(sd / it["src"], out, ts)
+        elif t == "layers": _cover(sd / it["layers"][0], out, ts)
         elif t == "graphic" and it["g"].get("kind") == "recon":
             _remotion(sd, it, 6, out, cfg, log, frame=FPS * 3, scale=0.25)
         elif t == "graphic" and it["g"].get("kind") == "map":
             _card(it["g"].get("title") or "Map", "map: " + ", ".join(p["name"] for p in it["g"].get("points", []))[:28], out)
         else:
-            g = it.get("g", {}); _card(g.get("text", ""), g.get("kicker") or "headline card", out)
+            g = it.get("g", {}); _card(g.get("text", ""), g.get("kicker") or "headline card", out, ts)
     except Exception as e:
         log(f"  thumbnail for {c['id']} ({c['rung']}) failed ({str(e)[:100]}); using a text card")
-        _card(c["why"], RUNG.get(c["rung"], c["rung"]), out)
+        _card(c["why"], RUNG.get(c["rung"], c["rung"]), out, ts)
     return _rel(out, sd)
 
 def thumbs(job, cfg, log, cids=None):
@@ -280,7 +292,7 @@ def preview(job, cid, cfg, log):
         src = sd / (it["src"] if t == "image" else it["layers"][0] if t == "layers" else c["thumb"])
         if t == "graphic":   # a headline card: drawn larger here (no renderer needed for a static card)
             big = pd / f"{cid}.jpg"; g = it.get("g", {})
-            if not big.exists(): _card(g.get("text", ""), g.get("kicker") or "headline card", big, size=(540, 960))
+            if not big.exists(): _card(g.get("text", ""), g.get("kicker") or "headline card", big, size=tuple(2 * x for x in _tsize(sd)))
             src = big
         return {"image": _rel(src, sd)}
     if out.exists(): return {"video": _rel(out, sd)}
@@ -371,14 +383,16 @@ def supply(job, bid, src, tag, cfg, log):
     tag = tag if tag in ("", "FILE", "ILLUSTRATIVE", "GENERATED", "RECONSTRUCTION") else ""
     if raw.suffix.lower() in VIDEO_EXT:
         out = sup / f"sup_{bid}_{n}.mp4"
-        media.ff("-i", raw, "-t", 20, "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920", "-an", "-c:v", "libx264",
+        W, H = _fsize(sd)
+        media.ff("-i", raw, "-t", 20, "-vf", f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}", "-an", "-c:v", "libx264",
                  "-pix_fmt", "yuv420p", "-crf", 18, out)
         secs = round(media.dur(out) / 0.85, 2)
         item = {"type": "video", "src": _rel(out, sd), "secs": secs, "tag": tag}
     else:
         im = Image.open(raw).convert("RGB"); out = sup / f"sup_{bid}_{n}.jpg"; im.save(out, quality=93)
-        if im.width > im.height: item = {"type": "image", "src": _rel(out, sd), "fit": "frame", "tag": tag}
-        else: item = {"type": "layers", "layers": [_rel(p, sd) for p in short.depth_free(out, sup / f"sup_{bid}_{n}")], "tag": tag}
+        W, H = _fsize(sd)
+        if (im.width > im.height) != (W > H): item = {"type": "image", "src": _rel(out, sd), "fit": "frame", "tag": tag}   # other orientation: shown whole
+        else: item = {"type": "layers", "layers": [_rel(p, sd) for p in short.depth_free(out, sup / f"sup_{bid}_{n}", (W, H))], "tag": tag}
     try: raw.unlink()
     except Exception: pass
     with _lock(job):
@@ -415,11 +429,11 @@ def _busy(job, bid, msg):
     with _lock(job):
         rv = load(job); rv["beats"][bid]["busy"] = msg; save(job, rv)
 
-def start(studio, jid, bid, kind, payload=None):
+def start(studio, jid, bid, kind, payload=None, ws=None):
     """Run 'expand' (show all options) or 'refine' for one beat in the background. -> error text or ''"""
     if studio.current: return "Another job is using the GPU right now; try again when it has finished."
     if not _gpu.acquire(blocking=False): return "Already generating options for a beat; wait for it to finish."
-    job = studio.job(jid).dir
+    job = ws or studio.job(jid).dir
     _busy(job, bid, {"expand": "Generating options...", "animate": "Animating (several minutes)..."}.get(kind, "Working on your instruction..."))
     def run():
         log = studio.job(jid).log
@@ -449,7 +463,7 @@ def _extra_stock(job, sec, queries, tag, cfg, log):
     from . import footage
     sd, rd = _p(job); sf = rd / f"stock_{sec['id']}_{tag}.json"
     slot = {"id": sec["id"], "text": sec["vo"], "queries": queries, "avoid": sec.get("avoid") or []}
-    picked = footage.fill(cfg, [slot], "portrait", {sec["id"]: 2}, sd / "stock", log, lambda: False, want_long_side=2560, max_secs=10.0,
+    picked = footage.fill(cfg, [slot], _sp(sd)["orient"], {sec["id"]: 2}, sd / "stock", log, lambda: False, want_long_side=2560, max_secs=10.0,
                           state_file=sf, fallback=True)
     st = json.loads(sf.read_text(encoding="utf-8")) if sf.exists() else {}
     return picked.get(sec["id"], []), st.get("rejected", {}).get(sec["id"], [])
@@ -561,11 +575,15 @@ def refine(job, bid, cfg, wg, log, payload):
 # ---------------------------------------------------------------- after the render: keep only what was used
 MEDIA = {".mp4", ".jpg", ".png", ".jpeg", ".webm", ".mov"}
 
-def prune(job, log):
-    """Delete previews and the full files of treatments that weren't used (thumbnails stay). Files the render used are listed in
-    short/used.json by build()."""
+def prune(job, log, full=True):
+    """Delete previews and (full=True) the full files of treatments that weren't used (thumbnails stay). Files the video uses are
+    listed in short/used.json by build() and the editor. After a render only previews go: the editor may still need the rest."""
     sd, rd = _p(job); uf = sd / "used.json"
-    if not uf.exists(): return
+    for d in (rd / "previews", Path(job) / "edit" / "previews"):
+        if d.exists():
+            for f in d.iterdir():
+                if f.is_file(): f.unlink(missing_ok=True)
+    if not full or not uf.exists(): return
     keep = {str((sd / u).resolve()) for u in json.loads(uf.read_text(encoding="utf-8"))}
     n, size = 0, 0
     for d in (rd / "previews", sd / "fallback", sd / "stock" / "clips", rd / "supplied"):

@@ -84,9 +84,14 @@ def smoke():
     return jsonify(id=studio.create_smoke(b.get("visual_review", "every")))
 
 # ---- visual review (Shorts)
+def _ws(jid):
+    """The review workspace: the job (Shorts) or job/longedit (long-video editing, ?space=long)."""
+    d = studio.job(jid).dir
+    return d / "longedit" if request.args.get("space") == "long" else d
+
 def _rv_payload(jid):
     from studio import review
-    rv = review.load(studio.job(jid).dir)
+    rv = review.load(_ws(jid))
     if not rv: abort(404)
     return rv
 
@@ -96,14 +101,14 @@ def get_review(jid): return jsonify(_rv_payload(jid))
 @app.post("/api/jobs/<jid>/review/<bid>")
 def review_beat(jid, bid):
     from studio import review
-    b = request.get_json(silent=True) or {}; a = b.get("action"); j = studio.job(jid); cfg = config.load()
+    b = request.get_json(silent=True) or {}; a = b.get("action"); j = studio.job(jid); cfg = config.load(); ws = _ws(jid)
     try:
         if a in ("auto", "skip", "choose", "undo", "revert"):
-            review.decide(j.dir, bid, a, b.get("cands") if a != "revert" else b.get("i"), cfg, j.log)
+            review.decide(ws, bid, a, b.get("cands") if a != "revert" else b.get("i"), cfg, j.log)
             j.log(f"Visual review {bid}: {a}" + (f" {', '.join(b.get('cands') or [])}" if a == "choose" else ""))
-        elif a == "supply": review.supply(j.dir, bid, b.get("src", ""), b.get("tag", ""), cfg, j.log); j.log(f"Visual review {bid}: your file added")
+        elif a == "supply": review.supply(ws, bid, b.get("src", ""), b.get("tag", ""), cfg, j.log); j.log(f"Visual review {bid}: your file added")
         elif a in ("expand", "refine", "animate"):
-            err = review.start(studio, jid, bid, a, {"text": b.get("text", ""), "tag": b.get("tag", "")})
+            err = review.start(studio, jid, bid, a, {"text": b.get("text", ""), "tag": b.get("tag", "")}, ws=ws)
             if err: return jsonify(error=err), 409
         else: return jsonify(error="unknown action"), 400
     except Exception as e: return jsonify(error=str(e)[:300]), 400
@@ -124,8 +129,54 @@ def review_all(jid, action):
 def review_preview(jid, cid):
     from studio import review
     j = studio.job(jid)
-    try: return jsonify(review.preview(j.dir, cid, config.load(), j.log))
+    try: return jsonify(review.preview(_ws(jid), cid, config.load(), j.log))
     except Exception as e: return jsonify(error=str(e)[:300]), 400
+
+# ---- post-render editing (every output type)
+@app.get("/api/jobs/<jid>/edit/beats")
+def edit_beats(jid):
+    from studio import edit
+    j = studio.job(jid)
+    try: out = edit.beats(j.dir)
+    except Exception as e: return jsonify(error=str(e)[:300], kind=None, beats=[])
+    k = str(j.dir); out.update(busy=edit.status(j.dir), error=edit._busy.get(k + ":err", ""), edits=j.state.get("edits", []),
+                                 undo=any(j.dir.glob("output/*.prev")))
+    return jsonify(out)
+
+@app.post("/api/jobs/<jid>/edit/open/<bid>")
+def edit_open(jid, bid):
+    from studio import edit
+    j = studio.job(jid)
+    try: rv = edit.open_beat(j.dir, bid, config.load(), j.log)
+    except Exception as e: return jsonify(error=str(e)[:300]), 400
+    return jsonify(space="long" if edit.kind(j.dir) == "long" else "short", rv=rv)
+
+@app.post("/api/jobs/<jid>/edit/<action>/<bid>")
+def edit_act(jid, action, bid):
+    from studio import edit
+    j = studio.job(jid); b = request.get_json(silent=True) or {}; cfg = config.load()
+    if studio.current: return jsonify(error="A job is rendering right now; edit when it has finished."), 409
+    try:
+        if action == "preview": return jsonify(edit.preview(j.dir, bid, b.get("cands") or [], b.get("fit", "auto"), cfg, j.log))
+        if action == "apply":
+            err = edit.start_apply(j.dir, bid, b.get("cands") or [], b.get("fit", "auto"), cfg, j.log)
+            return (jsonify(error=err), 409) if err else jsonify(ok=True)
+    except Exception as e: return jsonify(error=str(e)[:300]), 400
+    return jsonify(error="unknown action"), 400
+
+@app.post("/api/jobs/<jid>/edit_all/<action>")
+def edit_all(jid, action):
+    from studio import edit, review
+    j = studio.job(jid)
+    try:
+        if action == "undo": edit.undo(j.dir, j.log)
+        elif action == "rerender": studio.rerender(jid)
+        elif action == "cleanup":
+            review.prune(j.dir, j.log, full=True)
+            if (j.dir / "longedit").exists(): review.prune(j.dir / "longedit", j.log, full=True)
+        else: return jsonify(error="unknown action"), 400
+    except Exception as e: return jsonify(error=str(e)[:300]), 400
+    return jsonify(ok=True)
 
 @app.get("/api/jobs/<jid>/thumbnail")
 def get_thumb(jid):

@@ -22,6 +22,15 @@ Judge the picture and reply with ONLY JSON:
  "garbled": true or false - melted or deformed objects, broken shapes, extra or missing limbs, warped faces, impossible geometry{extra}?,
  "why": "max 12 words"{worst}}}"""
 
+def space(sd):
+    """Frame of the workspace: Shorts are portrait (default); the long-video edit workspace has short/space.json = landscape."""
+    sp = {"orient": "portrait", "still_res": "1088x1920", "i2v_res": "720x1280", "w": 1080, "h": 1920}
+    f = Path(sd) / "space.json"
+    if f.exists():
+        try: sp.update(json.loads(f.read_text(encoding="utf-8")))
+        except Exception: pass
+    return sp
+
 def _yes(v): return str(v).strip().lower() in ("true", "yes", "1")
 
 def check(cfg, img, narration, subject=None, video=False, info=None):
@@ -71,7 +80,7 @@ def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False, animate=F
         if not s.get("still_prompt"): r["still"] = None; r["still_why"] = "no scene prompt"; save(); continue
         if not img.exists():
             try:
-                g = wg.gen({"model_type": cfg["still_model"], "prompt": s["still_prompt"] + render.STYLE, "resolution": "1088x1920",
+                g = wg.gen({"model_type": cfg["still_model"], "prompt": s["still_prompt"] + render.STYLE, "resolution": space(sd)["still_res"],
                             "num_inference_steps": 4, "seed": seed + i}, log, f"still {s['key']}", stop=stop)
                 if g["ok"]: shutil.copy(g["file"], img)
             except Exception as e: log(f"  still {s['key']} failed ({str(e)[:100]})")
@@ -98,7 +107,7 @@ def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False, animate=F
             if not media.ok(mp):
                 try:
                     g = wg.gen({"model_type": cfg.get("short_i2v_model") or cfg["video_model"], "prompt": (s.get("motion") or s["still_prompt"]) + render.STYLE,
-                                "image_prompt_type": "S", "image_start": str((sd / r["still"]).resolve()), "resolution": "720x1280",
+                                "image_prompt_type": "S", "image_start": str((sd / r["still"]).resolve()), "resolution": space(sd)["i2v_res"],
                                 "video_length": int(cfg.get("short_i2v_frames", 169)), "num_inference_steps": int(cfg.get("short_i2v_steps", 8)), "seed": seed + 400 + i},
                                log, f"animate {s['key']}", stop=stop)
                     if g["ok"]: shutil.copy(g["file"], mp)

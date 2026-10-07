@@ -236,3 +236,17 @@ This is the human or AI step the app can't do for itself:
 - After the render: `output/thumbnail_9_16.png` (thumb916.py; options in short/thumb.json; regenerate/approve on the job page;
   Settings "Channel name"), then unused treatment files and previews are deleted (thumbnails kept; used files listed in short/used.json).
 - Smoke test: Settings -> "Run smoke test (1 beat)" or `POST /api/smoke {"visual_review":"every"}`: fixed one-beat script, no YouTube.
+
+## Post-render editing (Oct 2026) — app/studio/edit.py
+- Every finished job page: player + "Edit at m:ss (beat)" -> beat panel (thumbnails, 2 s previews, Refine, Supply, Add animation,
+  Show all options) + fit buttons (Auto / Freeze / Slow down / Loop / Trim / Speed up / Add still) + Preview in the video (half res,
+  with narration) + Apply to video. Undo last edit (one level), Full re-render (edits kept), Done editing (clean up = prune).
+- Fit rule (edit.layout): longer footage -> middle segment; shorter -> information beats get the beat's still/card after the
+  footage, atmospheric beats (edit.atmospheric) slow motion up to 1.3x then hold the last frame.
+- Shorts: keyframes forced on every beat boundary (edit.ensure_keyframes, after each render / first edit of an older Short);
+  apply = Remotion renders the beat's frame range of Teaser (cached bundle, media over http) -> encoded with ENC_S -> stream-copy
+  splice at the keyframes -> original audio muxed back; teaser.json updated; review.json beat "edit" (build() honours it).
+- Long videos: beat = visual slot (sid_vi); workspace job/longedit (16:9 Short-like review space, short/space.json);
+  apply = BeatClip render -> v_<sid>_<vi>.mp4 -> assemble.section() rebuilds that section -> sections joined by stream copy ->
+  audio from build/final_audio.wav. plan visual edit_clip keeps the edit for full rebuilds.
+- After a render only previews are pruned now; unused treatment files stay until "Done editing (clean up)".
