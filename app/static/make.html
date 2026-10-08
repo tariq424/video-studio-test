@@ -63,7 +63,7 @@ function fillForm(spec){const d=$('form').contentDocument;const q=t=>d.querySele
  set('input-type',{youtube:'yt',local_file:'file',text:'text'}[i.type]);
  set('youtube-url',i.type==='youtube'?i.source:'','input');set('file-path',i.type==='local_file'?i.source:'','input');set('source-text',i.type==='text'?i.source:'','input');
  set('source-title',i.title||'','input');set('source-credit',i.credit||'','input');
- set('output-mode',{short:'short',explainer:'long',both:'both'}[o.mode]);
+ set('output-mode',{short:'short',explainer:'long',both:'both',smoke:'smoke'}[o.mode]);
  set('short-length',o.short_length,'input');set('long-length',o.long_minutes,'input');
  set('toggle-captions',p.captions);set('toggle-presenter',p.presenter);set('script-ai',p.script_ai||'');
  set('visuals-mode',p.visuals==='review'?'every':'auto');set('toggle-skip-script-review',!p.script_review);
@@ -89,7 +89,7 @@ function useSaved(i){const x=window._saved[i];SPEC=x.spec;$('desc').value=x.desc
 async function delSaved(n){await fetch('/make/saved/'+encodeURIComponent(n),{method:'DELETE'});loadSaved()}
 function readForm(){const d=$('form').contentDocument;const q=t=>d.querySelector(`[data-testid="${t}"]`);const k=q('input-type').value;
  return {input:{type:{yt:'youtube',file:'local_file',text:'text'}[k],source:k=='yt'?q('youtube-url').value:k=='file'?q('file-path').value:q('source-text').value,title:q('source-title').value,credit:q('source-credit').value},
-  output:{mode:{short:'short',long:'explainer',both:'both'}[q('output-mode').value],short_length:+q('short-length').value,long_minutes:+q('long-length').value},
+  output:{mode:{short:'short',long:'explainer',both:'both',smoke:'smoke'}[q('output-mode').value],short_length:+q('short-length').value,long_minutes:+q('long-length').value},
   pipeline:{script_review:!q('toggle-skip-script-review').checked,visuals:q('visuals-mode').value=='every'?'review':'auto',captions:q('toggle-captions').checked,presenter:q('toggle-presenter').checked,script_ai:q('script-ai').value}}}
 async function saveSpec(){const n=$('sname').value.trim();if(!n){$('sname').focus();return}await post('/make/save',{name:n,spec:readForm(),description:$('desc').value});$('sname').value='';loadSaved()}
 // runner

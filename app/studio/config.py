@@ -40,6 +40,7 @@ DEFAULTS = {
     "still_model": "flux2_klein_9b",
     "video_model": "ltx2_distilled",
     "channel_name": "",
+    "smoke_source": "https://youtu.be/xcQ7MhOMLrg",   # "smoke test" with no link: this video (its transcript is cached, so YouTube isn't contacted)
     "make_model": "phi4-mini",          # /make: the small local model that reads your description (Ollama)
     "make_model_fallback": "gemma3:4b",              # shown on the Short's 9:16 thumbnail when set
     "short_i2v": True,                # Short visual ladder step 3: animate the AI still with WanGP image-to-video

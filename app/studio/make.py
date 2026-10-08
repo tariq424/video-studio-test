@@ -12,7 +12,7 @@ from . import config
 DEFAULT = {"input": {"type": "youtube", "source": "", "title": "", "credit": "", "transcript": ""},
            "output": {"mode": "short", "short_length": 165, "long_minutes": 15},
            "pipeline": {"script_review": False, "visuals": "auto", "captions": True, "presenter": False, "script_ai": ""}}
-MODES = {"short", "explainer", "both"}
+MODES = {"short", "explainer", "both"}   # "smoke" is set only by the rules ("smoke test")
 AIS = {"": "Settings default", "deepseek": "DeepSeek", "zai": "z.ai GLM", "claude": "Claude", "local": "Local AI (Ollama)"}
 
 PROMPT = """Turn the user's request for a video into JSON. Fields:
@@ -62,6 +62,7 @@ def _rules(text):
     if mm: out["output"]["short_length"] = int(mm.group(1)) * 60 + int(mm.group(2))
     sm = re.search(r"\b(\d{2,3})\s*(?:s|sec|secs|seconds)\b", low)
     if sm: out["output"]["short_length"] = int(sm.group(1))
+    if re.search(r"\bsmoke[- ]?test", low): out["output"].update(mode="smoke", short_length=30)
     if re.search(r"review (mode|every beat|each beat|the visuals|visuals)|(pick|choose|approve|check) (the )?(visuals|footage|images|pictures)", low): out["pipeline"]["visuals"] = "review"
     if re.search(r"\bauto(matic)? (mode|visuals)\b|\bdraft\b", low) and "visuals" not in out["pipeline"]: out["pipeline"]["visuals"] = "auto"
     if re.search(r"(review|read|check|approve|see|edit) (the |my )?script|script review", low): out["pipeline"]["script_review"] = True
@@ -140,7 +141,9 @@ def parse(text, cfg):
     else: parsed_by = f"rules only ({who})"
     rules, notes = _rules(text)
     _deep(spec, rules)   # links, paths, numbers and explicit keywords win
-    o = spec["output"]; o["short_length"] = max(120, min(176, int(o["short_length"]))); o["long_minutes"] = max(3, min(20, int(o["long_minutes"])))
+    o = spec["output"]; o["short_length"] = 30 if o["mode"] == "smoke" else max(120, min(176, int(o["short_length"]))); o["long_minutes"] = max(3, min(20, int(o["long_minutes"])))
+    if o["mode"] == "smoke" and not spec["input"]["source"] and cfg.get("smoke_source"):   # no source given: the standard smoke-test video
+        spec["input"].update(type="youtube", source=cfg["smoke_source"]); notes.append("no source given: using the standard smoke-test video")
     if spec["input"]["type"] == "youtube" and not spec["input"]["source"]: notes.append("no YouTube link found in your description: paste it into the form")
     if spec["input"]["type"] == "local_file" and not spec["input"]["source"]: notes.append("no file path found: type the path or pick the file in the form")
     return {"spec": spec, "summary": summary(spec), "notes": notes, "parsed_by": parsed_by}
@@ -150,12 +153,13 @@ def summary(spec):
     src = {"youtube": "YouTube link", "local_file": "File on this PC", "text": "Pasted text"}[i["type"]]
     show = (i["source"][:90] + ("…" if len(i["source"]) > 90 else "")) if i["source"] else "(not given)"
     mode = {"short": f"Short only, {o['short_length'] // 60}:{o['short_length'] % 60:02d}", "explainer": f"Explainer only, {o['long_minutes']} min",
-            "both": f"Explainer ({o['long_minutes']} min) + Short ({o['short_length'] // 60}:{o['short_length'] % 60:02d})"}[o["mode"]]
+            "both": f"Explainer ({o['long_minutes']} min) + Short ({o['short_length'] // 60}:{o['short_length'] % 60:02d})",
+            "smoke": "Smoke test: 30-second Short (about 75 words; pipeline check)"}[o["mode"]]
     lines = [f"Source: {src} — {show}", f"Make: {mode}",
              "Script review: " + ("pause so you can read and edit the script" if p["script_review"] else "skipped (renders straight away)"),
              "Visuals: " + ("Review every beat" if p["visuals"] == "review" else "Auto (pauses only when unsure)") if o["mode"] != "explainer" else "Visuals: (explainer: automatic)",
              f"Script AI: {AIS.get(p['script_ai'], p['script_ai'])}"]
-    if o["mode"] != "short": lines.append("Captions: " + ("on" if p["captions"] else "off") + " · Presenter: " + ("on" if p["presenter"] else "off"))
+    if o["mode"] in ("explainer", "both"): lines.append("Captions: " + ("on" if p["captions"] else "off") + " · Presenter: " + ("on" if p["presenter"] else "off"))
     if i.get("title"): lines.append(f"Source title: {i['title']}" + (f" — {i['credit']}" if i.get("credit") else ""))
     return lines
 

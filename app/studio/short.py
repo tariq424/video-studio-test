@@ -8,6 +8,7 @@ from .llm import LLM, parse_json
 from .writer import SYSTEM, make_notes, fact_check
 
 GAP, TAIL, MAX_SECS = 0.35, 2.2, 176.0   # YouTube Shorts allow up to 180 s; keep a margin
+SMOKE_WORDS = 58   # smoke-test Short: 2 beats of narration (the model runs ~10% long); with the ~12-word closing line about 75 words (~30 s)
 KINDS = {"hook", "quote", "stat", "compare", "icons", "timeline"}
 
 SHORT = """You are writing a vertical YouTube Short of about {secs} seconds (about {words} words of narration in total)
@@ -127,27 +128,30 @@ def verify_quotes(plan, transcript, log):
     return plan
 
 # ---------------------------------------------------------------- script
-def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir):
+def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir, smoke=False):
     words = int((secs - 7 - GAP * 11) * cfg.get("voice_wpm", 142) / 60)   # measured pace of the cloned narrator incl. pauses
     nb = max(7, min(12, round(words / 38)))
+    minb, lo, hi = 6, 0.88, 1.1
+    if smoke: words, nb, minb, lo, hi = SMOKE_WORDS, 2, 2, 0.8, 1.2   # smoke test: ~75 words in all with the closing line (~30 s spoken)
     title, channel = meta.get("title") or "the source", meta.get("channel") or meta.get("uploader") or "the creator"
     with LLM(cfg, log, stop) as llm:
         log(f"Writing the Short with {llm.name} (~{secs:.0f}s, {words} words, {nb} beats)...")
         notes = make_notes(llm, meta, transcript, max(words, 1500), log, stop, srcdir)
         def chk(j):
             b = j.get("beats")
-            if not isinstance(b, list) or len(b) < 6: raise ValueError("need at least 6 beats")
+            if not isinstance(b, list) or len(b) < minb: raise ValueError(f"need at least {minb} beats")
             for x in b:
                 if not isinstance(x.get("vo"), str) or not x.get("queries"): raise ValueError("beat missing vo or queries")
             n = sum(len(x["vo"].split()) for x in b)
-            if n < words * 0.88: raise ValueError(f"narration is {n} words in total but must be about {words}; add detail from the notes")
-            if n > words * 1.1: raise ValueError(f"narration is {n} words in total but must be at most {int(words * 1.05)}; cut weaker points")
+            if n < words * lo: raise ValueError(f"narration is {n} words in total but must be about {words}; add detail from the notes")
+            if n > words * hi: raise ValueError(f"narration is {n} words in total but must be at most {int(words * 1.05)}; cut weaker points")
         prompt = SHORT.format(secs=int(secs), words=words, title=title, channel=channel, notes=notes[:24000], nb=nb,
                               people=(meta.get("description") or "")[:1200] or "(see notes)")
         try: j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=chk)
         except RuntimeError:
             log("  length still short after 3 tries; keeping the best version")
             j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=lambda x: None if x.get("beats") else (_ for _ in ()).throw(ValueError("no beats")))
+        if smoke: j["beats"] = j["beats"][:2]   # a smoke test stays ~30 s even if the length check gave up
         plan = {"title": (j.get("title") or title)[:90], "tag": (j.get("tag") or "CONDENSED")[:32].upper(),
                 "source_spoken": (j.get("source_spoken") or title)[:120],
                 "description": j.get("description", ""), "mode": mode, "sections": []}

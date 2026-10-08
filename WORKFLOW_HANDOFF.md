@@ -262,3 +262,9 @@ This is the human or AI step the app can't do for itself:
 - app/vs_runner.py: Playwright runner (headless Edge; installs playwright on first use) -> screenshots/<ts>/ + steps.jsonl;
   POST /make/runner {spec, click_make, edit:{job,beat,cands,fit}}; Make video is only clicked when click_make is true (tests).
 - Every post-render edit records state.edits[].verify = {frames_same, audio_same, decode_ok}.
+
+## Smoke mode (30-second Short)
+- "smoke test" on /make (or Make → "Smoke test (30-second Short, pipeline check)" in the form) makes a ~30 s Short: 2 beats of narration (~58-word target, accepted 0.8-1.2x) plus the closing line, about 75 words. Real Shorts keep the 2:00 minimum.
+- No link given → `smoke_source` in config (the flydubai video; its transcript is cached, so YouTube isn't contacted).
+- Policy: use smoke mode for pipeline iteration; real lengths only for actual videos.
+- Measured 2026-10-08: job 20261008_190501, 33.0 s output, ~18 min end to end (about 15 min of it WanGP stills).

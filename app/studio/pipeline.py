@@ -10,6 +10,8 @@ LONG = {"script", "charts", "voice", "captions", "broll", "presenter", "motion",
 SHORT = {"short_script", "short_stock", "short_voice", "short_fallback", "short_review", "short_render"}
 def stages_for(mode): return [s for s in STAGES if not ((mode == "short" and s in LONG) or (mode == "long" and s in SHORT))]
 
+SMOKE_SECS = 30.0   # "smoke test" Shorts: about 75 words of narration including the closing line
+
 class Job:
     def __init__(self, path): self.dir = Path(path)
     @property
@@ -52,6 +54,8 @@ class Studio:
 
     def create(self, url, minutes, presenter=False, auto_approve=False, transcript_text="", provider="", captions=True,
                mode="both", short_secs=165, upload=None, upload_name="", src_title="", src_credit="", visual_review="auto"):
+        smoke = mode == "smoke"   # pipeline check: a ~30-second Short (about 75 words); real Shorts keep the 2:00 minimum
+        if smoke: mode, short_secs = "short", SMOKE_SECS
         jid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         j = self.job(jid); j.dir.mkdir(parents=True); (j.dir / "src").mkdir()
         up = ""
@@ -60,10 +64,10 @@ class Studio:
         elif transcript_text.strip():
             (j.dir / "src" / ("transcript_manual.txt" if url else "pasted.txt")).write_text(transcript_text, encoding="utf-8")
         j.save(url=url, minutes=float(minutes), presenter=bool(presenter), captions=bool(captions), auto_approve=bool(auto_approve), provider=provider or "",
-               mode=mode if mode in ("long", "short", "both") else "both", short_secs=max(120.0, min(176.0, float(short_secs))),
+               mode=mode if mode in ("long", "short", "both") else "both", short_secs=SMOKE_SECS if smoke else max(120.0, min(176.0, float(short_secs))), smoke=smoke,
                upload=up, src_title=src_title, src_credit=src_credit, visual_review=visual_review if visual_review in ("auto", "every") else "auto", status="queued", stage="transcript", done=[], title="", created=time.time())
         what = url or (f"file {up}" if up else "pasted text")
-        j.log(f"Job created for {what} (output: {mode}; long {minutes} min, short {short_secs:.0f}s)"); self.q.put(jid); return jid
+        j.log(f"Job created for {what} (output: {'SMOKE TEST, ' if smoke else ''}{mode}; long {minutes} min, short {short_secs:.0f}s)"); self.q.put(jid); return jid
 
     def approve(self, jid):
         j = self.job(jid); s = j.state
@@ -231,7 +235,8 @@ class Studio:
                 meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
                 text = (j.dir / "src" / "transcript.txt").read_text(encoding="utf-8")
                 lp = j.plan()
-                sp = short.write_short(cfg, meta, text, s.get("short_secs", 165), mode, lp["title"] if lp else "", log, stop, j.dir / "src")
+                sp = short.write_short(cfg, meta, text, s.get("short_secs", 165), mode, lp["title"] if lp else "", log, stop, j.dir / "src",
+                                       smoke=bool(s.get("smoke")))
                 j.save_short_plan(sp)
                 if not lp: j.save(title=sp["title"])
             elif st == "short_review":

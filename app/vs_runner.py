@@ -53,11 +53,11 @@ def fill(page, spec, run):
     if i["type"] != "youtube":
         page.fill(T("source-title"), i.get("title", "")); page.fill(T("source-credit"), i.get("credit", ""))
     run.step("source filled", detail=f"{i['type']}: {i.get('source', '')[:80]}")
-    page.select_option(T("output-mode"), {"short": "short", "explainer": "long", "both": "both"}[o["mode"]])
+    page.select_option(T("output-mode"), {"short": "short", "explainer": "long", "both": "both", "smoke": "smoke"}[o["mode"]])
     def rng(tid, v):
         page.evaluate("([t,v])=>{const e=document.querySelector(`[data-testid=${t}]`);e.value=v;e.dispatchEvent(new Event('input',{bubbles:true}))}", [tid, str(v)])
-    if o["mode"] != "explainer": rng("short-length", o["short_length"])
-    if o["mode"] != "short":
+    if o["mode"] in ("short", "both"): rng("short-length", o["short_length"])
+    if o["mode"] in ("explainer", "both"):
         rng("long-length", o["long_minutes"])
         page.set_checked(T("toggle-captions"), bool(pl.get("captions", True)))
         page.set_checked(T("toggle-presenter"), bool(pl.get("presenter", False)))
