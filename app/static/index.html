@@ -62,21 +62,21 @@ html.embed main{grid-template-columns:1fr;padding:0;max-width:none}html.embed bo
   <div class="row" style="margin-top:12px"><button onclick="saveSettings()">Save</button><button class="sec" onclick="testKey()">Test saved keys</button><button class="sec" onclick="smoke()">Run smoke test (1 beat)</button><span id="ssaved" class="mut"></span></div>
  </div>
  <div class="card" id="newvideo" data-testid="new-video-form"><h2>New video</h2>
-  <label>Source</label><select id="srck" data-testid="input-type" onchange="srcUI()"><option value="yt">YouTube link</option><option value="file">Upload a file (NotebookLM audio, .mp3/.m4a/.wav, or .pdf/.docx/.txt/.md)</option><option value="text">Paste text (notes, briefing doc)</option></select>
-  <div id="s_yt"><label>YouTube link</label><input id="url" data-testid="youtube-url" type="text" placeholder="https://www.youtube.com/watch?v=...">
+  <label>Source</label><select id="srck" data-testid="input-type" aria-label="Source" onchange="srcUI()"><option value="yt">YouTube link</option><option value="file">Upload a file (NotebookLM audio, .mp3/.m4a/.wav, or .pdf/.docx/.txt/.md)</option><option value="text">Paste text (notes, briefing doc)</option></select>
+  <div id="s_yt"><label>YouTube link</label><input id="url" data-testid="youtube-url" aria-label="YouTube link" type="text" placeholder="https://www.youtube.com/watch?v=...">
    <details><summary>Paste a transcript too (if the video has no captions)</summary><textarea id="tx" data-testid="transcript-text"></textarea></details></div>
   <div id="s_file" style="display:none"><label>File</label><input id="upf" data-testid="file-upload" type="file" accept=".mp3,.m4a,.wav,.aac,.ogg,.flac,.opus,.webm,.mp4,.txt,.md,.pdf,.docx">
-   <label>…or a file path on this PC</label><input id="upp" data-testid="file-path" type="text" placeholder="F:\notebooklm\briefing.m4a"></div>
-  <div id="s_text" style="display:none"><label>Text</label><textarea id="ptx" data-testid="source-text" rows="8" placeholder="Paste NotebookLM notes, a briefing doc, an article..."></textarea></div>
-  <div id="s_meta" style="display:none"><label>Title of the source (shown in credits)</label><input id="stt" data-testid="source-title" type="text" placeholder="e.g. The economics of AI agents">
-   <label>Credit (who made it)</label><input id="scr" data-testid="source-credit" type="text" placeholder="e.g. NotebookLM, or the author's name"></div>
-  <label>Make</label><select id="mode" data-testid="output-mode" onchange="srcUI()"><option value="both">Long explainer + Short</option><option value="short">Short only</option><option value="long">Long explainer only</option></select>
-  <div id="m_short"><label>Short length: <b id="sv">2:45</b> (YouTube Shorts max is 3:00)</label><input id="ssec" data-testid="short-length" type="range" min="120" max="176" step="5" value="165" oninput="sv.textContent=fmt(+this.value)" style="width:100%"></div>
-  <div id="m_long"><label>Long video length: <b id="mv">15</b> minutes</label><input id="min" data-testid="long-length" type="range" min="3" max="20" value="15" oninput="mv.textContent=this.value" style="width:100%">
+   <label>…or a file path on this PC</label><input id="upp" data-testid="file-path" aria-label="File path on this PC" type="text" placeholder="F:\notebooklm\briefing.m4a"></div>
+  <div id="s_text" style="display:none"><label>Text</label><textarea id="ptx" data-testid="source-text" aria-label="Source text" rows="8" placeholder="Paste NotebookLM notes, a briefing doc, an article..."></textarea></div>
+  <div id="s_meta" style="display:none"><label>Title of the source (shown in credits)</label><input id="stt" data-testid="source-title" aria-label="Source title" type="text" placeholder="e.g. The economics of AI agents">
+   <label>Credit (who made it)</label><input id="scr" data-testid="source-credit" aria-label="Source credit" type="text" placeholder="e.g. NotebookLM, or the author's name"></div>
+  <label>Make</label><select id="mode" data-testid="output-mode" aria-label="Make" onchange="srcUI()"><option value="both">Long explainer + Short</option><option value="short">Short only</option><option value="long">Long explainer only</option></select>
+  <div id="m_short"><label>Short length: <b id="sv">2:45</b> (YouTube Shorts max is 3:00)</label><input id="ssec" data-testid="short-length" aria-label="Short length" type="range" min="120" max="176" step="5" value="165" oninput="sv.textContent=fmt(+this.value)" onchange="sv.textContent=fmt(+this.value)" style="width:100%"></div>
+  <div id="m_long"><label>Long video length: <b id="mv">15</b> minutes</label><input id="min" data-testid="long-length" aria-label="Long video length" type="range" min="3" max="20" value="15" oninput="mv.textContent=this.value" onchange="mv.textContent=this.value" style="width:100%">
    <label><input id="caps" data-testid="toggle-captions" type="checkbox" checked> Animated captions with icons</label>
    <label><input id="pres" data-testid="toggle-presenter" type="checkbox"> On-screen presenter (small corner window, experimental)</label></div>
-  <label>Script AI for this video</label><select id="jp" data-testid="script-ai"><option value="">Use Settings default</option><option value="zai">z.ai GLM</option><option value="deepseek">DeepSeek</option><option value="claude">Claude</option><option value="local">Local AI (Ollama)</option></select>
-  <div id="m_vr"><label>Visuals (Shorts)</label><select id="vrev" data-testid="visuals-mode"><option value="auto">Auto: pick automatically, pause only when unsure</option><option value="every">Review every beat: make every treatment, pause to choose</option></select></div>
+  <label>Script AI for this video</label><select id="jp" data-testid="script-ai" aria-label="Script AI"><option value="">Use Settings default</option><option value="zai">z.ai GLM</option><option value="deepseek">DeepSeek</option><option value="claude">Claude</option><option value="local">Local AI (Ollama)</option></select>
+  <div id="m_vr"><label>Visuals (Shorts)</label><select id="vrev" data-testid="visuals-mode" aria-label="Visuals (Shorts)"><option value="auto">Auto: pick automatically, pause only when unsure</option><option value="every">Review every beat: make every treatment, pause to choose</option></select></div>
   <label><input id="auto" data-testid="toggle-skip-script-review" type="checkbox" checked> Skip script review (render straight away; untick to read and edit the script first)</label>
   <div class="row" style="margin-top:12px"><button data-testid="make-video" onclick="createJob()">Make video</button><span id="cmsg" data-testid="make-message" class="mut"></span></div>
  </div>
@@ -204,9 +204,9 @@ async function showThumb(s){const o=await j(`/api/jobs/${sel}/thumbnail`);const 
  const beats=(await j(`/api/jobs/${sel}/short_plan`)).sections.filter(x=>!x.cta).map((x,i)=>`<option value="${x.id}" ${o.beat==x.id?'selected':''}>Beat ${i+1}</option>`).join('');
  el.innerHTML=`<b>Thumbnail (9:16)</b> ${o.approved?'<span class="rv-badge" style="color:var(--ok)">approved</span>':''}<br><img src="/files/${sel}/output/thumbnail_9_16.png?t=${Date.now()}" style="width:200px;border-radius:8px;margin:6px 0"><br>
  <span class="mut" style="font-size:12px">output/thumbnail_9_16.png · upload it in YouTube Studio (Content → Shorts → pencil → Thumbnail)</span>
- <label>Picture from</label><select id="tb">${beats}</select><label>Text (lines split by /)</label><input type="text" id="tt" value="${esc(o.text||'')}" placeholder="leave blank for the hook">
- <div class="row"><select id="tsz" style="width:auto">${['S','M','L'].map(x=>`<option ${(o.size||'M')==x?'selected':''}>${x}</option>`).join('')}</select><select id="tcol" style="width:auto">${['yellow','red','white','cyan'].map(x=>`<option ${(o.color||'yellow')==x?'selected':''}>${x}</option>`).join('')}</select></div>
- <label>Or your own picture (path or URL)</label><input type="text" id="tsrc">
+ <label>Picture from</label><select id="tb" data-testid="thumb-beat" aria-label="Thumbnail picture from beat">${beats}</select><label>Text (lines split by /)</label><input type="text" id="tt" data-testid="thumb-text" aria-label="Thumbnail text" value="${esc(o.text||'')}" placeholder="leave blank for the hook">
+ <div class="row"><select id="tsz" data-testid="thumb-size" aria-label="Thumbnail text size" style="width:auto">${['S','M','L'].map(x=>`<option ${(o.size||'M')==x?'selected':''}>${x}</option>`).join('')}</select><select id="tcol" data-testid="thumb-color" aria-label="Thumbnail text colour" style="width:auto">${['yellow','red','white','cyan'].map(x=>`<option ${(o.color||'yellow')==x?'selected':''}>${x}</option>`).join('')}</select></div>
+ <label>Or your own picture (path or URL)</label><input type="text" id="tsrc" data-testid="thumb-source" aria-label="Thumbnail own picture (path or URL)">
  <div class="row" style="margin-top:8px"><button onclick="thumbGo()">Regenerate</button><button class="sec" onclick="thumbGo(true)">Approve</button><span id="tmsg" class="mut"></span></div>`}
 async function thumbGo(ap){$('tmsg').textContent='Working...';try{await rvPost(`/api/jobs/${sel}/thumbnail`,ap?{approve:true}:{beat:$('tb').value,text:$('tt').value,size:$('tsz').value,color:$('tcol').value,src:$('tsrc').value.trim()});$('tmsg').textContent='';showThumb()}catch(e){$('tmsg').textContent=e.message}}
 async function smoke(){$('ssaved').textContent='Starting smoke test...';const d=await rvPost('/api/smoke',{visual_review:'every'});sel=d.id;$('ssaved').textContent='Smoke test job '+d.id;loadJobs()}
@@ -216,6 +216,7 @@ let ED={beats:[],kind:null,cur:null,open:null,space:'short',rv:null,sel:[],fit:'
 const FITS=[['auto','Auto'],['freeze','Freeze'],['slow','Slow down'],['loop','Loop'],['trim','Trim'],['speed','Speed up'],['still','Add still']];
 function fmtT(x){return Math.floor(x/60)+':'+String(Math.floor(x%60)).padStart(2,'0')}
 async function edInit(){try{const d=await j(`/api/jobs/${sel}/edit/beats`);ED.beats=d.beats||[];ED.kind=d.kind;edBar(d)}catch(e){}}
+function edJump(id){const v=$('ov'),b=ED.beats.find(x=>x.id==id);if(!v||!b)return;v.pause();v.currentTime=b.start+Math.min(0.5,b.dur/2);ED.cur=b.id;edBar()}
 function edAt(t){return ED.beats.find(b=>t>=b.start&&t<b.start+b.dur)}
 function edTick(){const v=$('ov');if(!v||!ED.beats.length)return;const b=edAt(v.currentTime);const k=b?b.id:'';if(k!==ED.cur){ED.cur=k;edBar()}}
 function edBar(d){const el=$('edbar');if(!el)return;const v=$('ov');const b=v?edAt(v.currentTime):null;d=d||ED.last||{};ED.last=d;
@@ -224,6 +225,7 @@ function edBar(d){const el=$('edbar');if(!el)return;const v=$('ov');const b=v?ed
  else if(b&&b.editable)h+=`<button data-testid="edit-at" data-beat="${b.id}" onclick="edOpen('${b.id}')">Edit at ${fmtT(v.currentTime)} (${esc(b.label)}${ED.kind=='long'?' · '+b.id:''})</button>`;
  else if(b)h+=`<span class="mut" style="font-size:13px">${esc(b.label)}: not editable (title/end card)</span>`;
  else h+=`<span class="mut" style="font-size:13px">Play or scrub to a beat to edit it</span>`;
+ if(!d.busy&&ED.beats.some(x=>x.editable))h+=`<select data-testid="edit-jump" aria-label="Jump to beat" style="width:auto" onchange="edJump(this.value)"><option value="">Jump to beat…</option>${ED.beats.filter(x=>x.editable).map(x=>`<option value="${x.id}" ${b&&b.id==x.id?'selected':''}>${esc(x.label)}${ED.kind=='long'?' · '+x.id:''} (${fmtT(x.start)})</option>`).join('')}</select>`;
  if(d.undo&&!d.busy)h+=`<button class="sec" data-testid="edit-undo" onclick="edAll('undo')">Undo last edit</button>`;
  h+=`<button class="sec" onclick="if(confirm('Re-render the whole video? Your edits are kept.'))edAll('rerender')">Full re-render</button><button class="sec" onclick="edAll('cleanup')" title="Deletes previews and unused treatment files; thumbnails stay">Done editing (clean up)</button>`;
  if(d.error)h+=`<span style="color:var(--bad);font-size:13px">Last edit failed: ${esc(d.error)}</span>`;

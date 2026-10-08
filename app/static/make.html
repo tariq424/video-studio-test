@@ -25,12 +25,12 @@ pre{background:#0d1117;border:1px solid var(--line);border-radius:8px;padding:10
 <main>
 <section>
  <div class="card"><h2>What should it make?</h2>
-  <textarea id="desc" data-testid="make-describe" placeholder="e.g. Take https://youtu.be/xcQ7MhOMLrg and make a 2:45 Short, review mode for the visuals, DeepSeek for the script."></textarea>
+  <textarea id="desc" data-testid="make-describe" aria-label="Describe the video" placeholder="e.g. Take https://youtu.be/xcQ7MhOMLrg and make a 2:45 Short, review mode for the visuals, DeepSeek for the script."></textarea>
   <div class="row" style="margin-top:10px"><button id="gen" data-testid="make-generate" onclick="generate()">Fill the form</button><span id="gmsg" class="mut" data-testid="make-message"></span></div>
   <details id="parsed" data-testid="make-parsed" style="margin-top:12px" open><summary class="mut">What was understood</summary><div id="psum" class="mut" style="font-size:14px">Nothing yet.</div></details>
  </div>
  <div class="card"><h2>Saved jobs</h2>
-  <div class="row"><input type="text" id="sname" data-testid="make-save-name" placeholder="Name, e.g. Flydubai Short (review mode)" style="flex:1"><button class="sec" data-testid="make-save" onclick="saveSpec()">Save current</button></div>
+  <div class="row"><input type="text" id="sname" data-testid="make-save-name" aria-label="Saved job name" placeholder="Name, e.g. Flydubai Short (review mode)" style="flex:1"><button class="sec" data-testid="make-save" onclick="saveSpec()">Save current</button></div>
   <div id="saved" data-testid="make-saved-list" class="mut" style="margin-top:8px">None saved yet.</div>
  </div>
  <div class="card"><details><summary class="mut">Automated test (Playwright runner)</summary>
@@ -41,7 +41,7 @@ pre{background:#0d1117;border:1px solid var(--line);border-radius:8px;padding:10
 </section>
 <section>
  <div class="card"><h2>The form <span class="mut" style="font-weight:400;font-size:13px">— the real Video Studio form. Fix anything here, then click <b>Make video</b>.</span></h2>
-  <iframe id="form" data-testid="make-form-frame" src="/?embed=1"></iframe></div>
+  <iframe id="form" data-testid="make-form-frame" title="Video Studio form" src="/?embed=1"></iframe></div>
  <div class="card" id="runcard" data-testid="make-run" style="display:none"><div class="row"><h2 style="margin:0" id="rtitle">Running</h2><span style="flex:1"></span><button class="sec" id="rcancel" data-testid="make-cancel" onclick="cancelJob()">Cancel</button></div>
   <div id="rbody"></div></div>
 </section>

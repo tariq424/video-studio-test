@@ -79,8 +79,12 @@ def create():
         f = _F()
     if f is not None and f.filename and not kind_of(f.filename): return jsonify(error="Unsupported file type. Use audio (.mp3 .m4a .wav ...) or .txt .md .pdf .docx"), 400
     if not b.get("url") and not b.get("transcript") and not (f and f.filename): return jsonify(error="Give a YouTube link, a file, or paste some text."), 400
-    jid = studio.create(b.get("url", "").strip(), b.get("minutes", 15), b.get("presenter", False), b.get("auto_approve", True), b.get("transcript", ""),
-                        b.get("provider", ""), b.get("captions", True), b.get("mode", "both"), float(b.get("short_secs", 165) or 165),
+    try: mins, ssec = float(b.get("minutes", 15) or 15), float(b.get("short_secs", 165) or 165)
+    except (TypeError, ValueError): return jsonify(error="Video lengths must be numbers."), 400
+    if not 3 <= mins <= 20: return jsonify(error="Long video length must be 3 to 20 minutes."), 400
+    if not 120 <= ssec <= 180: return jsonify(error="Short length must be 2:00 to 3:00."), 400
+    jid = studio.create(b.get("url", "").strip(), mins, b.get("presenter", False), b.get("auto_approve", True), b.get("transcript", ""),
+                        b.get("provider", ""), b.get("captions", True), b.get("mode", "both"), ssec,
                         f if (f and f.filename) else None, f.filename if f else "", b.get("src_title", ""), b.get("src_credit", ""),
                         b.get("visual_review", "auto"))
     return jsonify(id=jid)
