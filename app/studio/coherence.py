@@ -143,6 +143,16 @@ def phase(text):
         return max(cands)[1]
     return "air" if hits["air"] else ""
 
+DIRECTIONAL = re.compile(r"\b(descen\w*|dropp\w*|dive|dived|diving|plunge\w*|nosedive\w*|lost altitude|losing altitude|climb\w*|ascend\w*|"
+                         r"fell|fall(ing|s)?|plummet\w*|sank|sink(ing|s)?|"
+                         r"took off|taking off|bank(ed|ing)|rolled|spiral\w*)\b", re.I)
+
+def directional(text, moment=None):
+    """A beat whose narration has the aircraft moving in a direction (dive, descent, climb, bank) while in the air. AI stills can't
+    hold that attitude (tested 2026-10-09: the nose-up/down is fixed by the seed, not the prompt or the step count), so these beats
+    use real photos or the 3D reconstruction, whose attitude follows the narration."""
+    return (moment or phase(text)) == "air" and bool(DIRECTIONAL.search(text or ""))
+
 def beat_phases(sections):
     """Moment of every beat, from its NARRATION only (search phrases are noisy). A beat with no moment of its own (reactions,
     speculation, background) inherits the moment the story is at, so a comment made after the landing doesn't show the plane

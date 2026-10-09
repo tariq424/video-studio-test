@@ -334,9 +334,11 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                               "photo": pc["id"], "credit": photos.credit(pc), "short_credit": photos.short_credit(pc)}); used.add(pc["id"])
             if len(items) < n and pics: why1 = "not enough matching photos"
         pre[s["id"]] = items; step1[s["id"]] = ("photo" if s.get("subject") else "stock", why1); prej[s["id"]] = rej
+        skip = ("directional beat (dive/climb/bank): AI stills can't hold the attitude; reconstruction instead"
+                if s.get("subject") and coherence.directional(s["vo"], phases.get(s["id"])) else "")
         for k in range(n - len(items)):
             slots.append({"key": f"{s['id']}_{k}", "beat": s["id"], "vo": s["vo"], "still_prompt": s.get("still_prompt", ""),
-                          "motion": s.get("motion", ""), "subject": s.get("subject")})
+                          "motion": s.get("motion", ""), "subject": s.get("subject"), "skip": skip})
 
     def finalize(s, st):
         items = pre[s["id"]]; bd = s.get("backdrop") or {}
@@ -344,7 +346,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         rung1, why1 = step1[s["id"]]
         lines, k5, failed = [], 0, ([rung1] if why1 else [])
         for sl in [x for x in slots if x["beat"] == s["id"]]:
-            r = st.get(sl["key"], {}); chain = [rung1]; why = [f"{rung1}: {why1}"] if why1 else []
+            r = {"still_why": sl["skip"]} if sl.get("skip") else st.get(sl["key"], {}); chain = [rung1]; why = [f"{rung1}: {why1}"] if why1 else []
             chain.append("still")
             if r.get("still_ok"):
                 if "clip" in r: chain.append("animate")   # animation only exists after an explicit click
@@ -391,7 +393,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         for s in beats:
             if stop(): raise RuntimeError("cancelled")
             if s["id"] in needs and s["id"] not in out:
-                first = len(slots); prepare(s); sl = slots[first:]
+                first = len(slots); prepare(s); sl = [x for x in slots[first:] if not x.get("skip")]
                 st = ladder.run(cfg, wg, sd, fd, sl, log, stop, bool(sl) and wg.alive(), seed=5100 + first, full=full, pause=pause) if sl else {}
                 if sl and not wg.alive(): log("  WanGP isn't reachable: skipping steps 2-4")
                 finalize(s, st)
@@ -402,9 +404,10 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         if s["id"] in needs:
             if stop(): raise RuntimeError("cancelled")
             prepare(s)
-    gpu = bool(slots) and wg.alive()
-    if slots and not gpu: log("  WanGP isn't reachable: skipping steps 2-4")
-    st = ladder.run(cfg, wg, sd, fd, slots, log, stop, gpu, full=full, pause=pause) if slots else {}
+    run_slots = [x for x in slots if not x.get("skip")]
+    gpu = bool(run_slots) and wg.alive()
+    if run_slots and not gpu: log("  WanGP isn't reachable: skipping steps 2-4")
+    st = ladder.run(cfg, wg, sd, fd, run_slots, log, stop, gpu, full=full, pause=pause) if run_slots else {}
     for s in beats:
         if s["id"] in needs: finalize(s, st)
         elif s["id"] not in out: stock_beat(s)

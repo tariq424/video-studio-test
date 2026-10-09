@@ -291,3 +291,12 @@ This is the human or AI step the app can't do for itself:
 - Trace: job/trace.jsonl + job/trace.md (per-beat chain, decisions, timeline incl. debug on/off, chat). Claude reads trace.md here.
 - Rejected real photos: photos/<subject>.rejected.json with reason + preview (small ones are kept as <id>_small.jpg).
 - Smoke-tested 2026-10-08: job 20261008_210038 (manual pause, stock_found == 0 at Beat 1, chat use + why, debug off, auto pause → debug on, finished 31.1 s).
+
+## AI stills and aircraft attitude (2026-10-09)
+- Tested: the nose-up/down of a WanGP still is fixed by the seed, not the prompt or step count (4/8/12 steps x 3 seeds: 1 of 3 dives
+  every time); rotating the still afterwards fails (the vision model's pitch reads are fixed answers; 35 deg only reaches level; seams).
+- So: a subject beat whose narration moves the aircraft in a direction (dive, descent, fell, climb, bank... `coherence.directional`)
+  skips AI stills and uses real photos / the 3D reconstruction (attitude follows the narration). AI stills stay for the other beats
+  (with parallax when they pass). Manual AI stills: "Show all options" in review / the timeline editor.
+- Parallax is wired: it fires whenever an AI still passes the check (2 of the last 10 jobs before this); the drift is gentle (front layer 80 px).
+- Six-slot prompt / negative prompt / description-based check: branch wip/six-slot-image-prompts (not live).
