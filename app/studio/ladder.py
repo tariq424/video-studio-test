@@ -61,6 +61,14 @@ def check(cfg, img, narration, subject=None, video=False, info=None):
     if str(j.get("fits", "no")).strip().lower() != "yes": return False, "doesn't fit the narration" + (f": {why}" if why else "")
     return True, why
 
+def nose_side(cfg, img):
+    """'left' or 'right': the side of the picture the aircraft's nose points to (a blind look; default right)."""
+    from .footage import _vision
+    try:
+        j = parse_json(_vision(cfg, img, 'Look only at the aircraft. Reply with ONLY JSON: {"nose": "left" or "right" - the side of the picture its nose points toward}'))
+        return "left" if str(j.get("nose", "")).lower().startswith("l") else "right"
+    except Exception: return "right"
+
 def _rel(p, sd): return str(Path(p).relative_to(sd)).replace("\\", "/")
 
 def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False, animate=False, pause=None):
@@ -103,7 +111,9 @@ def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False, animate=F
             try: pause()
             except Exception: footage.unload_vet_model(cfg); raise
             r = st[s["key"]]; ok, why = check(cfg, sd / r["still"], s["vo"], s.get("subject"))
-            r["still_ok"], r["still_why"] = ok, why; save()
+            r["still_ok"], r["still_why"] = ok, why
+            if s.get("rotate"): r["nose"] = nose_side(cfg, sd / r["still"])   # which way to turn it (directional beats)
+            save()
         footage.unload_vet_model(cfg)
     # step 3: image-to-video of the stills that passed
     # animation (step 3) only on an explicit click (Show all options / Add animation -> animate=True); never in the

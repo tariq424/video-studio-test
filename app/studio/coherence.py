@@ -153,6 +153,22 @@ def directional(text, moment=None):
     use real photos or the 3D reconstruction, whose attitude follows the narration."""
     return (moment or phase(text)) == "air" and bool(DIRECTIONAL.search(text or ""))
 
+DOWN = re.compile(r"\b(descen\w*|dropp\w*|dive|dived|diving|plunge\w*|nosedive\w*|lost altitude|losing altitude|fell|fall(ing|s)?|"
+                  r"plummet\w*|sank|sink(ing|s)?|spiral\w*)\b", re.I)
+UP = re.compile(r"\b(climb\w*|ascend\w*|took off|taking off)\b", re.I)
+BANK = re.compile(r"\b(bank(ed|ing)?|turn(ed|ing)|rolled)\b", re.I)
+
+def attitude_rotation(text, moment=None):
+    """Degrees to rotate an AI still of an aircraft so it shows the narration's direction (nose-down positive), or None when the beat
+    isn't directional. Fixed by the verb, not measured: the image model's pitch is random and the vision model can't measure it.
+    Descending / diving / falling: 35 (tested: 35 reads level-to-banking-down, 50 overshoots into a tight crop). Climbing: 0
+    (the model draws climbs on its own). Banking / turning: 20."""
+    if not directional(text, moment): return None
+    if DOWN.search(text): return 35.0
+    if UP.search(text): return 0.0
+    if BANK.search(text): return 20.0
+    return None
+
 def beat_phases(sections):
     """Moment of every beat, from its NARRATION only (search phrases are noisy). A beat with no moment of its own (reactions,
     speculation, background) inherits the moment the story is at, so a comment made after the landing doesn't show the plane

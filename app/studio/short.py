@@ -334,11 +334,10 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                               "photo": pc["id"], "credit": photos.credit(pc), "short_credit": photos.short_credit(pc)}); used.add(pc["id"])
             if len(items) < n and pics: why1 = "not enough matching photos"
         pre[s["id"]] = items; step1[s["id"]] = ("photo" if s.get("subject") else "stock", why1); prej[s["id"]] = rej
-        skip = ("directional beat (dive/climb/bank): AI stills can't hold the attitude; reconstruction instead"
-                if s.get("subject") and coherence.directional(s["vo"], phases.get(s["id"])) else "")
+        rot = coherence.attitude_rotation(s["vo"], phases.get(s["id"])) if s.get("subject") else None
         for k in range(n - len(items)):
             slots.append({"key": f"{s['id']}_{k}", "beat": s["id"], "vo": s["vo"], "still_prompt": s.get("still_prompt", ""),
-                          "motion": s.get("motion", ""), "subject": s.get("subject"), "skip": skip})
+                          "motion": s.get("motion", ""), "subject": s.get("subject"), "rotate": rot})
 
     def finalize(s, st):
         items = pre[s["id"]]; bd = s.get("backdrop") or {}
@@ -346,8 +345,27 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         rung1, why1 = step1[s["id"]]
         lines, k5, failed = [], 0, ([rung1] if why1 else [])
         for sl in [x for x in slots if x["beat"] == s["id"]]:
-            r = {"still_why": sl["skip"]} if sl.get("skip") else st.get(sl["key"], {}); chain = [rung1]; why = [f"{rung1}: {why1}"] if why1 else []
+            r = st.get(sl["key"], {}); chain = [rung1]; why = [f"{rung1}: {why1}"] if why1 else []
             chain.append("still")
+            sw = str(r.get("still_why") or "")
+            if sl.get("rotate") is not None and r.get("still") and not sw.startswith("garbled"):
+                # directional beat: the image model's nose angle is random, so the still is turned by the narration's verb and given
+                # parallax; it is rejected only when garbled (the attitude check can't judge it)
+                img = sd / r["still"]; deg = sl["rotate"]
+                if deg:
+                    img = rotate_still(img, deg, r.get("nose", "right"), fd / f"{sl['key']}_rot.jpg"); chain.append(f"rotate {deg:.0f}°")
+                chain.append("parallax"); pre_ = fd / f"{sl['key']}_r"
+                try: lay = depth.layers(img, pre_, log)
+                except Exception as e: log(f"  depth layers failed ({str(e)[:80]}); held with a slow zoom"); lay = depth_free(img, pre_)
+                items.append({"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED · PARALLAX", "rung": "parallax"})
+                if not r.get("still_ok"): why.append(f"still check ignored for a directional beat ({sw[:60]})")
+                lines.append(" -> ".join(chain) + (f"  ({'; '.join(why)})" if why else "")); continue
+            if not r.get("still_ok") and r.get("still") and sw.startswith("shows text"):
+                # only marks (lettering/logo) - not a contradiction of the narration: hold the still with a slow zoom
+                chain.append("hold"); why.append(f"still: {sw}"); failed.append("still")
+                lay = depth_free(sd / r["still"], fd / f"{sl['key']}_hold")
+                items.append({"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED", "rung": "still"})
+                lines.append(" -> ".join(chain) + f"  ({'; '.join(why)})"); continue
             if r.get("still_ok"):
                 if "clip" in r: chain.append("animate")   # animation only exists after an explicit click
                 if r.get("clip_ok"):
@@ -393,7 +411,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         for s in beats:
             if stop(): raise RuntimeError("cancelled")
             if s["id"] in needs and s["id"] not in out:
-                first = len(slots); prepare(s); sl = [x for x in slots[first:] if not x.get("skip")]
+                first = len(slots); prepare(s); sl = slots[first:]
                 st = ladder.run(cfg, wg, sd, fd, sl, log, stop, bool(sl) and wg.alive(), seed=5100 + first, full=full, pause=pause) if sl else {}
                 if sl and not wg.alive(): log("  WanGP isn't reachable: skipping steps 2-4")
                 finalize(s, st)
@@ -404,7 +422,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         if s["id"] in needs:
             if stop(): raise RuntimeError("cancelled")
             prepare(s)
-    run_slots = [x for x in slots if not x.get("skip")]
+    run_slots = slots
     gpu = bool(run_slots) and wg.alive()
     if run_slots and not gpu: log("  WanGP isn't reachable: skipping steps 2-4")
     st = ladder.run(cfg, wg, sd, fd, run_slots, log, stop, gpu, full=full, pause=pause) if run_slots else {}
@@ -413,6 +431,19 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         elif s["id"] not in out: stock_beat(s)
         if dbg: save_out(); dbg.point(info(s))
     save_out()
+
+def rotate_still(src, deg, nose, dst):
+    """Turn a still `deg` degrees nose-down (nose = the side of the picture the aircraft points to) and crop to fill the frame
+    (no empty corners; a heavier crop at larger angles)."""
+    import math
+    from PIL import Image
+    im = Image.open(src).convert("RGB"); W, H = im.size; t = math.radians(abs(deg))
+    s = max(math.cos(t) + (H / W) * math.sin(t), (W / H) * math.sin(t) + math.cos(t))
+    cw = deg if nose != "left" else -deg   # nose to the right: clockwise lowers it
+    big = im.resize((int(W * s), int(H * s)), Image.LANCZOS).rotate(-cw, resample=Image.BICUBIC, expand=False)
+    x0, y0 = (big.width - W) // 2, (big.height - H) // 2
+    big.crop((x0, y0, x0 + W, y0 + H)).save(dst, quality=93)
+    return Path(dst)
 
 def _rel_sd(p, sd): return str(Path(p).relative_to(sd)).replace("\\", "/")
 
