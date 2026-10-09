@@ -69,7 +69,7 @@ def subject_mask(d):
     cand = [(sizes[k], k) for k in range(1, len(sizes)) if k not in edge]
     if not cand: return None
     area, k = max(cand)
-    if not (0.04 <= area / m.size <= 0.5) or area < 0.6 * sum(c for c, _ in cand): return None
+    if not (0.005 <= area / m.size <= 0.5) or area < 0.6 * sum(c for c, _ in cand): return None
     s = lab == k
     outside, _ = _components(~s)                                       # fill holes: background not reachable from the border
     border = set(outside[0].tolist()) | set(outside[-1].tolist()) | set(outside[:, 0].tolist()) | set(outside[:, -1].tolist())
