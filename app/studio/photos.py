@@ -174,26 +174,47 @@ def find(cfg, subject, out_dir, log, want=4, keys=None):
         except Exception as e:
             log(f"  can't check photos ({str(e)[:100]}); using none - the shot falls back to a reconstruction"); return []
     from PIL import Image
+    rej = []   # every rejected photo, with its reason and a preview where one could be had (the debugger thumbnails them)
+    def reject(c, why, path=None):
+        rej.append({"id": c["id"], "title": c["title"][:80], "why": why, "path": str(path) if path and Path(path).exists() else "",
+                    "creator": c.get("creator", ""), "src": c.get("src", "")})
+    def small_preview(c, data=None):
+        pv = out_dir / f"{c['id']}_small.jpg"
+        if pv.exists(): return pv
+        try:
+            if data is None: data, _ = _download(c["url"])
+            if data: Image.open(io.BytesIO(data)).convert("RGB").save(pv, "JPEG", quality=85); return pv
+        except Exception: pass
+        return None
     for c in uniq[:want * 2 + 4]:
         if len(got) >= want: break
-        if c["w"] and c["w"] < MIN_W: log(f"  photo skipped: {c['title'][:50]} (only {c['w']} px wide)"); continue
+        if c["w"] and c["w"] < MIN_W:
+            log(f"  photo skipped: {c['title'][:50]} (only {c['w']} px wide)"); reject(c, f"only {c['w']} px wide", small_preview(c)); continue
         path = out_dir / f"{c['id']}.jpg"
         if not path.exists():   # downloaded files are kept, so a re-run never fetches them again
             data, why = _download(c["url"])
-            if data is None: log(f"  photo download failed ({why}): {c['title'][:50]}"); continue
+            if data is None: log(f"  photo download failed ({why}): {c['title'][:50]}"); reject(c, f"download failed ({why})"); continue
             try: im = Image.open(io.BytesIO(data)).convert("RGB")
-            except Exception: log(f"  photo download failed (not an image): {c['title'][:50]}"); continue
-            if im.width < MIN_W: log(f"  photo skipped: {c['title'][:50]} (only {im.width} px wide)"); continue
+            except Exception: log(f"  photo download failed (not an image): {c['title'][:50]}"); reject(c, "not an image"); continue
+            if im.width < MIN_W:
+                log(f"  photo skipped: {c['title'][:50]} (only {im.width} px wide)"); reject(c, f"only {im.width} px wide", small_preview(c, data)); continue
             im.save(path, "JPEG", quality=92)
         ok, why = _check(cfg, c, path, subject, log)
-        if not ok: log(f"  photo skipped: {c['title'][:50]} ({why})"); continue
+        if not ok: log(f"  photo skipped: {c['title'][:50]} ({why})"); reject(c, why, path); continue
         c["path"] = str(path); got.append(c)
         log(f"  photo OK: {c['title'][:60]} - {c['creator'][:40]}, {credit_license(c)} ({c['src']}; {c.get('phase') or '?'})")
     if uniq:
         from .footage import unload_vet_model
         unload_vet_model(cfg)   # free the GPU for WanGP
     if got or not problem: cf.write_text(json.dumps(got, indent=1), encoding="utf-8")   # a throttled empty result is retried next time
+    if rej: (out_dir / f"{_slug(subject['name'])}.rejected.json").write_text(json.dumps(rej, indent=1), encoding="utf-8")
     return got
+
+def rejected(subject, out_dir):
+    """Photos of the subject that were rejected (reason + preview path), from the last search."""
+    f = Path(out_dir) / f"{_slug(subject['name'])}.rejected.json"
+    try: return json.loads(f.read_text(encoding="utf-8")) if f.exists() else []
+    except Exception: return []
 
 def credit_license(c):
     n = LIC_NAME.get(c["license"], c["license"].upper())

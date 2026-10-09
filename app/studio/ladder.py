@@ -59,11 +59,13 @@ def check(cfg, img, narration, subject=None, video=False, info=None):
 
 def _rel(p, sd): return str(Path(p).relative_to(sd)).replace("\\", "/")
 
-def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False, animate=False):
+def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False, animate=False, pause=None):
     """slots: [{"key", "beat", "vo", "still_prompt", "motion", "subject"}] -> {key: {"still": path|None, "still_ok", "still_why",
     "clip": path|None, "clip_ok", "clip_why", "clip_secs", "clip_worst"}}. State is kept in fallback/ladder.json so Resume doesn't redo work.
     full=True (Review every beat / Show all options): animate every still, also the ones that failed their check, so the
-    reviewer sees every treatment; otherwise the ladder stops at the first step that passes."""
+    reviewer sees every treatment; otherwise the ladder stops at the first step that passes.
+    pause: called at each safe point (between generations / checks); raises debug.Paused when 'Pause now' was pressed."""
+    pause = pause or (lambda: None)
     from . import render, footage
     sf = fd / "ladder.json"
     st = json.loads(sf.read_text(encoding="utf-8")) if sf.exists() else {}
@@ -75,6 +77,7 @@ def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False, animate=F
     # step 2: stills
     for i, s in enumerate(slots):
         if stop(): raise RuntimeError("cancelled")
+        pause()
         r = st[s["key"]]; img = fd / f"{s['key']}.jpg"
         if "still" in r and (r["still"] is None or img.exists()): continue
         if not s.get("still_prompt"): r["still"] = None; r["still_why"] = "no scene prompt"; save(); continue
@@ -93,6 +96,8 @@ def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False, animate=F
         try: footage.ensure_vet_model(cfg, log)
         except Exception as e: log(f"  {str(e)[:160]}")
         for s in todo:
+            try: pause()
+            except Exception: footage.unload_vet_model(cfg); raise
             r = st[s["key"]]; ok, why = check(cfg, sd / r["still"], s["vo"], s.get("subject"))
             r["still_ok"], r["still_why"] = ok, why; save()
         footage.unload_vet_model(cfg)

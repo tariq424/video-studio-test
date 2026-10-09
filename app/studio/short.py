@@ -261,33 +261,50 @@ def depth_free(img, prefix, size=(1080, 1920)):
     p = Path(f"{prefix}_L0.jpg"); im.crop((x0, y0, x0 + W, y0 + H)).save(p, quality=92)
     return [p]
 
-def do_fallback(job, plan, cfg, wg, log, stop, full=False):
+def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
     """The visual ladder for beats that step 1 didn't cover (stock footage for generic beats, real photos for subject beats):
     2 WanGP still -> 3 WanGP image-to-video (GENERATED) -> 4 parallax of the still (PARALLAX) -> 5 3D reconstruction / headline card.
     Every step is checked against the beat's narration (ladder.py); a failed check escalates. A beat's map backdrop (geography)
-    is kept as its first visual. Writes short/fallback.json = {beat: [bg items]} and logs one ladder line per beat."""
+    is kept as its first visual. Writes short/fallback.json = {beat: [bg items]} and logs one ladder line per beat.
+    Also writes short/fallback/chains.json (every beat's decision chain: stock found, what was tried and why it failed, what is used)
+    for the debugger and the trace. dbg (debug.Debugger): safe points for 'Pause now'; with breakpoints on, beats run one at a time
+    and each is checked after its visuals are decided (normal runs keep the batched GPU order)."""
     from . import depth, coherence, photos, ladder
     sd = job / "short"; fd = sd / "fallback"; fd.mkdir(parents=True, exist_ok=True)
     tm = json.loads((sd / "timings.json").read_text(encoding="utf-8"))
     pick = json.loads((sd / "stock" / "pick.json").read_text(encoding="utf-8"))
+    fsf = sd / "stock" / "footage.json"; fst = json.loads(fsf.read_text(encoding="utf-8")) if fsf.exists() else {}
     ff = sd / "fallback.json"; out = json.loads(ff.read_text(encoding="utf-8")) if ff.exists() else {}
+    cf = fd / "chains.json"; chs = json.loads(cf.read_text(encoding="utf-8")) if cf.exists() else {}
+    def save_out(): ff.write_text(json.dumps(out, indent=1), encoding="utf-8"); cf.write_text(json.dumps(chs, indent=1), encoding="utf-8")
     allneeds = base_needs = _needs(plan, tm, pick, sd, cfg)
     if full:   # Review every beat: every beat gets the whole menu, also the ones stock footage already covers (one slot)
         allneeds = {s["id"]: allneeds.get(s["id"], 1) for s in plan["sections"] if not s.get("cta") and s["id"] in tm}
     needs = {k: v for k, v in allneeds.items() if k not in out}
+    beats = [s for s in plan["sections"] if not s.get("cta") and s["id"] in tm]
+    def srej(bid): return [{"id": r.get("id"), "why": r.get("why", "")} for r in fst.get("rejected", {}).get(bid, [])][:12]
+    def stock_beat(sec):
+        bid = sec["id"]
+        if bid in chs: return
+        k = len(pick.get(bid, []))
+        chs[bid] = {"n": int(bid[1:]) + 1, "vo": sec["vo"], "stock_found": k, "chain": [f"stock ({k} clip(s), coherent)"], "uses": ["stock"],
+                    "failed": [], "stock_rejected": srej(bid), "photos_rejected": []}
+    def info(sec):
+        c = chs.get(sec["id"], {})
+        return {"bid": sec["id"], "n": int(sec["id"][1:]) + 1, "vo": sec["vo"], "stock_found": c.get("stock_found", len(pick.get(sec["id"], []))),
+                "uses": c.get("uses", []), "failed": c.get("failed", [])}
     log("Visual ladder per beat (1 stock/photo -> 2 still -> 3 animate -> 4 parallax -> 5 reconstruction):")
-    for s in plan["sections"]:   # beats step 1 covered on its own
-        if s.get("cta") or s["id"] not in tm or s["id"] in base_needs: continue
-        log(f"  {s['id']}: stock ({len(pick.get(s['id'], []))} clip(s), coherent)")
-    if not needs:
-        log("  no other beats need visuals"); ff.write_text(json.dumps(out, indent=1), encoding="utf-8"); return
+    for s in beats:   # beats step 1 covered on its own
+        if s["id"] in base_needs: continue
+        log(f"  {s['id']}: stock ({len(pick.get(s['id'], []))} clip(s), coherent)"); stock_beat(s)
+    if not needs and not dbg:
+        log("  no other beats need visuals"); save_out(); return
     ents = json.loads((job / "entities.json").read_text(encoding="utf-8")) if (job / "entities.json").exists() else []
     phases = coherence.beat_phases([x for x in plan["sections"] if not x.get("cta")])
-    pre, step1, slots = {}, {}, []
-    for s in plan["sections"]:
-        if s["id"] not in needs: continue
-        if stop(): raise RuntimeError("cancelled")
-        n = needs[s["id"]]; items = []
+    pre, step1, slots, prej = {}, {}, [], {}
+
+    def prepare(s):
+        n = needs[s["id"]]; items = []; rej = []
         bd = s.get("backdrop") or {"kind": "headline", "kicker": "", "text": s["vo"][:60], "sub": ""}
         if bd.get("kind") == "map": items.append({"type": "graphic", "g": bd, "rung": "map"})
         have = len(pick.get(s["id"], []))
@@ -301,7 +318,10 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False):
             else:
                 try: pics = photos.find(cfg, s["subject"], sd / "photos", log, want=10)
                 except Exception as e: log(f"  photo search failed ({str(e)[:100]})")
+                rej += photos.rejected(s["subject"], sd / "photos")
                 fit = [pc for pc in pics if coherence.phase_ok(bp, pc.get("phase"))]
+                rej += [{"id": pc["id"], "title": pc.get("title", "")[:80], "path": pc.get("path", ""),
+                         "why": f"shows the subject {pc.get('phase') or 'at another moment'}, the beat is {bp or 'another moment'}"} for pc in pics if pc not in fit]
                 why1 = ("no usable photo" if not pics else f"no photo shows it {bp or 'in this situation'}") if not fit else ""
                 pics = fit
             used = {i.get("photo") for v in out.values() for i in v if i.get("photo")}
@@ -313,19 +333,16 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False):
                 items.append({"type": "image", "src": str(dst.relative_to(sd)).replace("\\", "/"), "fit": "frame", "rung": "photo",
                               "photo": pc["id"], "credit": photos.credit(pc), "short_credit": photos.short_credit(pc)}); used.add(pc["id"])
             if len(items) < n and pics: why1 = "not enough matching photos"
-        pre[s["id"]] = items; step1[s["id"]] = ("photo" if s.get("subject") else "stock", why1)
+        pre[s["id"]] = items; step1[s["id"]] = ("photo" if s.get("subject") else "stock", why1); prej[s["id"]] = rej
         for k in range(n - len(items)):
             slots.append({"key": f"{s['id']}_{k}", "beat": s["id"], "vo": s["vo"], "still_prompt": s.get("still_prompt", ""),
                           "motion": s.get("motion", ""), "subject": s.get("subject")})
-    gpu = bool(slots) and wg.alive()
-    if slots and not gpu: log("  WanGP isn't reachable: skipping steps 2-4")
-    st = ladder.run(cfg, wg, sd, fd, slots, log, stop, gpu, full=full) if slots else {}
-    for s in plan["sections"]:
-        if s["id"] not in needs: continue
+
+    def finalize(s, st):
         items = pre[s["id"]]; bd = s.get("backdrop") or {}
         cap = bd.get("text", "") if bd.get("kind") == "headline" else bd.get("title", "")
         rung1, why1 = step1[s["id"]]
-        lines, k5 = [], 0
+        lines, k5, failed = [], 0, ([rung1] if why1 else [])
         for sl in [x for x in slots if x["beat"] == s["id"]]:
             r = st.get(sl["key"], {}); chain = [rung1]; why = [f"{rung1}: {why1}"] if why1 else []
             chain.append("still")
@@ -334,7 +351,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False):
                 if r.get("clip_ok"):
                     items.append({"type": "video", "src": r["clip"], "secs": round((r.get("clip_secs") or FB_SECS) / 0.85, 2), "tag": "GENERATED", "rung": "animate"})
                     lines.append(" -> ".join(chain) + (f"  ({'; '.join(why)})" if why else "")); continue
-                if "clip" in r: why.append(f"animate: {r.get('clip_why') or 'not run'}")
+                if "clip" in r: why.append(f"animate: {r.get('clip_why') or 'not run'}"); failed.append("animate")
                 chain.append("parallax")
                 img = sd / r["still"]; pre_ = fd / sl["key"]
                 try: lay = depth.layers(img, pre_, log)
@@ -342,7 +359,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False):
                     log(f"  depth layers failed ({str(e)[:80]}); still without parallax"); lay = depth_free(img, pre_)
                 items.append({"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED · PARALLAX", "rung": "parallax"})
             else:
-                why.append(f"still: {r.get('still_why') or 'not made'}")
+                why.append(f"still: {r.get('still_why') or 'not made'}"); failed.append("still")
                 if s.get("subject"):
                     chain.append("reconstruction")
                     items.append({"type": "graphic", "g": coherence.recon(s["subject"], ents, s["vo"], k5, cap if k5 == 0 else "", moment=phases.get(s["id"], "")), "rung": "reconstruction"}); k5 += 1
@@ -364,7 +381,35 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False):
         got = ", ".join(i["rung"] for i in items)
         for j, ln in enumerate(lines): log(f"  {s['id']}{'#' + str(j + 1) if len(lines) > 1 else ''}: {ln}")
         log(f"  {s['id']} uses: {got}")
-        ff.write_text(json.dumps(out, indent=1), encoding="utf-8")
+        chs[s["id"]] = {"n": int(s["id"][1:]) + 1, "vo": s["vo"], "stock_found": len(pick.get(s["id"], [])), "chain": lines,
+                        "uses": [i["rung"] for i in items], "failed": sorted(set(failed)), "stock_rejected": srej(s["id"]), "photos_rejected": prej.get(s["id"], [])}
+        save_out()
+
+    pause = (lambda: dbg.manual("short_fallback: AI stills")) if dbg else None
+    if dbg and dbg.active():   # debug: one beat at a time, so a breakpoint stops right after the beat it is about
+        log("  debug on: beats run one at a time; breakpoints are checked after each beat")
+        for s in beats:
+            if stop(): raise RuntimeError("cancelled")
+            if s["id"] in needs and s["id"] not in out:
+                first = len(slots); prepare(s); sl = slots[first:]
+                st = ladder.run(cfg, wg, sd, fd, sl, log, stop, bool(sl) and wg.alive(), seed=5100 + first, full=full, pause=pause) if sl else {}
+                if sl and not wg.alive(): log("  WanGP isn't reachable: skipping steps 2-4")
+                finalize(s, st)
+            elif s["id"] not in needs: stock_beat(s)
+            save_out(); dbg.point(info(s))
+        return
+    for s in beats:
+        if s["id"] in needs:
+            if stop(): raise RuntimeError("cancelled")
+            prepare(s)
+    gpu = bool(slots) and wg.alive()
+    if slots and not gpu: log("  WanGP isn't reachable: skipping steps 2-4")
+    st = ladder.run(cfg, wg, sd, fd, slots, log, stop, gpu, full=full, pause=pause) if slots else {}
+    for s in beats:
+        if s["id"] in needs: finalize(s, st)
+        elif s["id"] not in out: stock_beat(s)
+        if dbg: save_out(); dbg.point(info(s))
+    save_out()
 
 def _rel_sd(p, sd): return str(Path(p).relative_to(sd)).replace("\\", "/")
 

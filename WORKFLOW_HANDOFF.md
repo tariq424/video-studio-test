@@ -275,3 +275,19 @@ This is the human or AI step the app can't do for itself:
   (not an unchecked re-ask); >10% long -> drop middle beats; the fact-check can lengthen the script, so it is cut again after (>6%).
 - Render: if the narration is more than 3 s off plan["target_secs"], the pace is nudged up to +/-7% (atempo; beat timings scale with it).
 - Verified: 2:20 job 20261008_201028 narration 138.5 s (stopped after narration); smoke 20261008_202035 37 s -> 35.0 s via the pace step.
+
+## Debugger (2026-10-08) — studio/debug.py
+- Off by default. New video form → "Debug (breakpoints)": Debug mode + breakpoints, one per line:
+  `beat == N`, `treatment == stock|photo|still|animate|parallax|3d|card`, `stock_found == N` (also < > <= >=),
+  `escalated_past == stock|photo|still|animate`, `narration contains "word"`. Checked once per beat after its visuals are decided.
+- With breakpoints on, short_fallback runs beats one at a time (same seeds); normal runs stay batched.
+- "Pause now" (any running job): pauses at the next safe point (before a stage; between AI stills/checks; after a beat). Status "paused",
+  survives restarts; Continue = resume (caches mean nothing is redone).
+- Shared pause panel (#dbp): label (manual / breakpoint / uncertain), "Debug mode for the rest of this run" switch, Continue / Skip step /
+  Abort / Generate thumbnails, breakpoints (add, remove, disable all), inspector (chain + reasons from short/fallback/chains.json),
+  the beat's treatment card (Use selected = override, supply your own), panel chat.
+- Panel chat (DeepSeek, else local): refine / more_stock (no animation) / use options / thumbnails / skip / continue; why-questions get an
+  answer from the log + "For deeper reasoning, ask in the Claude chat."
+- Trace: job/trace.jsonl + job/trace.md (per-beat chain, decisions, timeline incl. debug on/off, chat). Claude reads trace.md here.
+- Rejected real photos: photos/<subject>.rejected.json with reason + preview (small ones are kept as <id>_small.jpg).
+- Smoke-tested 2026-10-08: job 20261008_210038 (manual pause, stock_found == 0 at Beat 1, chat use + why, debug off, auto pause → debug on, finished 31.1 s).

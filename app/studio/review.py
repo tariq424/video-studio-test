@@ -109,8 +109,10 @@ def _stock_cands(rv, sec, picked, rejected, story_subjects, auto=False):
              "stock", False, r.get("why", "rejected"))
     return out
 
-def collect(job, plan, cfg, log, mode="auto"):
-    """Build/refresh review.json after short_fallback. -> (rv, pause?)"""
+def collect(job, plan, cfg, log, mode="auto", debug_beats=None):
+    """Build/refresh review.json after short_fallback. -> (rv, pause?)
+    debug_beats: a debugger pause mid-run: only these beats, every cheap treatment plus the rejected real photos, no auto decisions,
+    no thumbnails (the panel makes them on request), never pauses by itself."""
     from . import short, coherence
     job = Path(job); sd, rd = _p(job); rd.mkdir(parents=True, exist_ok=True)
     with _lock(job):
@@ -127,9 +129,14 @@ def collect(job, plan, cfg, log, mode="auto"):
         story_subjects = any(e.get("kind") != "person" for e in (json.loads(ef.read_text(encoding="utf-8")) if ef.exists() else []))
         phases = coherence.beat_phases([x for x in plan["sections"] if not x.get("cta")])
         full = mode == "every"
+        dbg_ch = {}
+        if debug_beats is not None:
+            from . import debug as _dbg
+            dbg_ch = _dbg.chains(job)
         for sec in plan["sections"]:
             bid = sec["id"]
             if sec.get("cta") or bid not in tm: continue
+            if debug_beats is not None and bid not in debug_beats: continue
             d = tm[bid]["dur"] + short.GAP
             b = rv["beats"].setdefault(bid, {"vo": sec["vo"], "secs": round(d, 2), "auto": [], "cands": [], "decision": None, "chosen": [],
                                              "uncertain": False, "why": "", "history": [], "busy": "", "msg": "", "notes": []})
@@ -145,7 +152,11 @@ def collect(job, plan, cfg, log, mode="auto"):
             _stock_cands(rv, sec, [], fst.get("rejected", {}).get(bid, []), story_subjects)
             slots = {k: r for k, r in lad.items() if k.rsplit("_", 1)[0] == bid}
             for k, r in slots.items(): _slot_cands(rv, sec, k, r, sd, full, log)
-            if full: _cheap_cands(rv, sec, job, phases)
+            if full or debug_beats is not None: _cheap_cands(rv, sec, job, phases)
+            for pr in dbg_ch.get(bid, {}).get("photos_rejected", []):   # the debugger shows rejected real photos too
+                if pr.get("path") and Path(pr["path"]).exists():
+                    _add(rv, bid, {"type": "image", "src": _rel(pr["path"], sd), "fit": "frame", "tag": "FILE", "photo": pr.get("id")}, "photo", False,
+                         pr.get("why", "rejected"))
             b["auto"] = auto
             # uncertain: the check couldn't judge, or every generated option failed and the beat fell back to the last resort
             why = []
@@ -155,8 +166,8 @@ def collect(job, plan, cfg, log, mode="auto"):
                 why.append("the AI still failed the check, so it fell back to " + ", ".join(sorted({RUNG.get(x, x).lower() for x in rungs if x in ('reconstruction', 'headline')})))
             if not auto: why.append("no visual found")
             b["uncertain"], b["why"] = bool(why), "; ".join(why)
-            if mode == "auto" and not why and not b["decision"]: b["decision"] = "auto"
-        pause = any(not b["decision"] for b in rv["beats"].values())
+            if mode == "auto" and not why and not b["decision"] and debug_beats is None: b["decision"] = "auto"
+        pause = any(not b["decision"] for b in rv["beats"].values()) and debug_beats is None
         save(job, rv)
     if pause:
         n = sum(1 for b in rv["beats"].values() if b["uncertain"])
@@ -434,14 +445,14 @@ def start(studio, jid, bid, kind, payload=None, ws=None):
     if studio.current: return "Another job is using the GPU right now; try again when it has finished."
     if not _gpu.acquire(blocking=False): return "Already generating options for a beat; wait for it to finish."
     job = ws or studio.job(jid).dir
-    _busy(job, bid, {"expand": "Generating options...", "animate": "Animating (several minutes)..."}.get(kind, "Working on your instruction..."))
+    _busy(job, bid, {"expand": "Generating options...", "animate": "Animating (several minutes)...", "more_stock": "Searching more stock footage..."}.get(kind, "Working on your instruction..."))
     def run():
         log = studio.job(jid).log
         try:
             from . import config
             from .wangp import WanGP
             cfg = config.load(); wg = WanGP(cfg)
-            {"expand": expand, "refine": refine, "animate": add_animation}[kind](job, bid, cfg, wg, log, payload or {})
+            {"expand": expand, "refine": refine, "animate": add_animation, "more_stock": more_stock}[kind](job, bid, cfg, wg, log, payload or {})
         except Exception as e:
             log(f"  {bid}: {kind} failed: {str(e)[:300]}")
             with _lock(job):
@@ -459,11 +470,11 @@ def _run_slots(job, sec, keys, cfg, wg, log, prompt=None, motion=None, animate=F
     if not gpu: log("  WanGP isn't reachable: no AI stills or animations")
     return ladder.run(cfg, wg, sd, sd / "fallback", slots, log, lambda: False, gpu, seed=7000 + int(time.time()) % 1000, full=True, animate=animate)
 
-def _extra_stock(job, sec, queries, tag, cfg, log):
+def _extra_stock(job, sec, queries, tag, cfg, log, n=2):
     from . import footage
     sd, rd = _p(job); sf = rd / f"stock_{sec['id']}_{tag}.json"
     slot = {"id": sec["id"], "text": sec["vo"], "queries": queries, "avoid": sec.get("avoid") or []}
-    picked = footage.fill(cfg, [slot], _sp(sd)["orient"], {sec["id"]: 2}, sd / "stock", log, lambda: False, want_long_side=2560, max_secs=10.0,
+    picked = footage.fill(cfg, [slot], _sp(sd)["orient"], {sec["id"]: n}, sd / "stock", log, lambda: False, want_long_side=2560, max_secs=10.0,
                           state_file=sf, fallback=True)
     st = json.loads(sf.read_text(encoding="utf-8")) if sf.exists() else {}
     return picked.get(sec["id"], []), st.get("rejected", {}).get(sec["id"], [])
@@ -506,6 +517,20 @@ def expand(job, bid, cfg, wg, log, payload):
         save(job, rv)
     thumbs(job, cfg, log)
     log(f"{bid}: all treatments ready")
+
+def more_stock(job, bid, cfg, wg, log, payload):
+    """Panel chat: more stock footage for this beat (no GPU generation, never an animation)."""
+    sd, rd = _p(job); sp, sec = _section(job, bid)
+    qs = [q for q in (payload.get("queries") or []) if isinstance(q, str) and q.strip()][:3] or sec.get("queries") or []
+    n = max(1, min(4, int(payload.get("count") or 2)))
+    k = len(list(rd.glob(f"stock_{bid}_m*.json"))) + 1
+    log(f"{bid}: searching {n} more stock clip(s): {'; '.join(qs)}")
+    picked, rejected = _extra_stock(job, sec, qs, f"m{k}", cfg, log, n=n)
+    with _lock(job):
+        rv = load(job); new = _stock_cands(rv, sec, picked, rejected, _story_subjects(job))
+        rv["beats"][bid]["msg"] = f"{len(picked)} more stock clip(s) found" + (f", {len(rejected)} rejected" if rejected else "") + "."
+        save(job, rv)
+    thumbs(job, cfg, log)
 
 def add_animation(job, bid, cfg, wg, log, payload):
     """Add animation: animate this beat's AI still(s) (making a still first if there is none)."""

@@ -1,7 +1,7 @@
 """Job queue: one job renders at a time (single GPU). Each stage is resumable."""
 import json, threading, time, traceback, re, shutil, datetime, queue
 from pathlib import Path
-from . import config, transcript, writer, render, assemble, media, sources, short
+from . import config, transcript, writer, render, assemble, media, sources, short, debug
 from .wangp import WanGP
 
 STAGES = ["transcript", "script", "short_script", "review", "short_stock", "short_voice", "short_fallback", "short_review", "short_render",
@@ -53,7 +53,7 @@ class Studio:
         return out
 
     def create(self, url, minutes, presenter=False, auto_approve=False, transcript_text="", provider="", captions=True,
-               mode="both", short_secs=165, upload=None, upload_name="", src_title="", src_credit="", visual_review="auto"):
+               mode="both", short_secs=165, upload=None, upload_name="", src_title="", src_credit="", visual_review="auto", dbg_on=False, bps=None):
         smoke = mode == "smoke"   # pipeline check: a ~30-second Short (about 75 words); real Shorts keep the 2:00 minimum
         if smoke: mode, short_secs = "short", SMOKE_SECS
         jid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -65,7 +65,9 @@ class Studio:
             (j.dir / "src" / ("transcript_manual.txt" if url else "pasted.txt")).write_text(transcript_text, encoding="utf-8")
         j.save(url=url, minutes=float(minutes), presenter=bool(presenter), captions=bool(captions), auto_approve=bool(auto_approve), provider=provider or "",
                mode=mode if mode in ("long", "short", "both") else "both", short_secs=SMOKE_SECS if smoke else max(120.0, min(176.0, float(short_secs))), smoke=smoke,
-               upload=up, src_title=src_title, src_credit=src_credit, visual_review=visual_review if visual_review in ("auto", "every") else "auto", status="queued", stage="transcript", done=[], title="", created=time.time())
+               upload=up, src_title=src_title, src_credit=src_credit, visual_review=visual_review if visual_review in ("auto", "every") else "auto", status="queued", stage="transcript", done=[], title="", created=time.time(),
+               debug={"on": bool(dbg_on), "bps": list(bps or []), "bps_off": False, "checked": [], "chat": []}, trace=bool(dbg_on))
+        if dbg_on: debug.trace(j.dir, {"ev": "debug on", "at": "job start", "breakpoints": "; ".join(bps or []) or "none"})
         what = url or (f"file {up}" if up else "pasted text")
         j.log(f"Job created for {what} (output: {'SMOKE TEST, ' if smoke else ''}{mode}; long {minutes} min, short {short_secs:.0f}s)"); self.q.put(jid); return jid
 
@@ -112,7 +114,37 @@ class Studio:
         j.save(done=d, status="queued"); j.log("Full re-render requested"); self.q.put(jid)
 
     def resume(self, jid):
-        j = self.job(jid); self.cancel.discard(jid); j.save(status="queued", error=""); j.log("Resumed"); self.q.put(jid)
+        j = self.job(jid); self.cancel.discard(jid)
+        was = j.state.get("pause") if j.state.get("status") == "paused" else None
+        j.save(status="queued", error="", pause=None, pause_req=False); j.log("Resumed"); self.q.put(jid)
+        if was: debug.trace(j.dir, {"ev": "resume", "from": was.get("label", "")})
+
+    def request_pause(self, jid):
+        """'Pause now': stop at the next safe point (never inside a render or a generation)."""
+        j = self.job(jid)
+        if j.state.get("status") not in ("running", "queued"): return False
+        j.save(pause_req=True); j.log("Pause requested: stopping at the next safe point"); return True
+
+    def set_debug(self, jid, on=None, bps=None, bps_off=None):
+        j = self.job(jid); d = j.state.get("debug") or {"on": False, "bps": [], "bps_off": False, "checked": [], "chat": []}
+        s = j.state; p = s.get("pause") or {}
+        where = f"Beat {p['n']}" if p.get("n") else (s.get("stage") or "")
+        if on is not None and bool(on) != bool(d.get("on")):
+            d["on"] = bool(on); j.save(debug=d)
+            if on and not s.get("trace"): j.save(trace=True)
+            debug.trace(j.dir, {"ev": "debug " + ("on" if on else "off"), "at": where, "status": s.get("status")}, force=bool(on))
+            j.log(f"Debug mode {'on' if on else 'off'} for the rest of this run")
+        if bps is not None:
+            d["bps"] = list(bps); j.save(debug=d); debug.trace(j.dir, {"ev": "breakpoints", "list": "; ".join(bps) or "none"})
+        if bps_off is not None:
+            d["bps_off"] = bool(bps_off); j.save(debug=d); debug.trace(j.dir, {"ev": "breakpoints " + ("disabled" if bps_off else "enabled"), "at": where})
+        debug.render_md(j.dir)
+        return j.state.get("debug")
+
+    def abort(self, jid):
+        j = self.job(jid)
+        if j.state.get("status") in ("running", "queued"): self.stop(jid); return
+        j.save(status="stopped", pause=None, pause_req=False); j.log("Aborted"); debug.trace(j.dir, {"ev": "abort"}); debug.render_md(j.dir)
     def stop(self, jid): self.cancel.add(jid); self.job(jid).log("Stop requested")
 
     def _worker(self):
@@ -208,10 +240,30 @@ class Studio:
         stop = lambda: jid in self.cancel
         wg = WanGP(cfg); log = j.log
         j.save(status="running", error="")
+        dbg = debug.Debugger(j, log)
+        try: self._stages(j, s, cfg, wg, log, stop, dbg, jid)
+        except debug.Paused as p:
+            info = p.info
+            if info.get("stage") is None: info["stage"] = j.state.get("stage")
+            sd = j.dir / "short"
+            if (sd / "timings.json").exists() and (sd / "stock" / "pick.json").exists() and j.short_plan():
+                beats = [info["beat"]] if info.get("beat") else list(debug.chains(j.dir))
+                if beats:
+                    try:
+                        from . import review
+                        review.collect(j.dir, j.short_plan(), cfg, log, s.get("visual_review", "auto"), debug_beats=beats)
+                    except Exception as e: log(f"  couldn't gather this beat's treatments ({str(e)[:150]})")
+            j.save(status="paused", pause=info, pause_req=False)
+            log(info["label"] + (f" at Beat {info['n']}" if info.get("n") else f" before {info.get('where')}") + ". Press Continue to go on.")
+            debug.trace(j.dir, {"ev": "pause", "label": info["label"], "beat": info.get("n"), "where": info.get("where")}, force=True)
+            debug.render_md(j.dir)
+
+    def _stages(self, j, s, cfg, wg, log, stop, dbg, jid):
         mode = s.get("mode", "long")
         for st in stages_for(mode):
             if st in j.state.get("done", []): continue
             if stop(): j.save(status="stopped"); log("Stopped"); self.cancel.discard(jid); return
+            dbg.manual(st)
             j.save(stage=st); log(f"== {st} ==")
             if st == "transcript":
                 man = j.dir / "src" / "transcript_manual.txt"
@@ -245,6 +297,9 @@ class Studio:
                 rv, pause = review.collect(j.dir, j.short_plan(), cfg, log, vm)
                 if pause:
                     j.save(status="awaiting_visuals")
+                    debug.trace(j.dir, {"ev": "pause", "label": "Paused: uncertain about this beat",
+                                        "beats": ", ".join(f"Beat {int(b[1:]) + 1}" for b, x in rv["beats"].items() if x.get("uncertain") and not x.get("decision"))})
+                    debug.render_md(j.dir)
                     log("Visual review: choose a treatment for each beat on the job page (or Approve all remaining)." if vm == "every" else
                         "Visual review: some beats are uncertain; check them on the job page (or Approve all remaining)."); return
                 if rv: review.close(j.dir)
@@ -267,7 +322,7 @@ class Studio:
                 elif st == "short_voice": _need_wangp(wg); short.do_voice(j.dir, sp, cfg, wg, log, stop)
                 elif st == "short_fallback":
                     if not wg.alive(): log("WanGP is not running: fallback beats get map/headline graphics instead of AI stills")
-                    short.do_fallback(j.dir, sp, cfg, wg, log, stop, full=s.get("visual_review") == "every")
+                    short.do_fallback(j.dir, sp, cfg, wg, log, stop, full=s.get("visual_review") == "every", dbg=dbg)
                 else:
                     meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
                     out = short.do_render(j.dir, sp, cfg, meta, log, stop); j.save(short_output=str(out))
@@ -314,6 +369,9 @@ class Studio:
             if stop(): j.save(status="stopped"); log("Stopped"); self.cancel.discard(jid); return
             d = j.state.get("done", []); d.append(st); j.save(done=d)
         j.save(status="finished", stage="done"); log("Finished.")
+        if j.state.get("trace"):
+            debug.trace(j.dir, {"ev": "finished"}); p = debug.render_md(j.dir)
+            if p: log(f"Debug trace: {p}")
 
 def _need_wangp(wg):
     if not wg.alive(): raise RuntimeError("WanGP is not running. Start Wan2GP in Pinokio, then press Resume.")

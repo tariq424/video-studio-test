@@ -26,6 +26,8 @@ details summary{cursor:pointer;color:var(--mut);font-size:13px;margin-top:10px}
 .script-doc{margin-top:18px;background:#0d1117;border:1px solid var(--line);border-radius:10px;padding:22px 26px;max-height:none}.script-doc h1{font-size:22px;margin:6px 0 4px}.script-doc .sub{color:var(--mut,#9aa4b2);margin:0 0 14px;font-style:italic}.script-doc h3{font-size:16px;margin:20px 0 6px}.script-doc p{line-height:1.65;margin:0;font-size:15.5px}
 main>section{min-width:0}
 .rv-beat{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:12px 0;background:#0d1117}.rv-beat.unsure{border-color:#d29922}.rv-beat.done{opacity:.8}
+.dbg{border-color:#d29922!important}.dbg-chain{font-size:12.5px;margin:4px 0 0 0;padding-left:18px}.dbg-chat{max-height:260px;overflow:auto;font-size:13px;margin:6px 0}
+.dbg-chat .you{color:var(--fg);margin-top:6px}.dbg-chat .ai{color:#9fb3c8;white-space:pre-wrap}.dbg-bp{display:inline-block;border:1px solid var(--line);border-radius:12px;padding:1px 8px;margin:2px 4px 2px 0;font-size:12.5px}
 .rv-row{display:flex;gap:10px;overflow-x:auto;padding:8px 0}.rv-c{flex:0 0 120px;font-size:11.5px;line-height:1.3}
 .rv-c img{width:120px;height:213px;object-fit:cover;border-radius:6px;border:2px solid var(--line);cursor:pointer;display:block;background:#000}
 .rv-c.sel img{border-color:var(--acc)}.rv-c.auto img{box-shadow:0 0 0 2px var(--blue)}.rv-c .bad{color:var(--bad)}.rv-c .ok{color:var(--ok)}
@@ -78,6 +80,10 @@ html.embed main{grid-template-columns:1fr;padding:0;max-width:none}html.embed bo
   <label>Script AI for this video</label><select id="jp" data-testid="script-ai" aria-label="Script AI"><option value="">Use Settings default</option><option value="zai">z.ai GLM</option><option value="deepseek">DeepSeek</option><option value="claude">Claude</option><option value="local">Local AI (Ollama)</option></select>
   <div id="m_vr"><label>Visuals (Shorts)</label><select id="vrev" data-testid="visuals-mode" aria-label="Visuals (Shorts)"><option value="auto">Auto: pick automatically, pause only when unsure</option><option value="every">Review every beat: make every treatment, pause to choose</option></select></div>
   <label><input id="auto" data-testid="toggle-skip-script-review" type="checkbox" checked> Skip script review (render straight away; untick to read and edit the script first)</label>
+  <details id="dbgd" data-testid="debug-options" style="margin-top:8px"><summary>Debug (breakpoints)</summary>
+   <label style="color:var(--fg)"><input type="checkbox" id="dbgon" data-testid="toggle-debug" aria-label="Debug mode"> Debug mode: pause when a breakpoint matches (off = runs as normal)</label>
+   <label for="dbgbps">Breakpoints, one per line (checked after each beat's visuals are decided)</label>
+   <textarea id="dbgbps" data-testid="debug-breakpoints" aria-label="Breakpoints" rows="3" placeholder="stock_found == 0&#10;beat == 3&#10;treatment == stock|photo|still|animate|parallax|3d|card&#10;escalated_past == stock&#10;narration contains &quot;word&quot;"></textarea></details>
   <div class="row" style="margin-top:12px"><button data-testid="make-video" onclick="createJob()">Make video</button><span id="cmsg" data-testid="make-message" class="mut"></span></div>
  </div>
  <div class="card"><h2>Jobs</h2><div id="jobs" class="mut">No jobs yet.</div></div>
@@ -99,7 +105,7 @@ async function status(){try{const s=await j('/api/status');stages=s.stages;$('pw
 function fmt(x){return Math.floor(x/60)+':'+String(x%60).padStart(2,'0')}
 function srcUI(){const k=$('srck').value,m=$('mode').value;$('s_yt').style.display=k=='yt'?'':'none';$('s_file').style.display=k=='file'?'':'none';$('s_text').style.display=k=='text'?'':'none';$('s_meta').style.display=k=='yt'?'none':'';$('m_short').style.display=m=='long'||m=='smoke'?'none':'';$('m_long').style.display=m=='short'||m=='smoke'?'none':'';$('m_vr').style.display=m=='long'?'none':''}
 async function createJob(){$('cmsg').textContent='Starting...';const k=$('srck').value;const fd=new FormData();
- const f={mode:$('mode').value,short_secs:$('ssec').value,minutes:$('min').value,presenter:$('pres').checked,captions:$('caps').checked,auto_approve:$('auto').checked,provider:$('jp').value,visual_review:$('vrev').value,src_title:$('stt').value,src_credit:$('scr').value,
+ const f={mode:$('mode').value,short_secs:$('ssec').value,minutes:$('min').value,presenter:$('pres').checked,captions:$('caps').checked,auto_approve:$('auto').checked,provider:$('jp').value,visual_review:$('vrev').value,debug:$('dbgon').checked,breakpoints:$('dbgbps').value,src_title:$('stt').value,src_credit:$('scr').value,
   url:k=='yt'?$('url').value.trim():'',transcript:k=='yt'?$('tx').value:k=='text'?$('ptx').value:''};
  for(const x in f)fd.append(x,f[x]);
  if(k=='file'){if($('upf').files.length)fd.append('file',$('upf').files[0]);else if($('upp').value.trim())fd.append('src_path',$('upp').value.trim());else{$('cmsg').textContent='Choose a file (or type its path) first.';return}}
@@ -109,23 +115,24 @@ function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt
 let lastKey='';
 async function loadDetail(){if(editing)return;const s=await j('/api/jobs/'+sel);const done=s.done||[];
  const key=sel+'|'+s.status+'|'+s.stage;
- if((s.status=='awaiting_review'||s.status=='awaiting_visuals'||s.status=='finished'||(s.status=='error'&&s.stage=='transcript'))&&key==lastKey)return;   // don't redraw while you read/paste
+ if((s.status=='awaiting_review'||s.status=='awaiting_visuals'||s.status=='paused'||s.status=='finished'||(s.status=='error'&&s.stage=='transcript'))&&key==lastKey)return;   // don't redraw while you read/paste
  lastKey=key;
  const mtxt={both:`long ${s.minutes} min + Short ${fmt(Math.round(s.short_secs||165))}`,short:`${s.smoke?'Smoke test · ':''}Short ${fmt(Math.round(s.short_secs||165))}`,long:`long ${s.minutes} min`}[s.mode||'long'];
  let h=`<h2>${esc(s.title||s.url)}</h2><div class="mut">${mtxt} · <b data-testid="job-status" data-status="${esc(s.status)}" data-stage="${esc(s.stage)}">${statusText(s)}</b>${s.error?` · <span style="color:var(--bad)">${esc(s.error)}</span>`:''}</div>`;
  h+=`<div class="stages">${(s.stages||stages).map(t=>`<span class="st ${done.includes(t)?'done':(s.stage==t?'cur':'')}">${t}</span>`).join('')}</div>`;
  h+=`<div class="row">`;
  if(s.status=='awaiting_review'){h+=`<button onclick="act('approve')">Approve & render</button>`;if(s.plan_summary)h+=`<button class="sec" onclick="editPlan()">Edit long script</button>`;if(s.short_summary)h+=`<button class="sec" onclick="editShort()">Edit Short script</button>`}
- if(['running','queued'].includes(s.status))h+=`<button class="sec" onclick="act('stop')">Stop</button>`;
+ if(['running','queued'].includes(s.status)){h+=`<button class="sec" onclick="act('stop')">Stop</button>`;h+=s.pause_req?`<span class="mut" data-testid="job-pausing">Pausing at the next safe point…</span>`:`<button class="sec" data-testid="job-pause" onclick="act('pause')">Pause now</button>`}
  if(['error','stopped'].includes(s.status))h+=`<button onclick="act('resume')">Resume</button>`;
  h+=`</div>`;
  if(s.status=='error'&&s.stage=='transcript')h+=`<details open style="margin-top:12px"><summary>Paste transcript (continues without YouTube)</summary><textarea id="jptx" rows="8" style="width:100%" placeholder="Paste the video's transcript here"></textarea><button onclick="pasteTx()">Use this transcript and continue</button> <span id="jptxm" class="mut"></span></details>`;
  if(s.short_output){const rel=s.short_output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished Short: <code>${esc(s.short_output)}</code><br><span class="mut">YouTube description with credits: output/youtube_short_description.txt</span></p><div class="row" style="align-items:flex-start"><div><video id="ov" controls style="max-width:360px" src="/files/${sel}/${rel}?t=${Date.now()}" ontimeupdate="edTick()"></video><div id="edbar"></div></div><div id="thumbp" style="flex:1;min-width:260px"></div></div><div id="edp"></div>`}
  if(s.output&&!s.short_output){const rel=s.output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished video: <code>${esc(s.output)}</code></p><video id="ov" controls src="/files/${sel}/${rel}?t=${Date.now()}" ontimeupdate="edTick()"></video><div id="edbar"></div><div id="edp"></div>`}
- h+=`<div id="rvp"></div><div id="sdoc"></div><div id="doc"></div><div id="ed"></div>`;
+ if(s.trace)h+=`<p class="mut" style="font-size:13px">Debug trace: <a data-testid="debug-trace" href="/files/${sel}/trace.md?t=${Date.now()}" target="_blank">trace.md</a> (in the job folder)</p>`;
+ h+=`<div id="dbp"></div><div id="rvp"></div><div id="sdoc"></div><div id="doc"></div><div id="ed"></div>`;
  h+=`<details ${s.status=='error'?'open':''} style="margin-top:18px"><summary class="mut">Technical log</summary><pre id="log">${esc((s.log||[]).join('\n'))}</pre></details>`;
  $('detail').innerHTML=h;const l=$('log');if(l)l.scrollTop=l.scrollHeight;
- if(s.status=='awaiting_visuals')showReview();if(s.thumbnail)showThumb(s);if(s.status=='finished'&&(s.short_output||s.output))edInit();
+ DBG_PAUSED=s.status=='paused';if(s.status=='paused'||s.status=='awaiting_visuals')showReview().then(showDebug);if(s.thumbnail)showThumb(s);if(s.status=='finished'&&(s.short_output||s.output))edInit();
  if(s.status!='awaiting_visuals'){if(s.plan_summary&&done.includes('script'))showScript(s);if(s.short_summary&&done.includes('short_script'))showShort(s)}}
 // fact-check questions: a to-do while the job waits for review; just notes once review was skipped
 function qbox(qs,st){const waiting=st&&st.status=='awaiting_review';
@@ -142,7 +149,7 @@ async function editShort(){editing=true;planCache=await j(`/api/jobs/${sel}/shor
  h+=`<div class="row" style="margin-top:12px"><button onclick="saveShort()">Save</button><button class="sec" onclick="editing=false;lastKey='';loadDetail()">Cancel</button></div>`;$('ed').innerHTML=h}
 async function saveShort(){planCache.title=$('pt').value;planCache.sections.forEach((x,i)=>{x.vo=$('sv'+i).value});
  await j(`/api/jobs/${sel}/short_plan`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(planCache)});editing=false;lastKey='';loadDetail()}
-function statusText(s){return {awaiting_visuals:'Visuals ready — choose a treatment for each beat below',awaiting_review:'Script ready — read it below, then approve',running:'Working: '+s.stage,queued:'Queued',done:'Finished',error:'Stopped with an error',stopped:'Stopped'}[s.status]||s.status}
+function statusText(s){if(s.status=='paused')return (s.pause&&s.pause.label||'Paused')+(s.pause&&s.pause.n?` (Beat ${s.pause.n})`:'');return {awaiting_visuals:'Visuals ready — choose a treatment for each beat below',awaiting_review:'Script ready — read it below, then approve',running:'Working: '+s.stage,queued:'Queued',done:'Finished',error:'Stopped with an error',stopped:'Stopped'}[s.status]||s.status}
 async function showScript(st){const p=await j(`/api/jobs/${sel}/plan`);const w=p.sections.reduce((a,x)=>a+x.vo.split(/\s+/).length,0);
  let h=`<div class="script-doc"><div class="mut" style="font-size:13px">${p.sections.length} sections · ${w} words · about ${(w/155).toFixed(1)} minutes</div>`;
  if(p.questions&&p.questions.length)h+=qbox(p.questions,st);else if(p.checked)h+=`<div class="mut" style="font-size:13px;margin-top:4px">✓ Checked against the transcript (names, speakers, claims)</div>`;
@@ -150,7 +157,7 @@ async function showScript(st){const p=await j(`/api/jobs/${sel}/plan`);const w=p
  p.sections.forEach((x,i)=>{h+=`<h3>${i+1}. ${esc(x.title)}</h3><p>${esc(x.vo)}</p>`});
  h+=`</div>`;$('doc').innerHTML=h}
 async function pasteTx(){const t=$('jptx').value;const r=await fetch(`/api/jobs/${sel}/transcript`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})});const k=await r.json();if(k.error){$('jptxm').textContent=k.error;return}lastKey='';loadJobs()}
-async function act(a){await j(`/api/jobs/${sel}/${a}`,{method:'POST'});editing=false;lastKey='';loadJobs()}
+async function act(a){try{await j(`/api/jobs/${sel}/${a}`,{method:'POST'})}catch(e){alert(e.message)}editing=false;lastKey='';loadJobs()}
 async function editPlan(){editing=true;planCache=await j(`/api/jobs/${sel}/plan`);$('doc').innerHTML='';$('sdoc').innerHTML='';
  let h=`<h2 style="margin-top:16px">Script review</h2><label>Title</label><input type="text" id="pt" value="${esc(planCache.title)}"><label>Subtitle</label><input type="text" id="ps" value="${esc(planCache.subtitle||'')}">`;
  planCache.sections.forEach((x,i)=>{h+=`<div class="sec-edit"><input type="text" id="st${i}" value="${esc(x.title)}"><textarea id="sv${i}" rows="6">${esc(x.vo)}</textarea><details><summary>${x.visuals.length} visuals</summary><pre>${x.visuals.map(v=>v.type+': '+(v.prompt||JSON.stringify(v.chart))).map(esc).join('\n')}</pre></details></div>`});
@@ -162,9 +169,9 @@ async function savePlan(ap){planCache.title=$('pt').value;planCache.subtitle=$('
 // ---------------- visual review
 const RUNG={stock:'Stock footage',photo:'Real photo',still:'AI still',animate:'AI animation',parallax:'Parallax',reconstruction:'3D reconstruction',headline:'Headline card',map:'Map',supplied:'Your file'};
 let RV=null,rvSel={},rvTimer=null,rvOpen={};
-async function showReview(){try{RV=await j(`/api/jobs/${sel}/review`)}catch(e){$('rvp').innerHTML='<p class="mut">Review data not ready yet.</p>';return}drawReview();
+async function showReview(){try{RV=await j(`/api/jobs/${sel}/review`)}catch(e){if(!DBG_PAUSED)$('rvp').innerHTML='<p class="mut">Review data not ready yet.</p>';return}drawReview();
  clearTimeout(rvTimer);if(Object.values(RV.beats).some(b=>b.busy))rvTimer=setTimeout(()=>{if($('rvp'))showReview()},4000)}
-function drawReview(){const bs=Object.entries(RV.beats);const left=bs.filter(([k,b])=>!b.decision).length;
+function drawReview(){if(DBG_PAUSED){drawDebug();return}const bs=Object.entries(RV.beats);const left=bs.filter(([k,b])=>!b.decision).length;
  const order=bs.sort((a,b)=>(b[1].uncertain&&!b[1].decision)-(a[1].uncertain&&!a[1].decision)||(+a[0].slice(1))-(+b[0].slice(1)));
  let h=`<div class="card" style="margin-top:14px"><h2>Visual review · ${RV.mode=='every'?'every beat':'auto (uncertain beats first)'}</h2>
  <div class="mut" style="font-size:13px">Available treatments for each beat. The blue outline is the pipeline's pick; click a thumbnail to preview it, tick <b>Use</b> on one or more (they play in the order you tick them).</div>
@@ -178,7 +185,7 @@ function beatHTML(bid,b){const n=+bid.slice(1)+1;const dec=b.decision?{auto:'✓
  <p style="margin:6px 0">${esc(b.vo)}</p><div class="mut" style="font-size:13px">Pipeline pick: <b>${esc(autoTxt)}</b>${b.why&&!b.uncertain?' — '+esc(b.why):''}</div><div class="rv-row">`;
  for(const cid of b.cands){const c=RV.cands[cid];const i=s.indexOf(cid);const tag=c.item.tag?` · ${esc(c.item.tag)}`:'';
   h+=`<div class="rv-c ${i>=0?'sel':''} ${b.auto.includes(cid)?'auto':''}" data-testid="review-treatment" data-beat="${bid}" data-cand="${cid}" data-rung="${c.rung}" data-index="${b.cands.indexOf(cid)}"><div class="${c.worst?'wrn':''}"><img data-testid="review-treatment-thumb" loading="lazy" src="${c.thumb?`/files/${sel}/short/${c.thumb}`:''}" onclick="rvPrev('${bid}','${cid}')" title="Click to preview"></div>
-  <b>${esc(RUNG[c.rung]||c.rung)}</b>${tag}<br><span class="${c.ok?'ok':'bad'}">${c.ok?'✓':'✗'} ${esc(c.why)}</span><br>
+  <b>${D&&D.debug&&D.debug.on?(b.cands.indexOf(cid)+1)+'. ':''}${esc(RUNG[c.rung]||c.rung)}</b>${tag}<br><span class="${c.ok?'ok':'bad'}">${c.ok?'✓':'✗'} ${esc(c.why)}</span><br>
   <label style="margin:2px 0;color:var(--fg)"><input type="checkbox" data-testid="review-choose" data-cand="${cid}" ${i>=0?'checked':''} onchange="rvTick('${bid}','${cid}',this.checked)"> Use${i>=0&&s.length>1?' #'+(i+1):''}</label></div>`}
  h+=`</div><div class="rv-prev" id="pv_${bid}"></div>
  <div class="row"><button data-testid="review-use-selected" data-beat="${bid}" onclick="rvDo('${bid}','choose')" ${s.length?'':'disabled'}>Use selected (${s.length})</button><button class="sec" data-testid="review-approve-auto" data-beat="${bid}" onclick="rvDo('${bid}','auto')">Approve auto</button><button class="sec" data-testid="review-skip" data-beat="${bid}" onclick="rvDo('${bid}','skip')">Skip (headline card)</button><button class="sec" onclick="rvDo('${bid}','expand')" ${b.busy?'disabled':''}>Show all options for this beat</button><button class="sec" onclick="rvDo('${bid}','animate')" ${b.busy?'disabled':''} title="Animates the AI still with WanGP; takes several minutes">Add animation</button>${b.decision?`<button class="sec" onclick="rvDo('${bid}','undo')">Undo decision</button>`:''}</div>
@@ -270,5 +277,44 @@ async function edRv(a){const body={action:a};if(a=='refine'){body.text=$('edrf')
  try{ED.rv=await rvPost(`/api/jobs/${sel}/review/${ED.open}${edQ()}`,body);edDraw();setTimeout(edRefresh,1500)}catch(e){alert(e.message)}}
 async function edSupply(){const t=$('edsp').value.trim();if(!t)return;$('edmsg').textContent='Adding your file…';
  try{ED.rv=await rvPost(`/api/jobs/${sel}/review/${ED.open}${edQ()}`,{action:'supply',src:t,tag:$('edst').value});ED.sel=[...ED.rv.beats[ED.open].chosen];$('edmsg').textContent='';edDraw()}catch(e){$('edmsg').textContent='';alert(e.message)}}
+
+// ---- debugger: the shared pause panel (manual pause, breakpoint, or the auto review pause with debug on)
+let D=null,DBG_PAUSED=false,dbgBeat=null,dbgBusy='',dbgKey='';
+async function showDebug(){try{D=await j(`/api/jobs/${sel}/debug`)}catch(e){return}
+ const ks=Object.keys(D.chains||{});
+ const pk=sel+'|'+(D.pause&&D.pause.t||D.status);if(pk!==dbgKey){dbgKey=pk;dbgBeat=D.pause&&D.pause.beat||null}
+ if(!dbgBeat||!ks.includes(dbgBeat)){const u=RV&&Object.entries(RV.beats).find(([k,b])=>b.uncertain&&!b.decision);dbgBeat=u?u[0]:(ks[0]||null)}
+ drawDebug()}
+function dbgLabel(){if(!D)return'';if(D.status=='paused')return D.pause&&D.pause.label||'Paused';return 'Paused: uncertain about this beat'}
+function drawDebug(){const el=$('dbp');if(!el||!D)return;const on=D.debug&&D.debug.on,paused=D.status=='paused',p=D.pause||{};
+ const ks=Object.keys(D.chains||{}).sort((a,b)=>+a.slice(1)-+b.slice(1));const c=(D.chains||{})[dbgBeat]||{};
+ let h=`<div class="card dbg" data-testid="debug-panel" style="margin-top:14px"><div class="row" style="align-items:center"><b data-testid="debug-label">${esc(dbgLabel())}</b>`+
+  (paused?`<span class="mut" style="font-size:13px">${p.n?'at Beat '+p.n:'before '+esc(p.where||D.stage||'')}</span>`:'')+`</div>
+  <label style="color:var(--fg);margin-top:6px"><input type="checkbox" data-testid="debug-toggle" aria-label="Debug mode for the rest of this run" ${on?'checked':''} onchange="dbgSet({on:this.checked})"> Debug mode for the rest of this run</label>`;
+ if(paused)h+=`<div class="row" style="margin-top:8px"><button data-testid="debug-continue" onclick="act('resume')">Continue</button><button class="sec" data-testid="debug-skip" ${dbgBeat?'':'disabled'} onclick="dbgAct('skip')" title="This beat gets its headline card, then the run continues">Skip step</button><button class="sec" data-testid="debug-abort" onclick="if(confirm('Abort this job?'))dbgAct('abort')">Abort</button>${on?`<button class="sec" data-testid="debug-thumbs" ${dbgBeat?'':'disabled'} onclick="dbgThumbs()">Generate thumbnails</button>`:''}<span id="rvmsg" class="mut">${esc(dbgBusy)}</span></div>`;
+ else if(on)h+=`<div class="row" style="margin-top:8px"><button class="sec" data-testid="debug-thumbs" ${dbgBeat?'':'disabled'} onclick="dbgThumbs()">Generate thumbnails</button><button class="sec" data-testid="debug-abort" onclick="if(confirm('Abort this job?'))dbgAct('abort')">Abort</button><span class="mut">${esc(dbgBusy)}</span></div>`;
+ if(on){
+  const bps=D.debug.bps||[];
+  h+=`<div style="margin-top:10px;font-size:13px"><b>Breakpoints</b> ${D.debug.bps_off?'<span class="rv-badge" style="color:#d29922">all disabled</span>':''}<br>${bps.map(x=>`<span class="dbg-bp" data-testid="debug-bp">${esc(x)} <a href="#" onclick="dbgSet({remove:${JSON.stringify(x).replace(/"/g,'&quot;')}});return false" title="Remove">×</a></span>`).join('')||'<span class="mut">none</span>'}
+   <div class="row" style="margin-top:4px"><input type="text" id="dbgadd" data-testid="debug-bp-add" aria-label="Add a breakpoint" placeholder='e.g. stock_found == 0' style="flex:1"><button class="sec" onclick="dbgSet({add:$('dbgadd').value})">Add</button><button class="sec" data-testid="debug-bps-off" onclick="dbgSet({bps_off:${D.debug.bps_off?'false':'true'}})">${D.debug.bps_off?'Enable breakpoints':'Disable all breakpoints'}</button></div></div>`;
+  if(ks.length){h+=`<div class="row" style="margin-top:10px;align-items:center"><b>Inspect</b><select data-testid="debug-beat" aria-label="Beat to inspect" style="width:auto" onchange="dbgBeat=this.value;drawDebug()">${ks.map(k=>`<option value="${k}" ${k==dbgBeat?'selected':''}>Beat ${+k.slice(1)+1}</option>`).join('')}</select></div>
+   <div data-testid="debug-inspect" style="font-size:13px"><p style="margin:6px 0">“${esc(c.vo||'')}”</p>
+   <div class="mut">Stock clips found: <b>${c.stock_found??'?'}</b> · uses: <b>${esc((c.uses||[]).join(', ')||'?')}</b>${(c.failed||[]).length?' · failed: '+esc(c.failed.join(', ')):''}</div>
+   <ol class="dbg-chain">${(c.chain||[]).map(x=>`<li>${esc(x)}</li>`).join('')}${(c.stock_rejected||[]).map(x=>`<li>stock clip rejected: ${esc(x.why||'')}</li>`).join('')}${(c.photos_rejected||[]).map(x=>`<li>real photo rejected: ${esc(x.why||'')}</li>`).join('')}</ol></div>`}
+  else h+=`<p class="mut" style="font-size:13px">No beats have been through the visual ladder yet.</p>`}
+ if(paused&&dbgBeat&&RV&&RV.beats&&RV.beats[dbgBeat])h+=beatHTML(dbgBeat,RV.beats[dbgBeat]);
+ if(on){const ch=(D.debug.chat||[]);
+  h+=`<div style="margin-top:10px"><b>Panel chat (DeepSeek)</b> <span class="mut" style="font-size:12.5px">For why-questions, use the Claude chat.</span>
+   <div class="dbg-chat" data-testid="debug-chat-log">${ch.map(x=>`<div class="you">Beat ${+x.beat.slice(1)+1} · you: ${esc(x.you)}</div><div class="ai">${esc(x.reply)} <span style="opacity:.7">[${esc(x.backend)}${x.action&&x.action!='none'?' · '+esc(x.action):''}]</span></div>`).join('')}</div>
+   <div class="row"><textarea id="dbgmsg" data-testid="debug-chat-input" aria-label="Panel chat message" rows="2" style="flex:1" placeholder="e.g. show 3 more stock options · swap to option 2 · redo the still with the plane diving"></textarea><button data-testid="debug-chat-send" ${dbgBeat?'':'disabled'} onclick="dbgChat()">Send</button></div></div>`}
+ h+=`</div>`;el.innerHTML=h}
+async function dbgSet(b){try{D=await rvPost(`/api/jobs/${sel}/debug`,b);drawDebug();if(D.status=='awaiting_visuals')drawReviewOnly()}catch(e){alert(e.message)}}
+function drawReviewOnly(){if(RV&&!DBG_PAUSED&&$('rvp'))drawReview()}
+async function dbgAct(a){try{await rvPost(`/api/jobs/${sel}/debug/${a}`,{beat:dbgBeat});lastKey='';loadJobs()}catch(e){alert(e.message)}}
+async function dbgThumbs(){dbgBusy='Generating thumbnails…';drawDebug();try{RV=await rvPost(`/api/jobs/${sel}/debug/thumbs`,{beat:dbgBeat})}catch(e){alert(e.message)}dbgBusy='';drawDebug();if(!DBG_PAUSED)drawReview()}
+async function dbgChat(){const t=$('dbgmsg').value.trim();if(!t)return;dbgBusy='Panel chat is thinking…';drawDebug();
+ try{await rvPost(`/api/jobs/${sel}/debug/chat`,{beat:dbgBeat,text:t})}catch(e){alert(e.message)}dbgBusy='';
+ D=await j(`/api/jobs/${sel}/debug`);try{await showReview()}catch(e){}drawDebug()}
+
 srcUI();status();loadJobs();setInterval(()=>{status();loadJobs()},5000);
 </script></body></html>
