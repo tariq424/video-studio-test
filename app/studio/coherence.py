@@ -122,13 +122,26 @@ PHASE_WORDS = [
             r"over (saudi|the sea|iraq|jordan))\b"),
     ("landing", r"\b(landed|touch(ed)? down|final approach|emergency landing|made (a|an) \w* ?landing)\b"),
 ]
+# in-air words that describe something physically happening in the air; the rest of the in-air list ("hijacking", "crash", "signals",
+# "radar", "suicide"...) only says what the story is about, not where the narration is
+AIR_EVENT = re.compile(r"\b(descen\w*|dropp\w*|dive|diving|plunge\w*|altitude|feet|ft\b|mid-?air|in flight|climb\w*|cruis\w*|"
+                       r"scrambled|intercept\w*|lost altitude|over (saudi|the sea|iraq|jordan))\b", re.I)
+AFTER_LANDING = re.compile(r"\b(after (it )?landed|after landing|on arrival)\b", re.I)
 
 def phase(text):
-    """'ground' | 'landing' | 'air' | '' (no particular moment)."""
+    """'ground' | 'landing' | 'air' | '' (no particular moment): where the narration actually is.
+    A beat that mentions the ground or a landing is there, unless it also narrates something happening in the air - then the
+    later of the two wins (the story moves forward: "dropped 13,000 feet and made an emergency landing" -> landing). Story words
+    like "hijacking" or "crash" never put a beat in the air on their own when it also mentions a landing or the ground."""
     t = text.lower()
-    for ph, rx in PHASE_WORDS:
-        if re.search(rx, t): return ph
-    return ""
+    hits = {ph: [m.start() for m in re.finditer(rx, t)] for ph, rx in PHASE_WORDS}
+    ev = [m.start() for m in AIR_EVENT.finditer(t)]
+    gl = {ph: v for ph, v in hits.items() if ph in ("ground", "landing") and v}
+    if gl:
+        if AFTER_LANDING.search(t): return "ground"   # told from after the landing
+        cands = [(max(v), ph) for ph, v in gl.items()] + ([(max(ev), "air")] if ev else [])
+        return max(cands)[1]
+    return "air" if hits["air"] else ""
 
 def beat_phases(sections):
     """Moment of every beat, from its NARRATION only (search phrases are noisy). A beat with no moment of its own (reactions,

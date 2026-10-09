@@ -14,13 +14,15 @@ from .llm import parse_json
 CHECK = """This {what} will be shown full-screen in a news Short while the narrator says:
 "{narration}"
 {subject}
-Judge the picture and reply with ONLY JSON:
-{{"fits": "yes" or "no" - does it show what this sentence describes: the same kind of subject, the same moment and action
+First look at the picture and describe what it ACTUALLY shows, then judge it. Reply with ONLY JSON, in this order:
+{{"seen": "max 15 words: what the picture actually shows - the subject, the setting, and where it is (in the air, landing, on the
+  ground, inside) and, for an aircraft, its attitude (nose up/climbing, level, nose down/descending)",
+ "fits": "yes" or "no" - does it show what this sentence describes: the same kind of subject, the same moment and action
   (e.g. a plane diving if the narration says it dropped, on the ground if it says it landed or sat on the tarmac) and the same mood
   (tense for an emergency, never cheerful)?,
  "marks": true or false - any readable text, letters, numbers, logo, brand name, airline name or livery lettering, flag or registration?,
  "garbled": true or false - melted or deformed objects, broken shapes, extra or missing limbs, warped faces, impossible geometry{extra}?,
- "why": "max 12 words"{worst}}}"""
+ "why": "max 12 words: what the narration needs that the picture does NOT show - it must agree with \"seen\""{worst}}}"""
 
 def space(sd):
     """Frame of the workspace: Shorts are portrait (default); the long-video edit workspace has short/space.json = landscape."""
@@ -48,7 +50,9 @@ def check(cfg, img, narration, subject=None, video=False, info=None):
                           worst=',\n "worst_frame": 1, 2 or 3 - the frame that looks worst' if video else "")
     try: j = parse_json(_vision(cfg, img, prompt))
     except Exception as e: return False, f"check unavailable ({str(e)[:50]})"
-    why = str(j.get("why", ""))[:80]
+    seen = str(j.get("seen", "")).strip().rstrip(".")[:90]
+    why = str(j.get("why", "")).strip().rstrip(".")[:80]
+    if seen: why = f"shows {seen[0].lower() + seen[1:]}" + (f"; needs: {why}" if why else "")   # the reason quotes what the model saw
     if info is not None:
         try: info["worst"] = max(1, min(3, int(j.get("worst_frame", 2))))
         except (TypeError, ValueError): info["worst"] = 2

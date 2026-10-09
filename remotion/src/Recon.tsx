@@ -349,15 +349,15 @@ const SceneGraph: React.FC<{ r: Recon; t: number; p: number; tall: boolean }> = 
       // dive: the nose drops to ~25 degrees and the aircraft sinks while the camera follows it down
       // pitch (+ = nose up), height change and bank for each attitude; "unstable" = erratic pitching and rolling
       const pitch = dive ? -interpolate(e, [0, 0.35, 1], [0, 0.42, 0.45]) : climb ? interpolate(e, [0, 0.4, 1], [0, 0.2, 0.22])
-                  : wobble ? 0.12 * Math.sin(t * 2.3) + 0.06 * Math.sin(t * 5.1) : 0;
-      const sink = dive ? -interpolate(p, [0, 1], [0, 60]) : climb ? interpolate(p, [0, 1], [0, 25]) : wobble ? 3 * Math.sin(t * 1.7) : 0;
+                  : wobble ? -(0.09 * (1 + Math.sin(t * 2.3)) + 0.03 * (1 + Math.sin(t * 5.1))) : 0;   // unstable: level to ~14 deg nose-down, never up
+      const sink = dive ? -interpolate(p, [0, 1], [0, 60]) : climb ? interpolate(p, [0, 1], [0, 25]) : wobble ? -interpolate(p, [0, 1], [0, 18]) - 0.6 * (1 + Math.sin(t * 1.7)) : 0;   // unstable: sinks, never rises
       const bank = dive ? 0.12 * Math.sin(t * 0.7) : wobble ? 0.35 * Math.sin(t * 1.9) + 0.15 * Math.sin(t * 4.3) : 0.04 * Math.sin(t * 0.6);
       return (<>
         <color attach="background" args={[dive ? "#6f9fd6" : "#7fb2ec"]} /><fog attach="fog" args={["#cfe2f7", 200, 1600]} />
         <Lights sky="#d6e8ff" ground="#ffffff" />
         {dive || climb || wobble ? <Cam pos={[6, sink + 3, tall ? 62 : 48]} look={[0, sink + (climb ? 3 : -3), 0]} fov={tall ? 55 : 40} />   /* side view: the attitude is visible */
               : <Cam pos={[Math.cos(a) * d, 9 + e * 3, Math.sin(a) * d + 6]} look={[2, 0, 0]} fov={tall ? 55 : 40} />}
-        <group rotation={[0.03 * Math.sin(t * 0.8), 0, pitch + bank * 0.2]} position={[0, Math.sin(t * 0.9) * 0.4 + sink, 0]}>
+        <group rotation={[0.03 * Math.sin(t * 0.8), 0, climb ? pitch + bank * 0.2 : Math.min(0, pitch + bank * 0.2)]} position={[0, Math.sin(t * 0.9) * 0.4 + sink, 0]}>{/* nose-up only when climbing */}
           <group rotation={[bank, 0, 0]}>{fighter ? <Fighter colors={r.colors} /> : <Airliner colors={r.colors} gear={false} />}</group>
         </group>
         {fighter ? <group position={[-14, 2 + sink, -12]} rotation={[0.05 * Math.sin(t), 0, 0]}><Fighter colors={r.colors} /></group> : null}
