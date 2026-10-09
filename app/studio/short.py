@@ -129,30 +129,41 @@ def verify_quotes(plan, transcript, log):
 
 # ---------------------------------------------------------------- script
 def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir, smoke=False):
-    words = int((secs - 7 - GAP * 11) * cfg.get("voice_wpm", 142) / 60)   # measured pace of the cloned narrator incl. pauses
+    wpm = cfg.get("voice_wpm", 155)
+    # target = narration + a pause after each beat + the end tail + the closing line (~16 words); size the story to fill the rest
+    words = int((secs - TAIL - GAP * 9 - 16 / wpm * 60) * wpm / 60)
     nb = max(7, min(12, round(words / 38)))
-    minb, lo, hi = 6, 0.88, 1.1
+    minb, lo, hi = 6, 0.95, 1.05
     if smoke: words, nb, minb, lo, hi = SMOKE_WORDS, 2, 2, 0.8, 1.2   # smoke test: ~75 words in all with the closing line (~30 s spoken)
     title, channel = meta.get("title") or "the source", meta.get("channel") or meta.get("uploader") or "the creator"
     with LLM(cfg, log, stop) as llm:
         log(f"Writing the Short with {llm.name} (~{secs:.0f}s, {words} words, {nb} beats)...")
         notes = make_notes(llm, meta, transcript, max(words, 1500), log, stop, srcdir)
+        tries = []   # every parsed attempt, so a near miss can be kept instead of an unchecked re-ask
         def chk(j):
             b = j.get("beats")
             if not isinstance(b, list) or len(b) < minb: raise ValueError(f"need at least {minb} beats")
             for x in b:
                 if not isinstance(x.get("vo"), str) or not x.get("queries"): raise ValueError("beat missing vo or queries")
             n = sum(len(x["vo"].split()) for x in b)
+            tries.append((abs(n - words), j))
             if n < words * lo: raise ValueError(f"narration is {n} words in total but must be about {words}; add detail from the notes")
             if n > words * hi: raise ValueError(f"narration is {n} words in total but must be at most {int(words * 1.05)}; cut weaker points")
         prompt = SHORT.format(secs=int(secs), words=words, title=title, channel=channel, notes=notes[:24000], nb=nb,
                               people=(meta.get("description") or "")[:1200] or "(see notes)")
         try: j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=chk)
         except RuntimeError:
-            log("  length still short after 3 tries; keeping the best version")
-            j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=lambda x: None if x.get("beats") else (_ for _ in ()).throw(ValueError("no beats")))
+            if tries:
+                j = min(tries, key=lambda x: x[0])[1]
+                log(f"  length still off after 3 tries; keeping the closest ({sum(len(x['vo'].split()) for x in j['beats'])} words, target {words})")
+            else:
+                log("  no usable script after 3 tries; asking once more without the length check")
+                j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=lambda x: None if x.get("beats") else (_ for _ in ()).throw(ValueError("no beats")))
         if smoke: j["beats"] = j["beats"][:2]   # a smoke test stays ~30 s even if the length check gave up
-        plan = {"title": (j.get("title") or title)[:90], "tag": (j.get("tag") or "CONDENSED")[:32].upper(),
+        else:   # hard cut: still more than 10% long -> drop whole middle beats (keep the hook and the payoff)
+            while len(j["beats"]) > minb and sum(len(x["vo"].split()) for x in j["beats"]) > words * 1.1:
+                cut = j["beats"].pop(-2); log(f"  script too long; dropped a middle beat ({len(cut['vo'].split())} words)")
+        plan = {"target_secs": float(secs), "title": (j.get("title") or title)[:90], "tag": (j.get("tag") or "CONDENSED")[:32].upper(),
                 "source_spoken": (j.get("source_spoken") or title)[:120],
                 "description": j.get("description", ""), "mode": mode, "sections": []}
         for i, b in enumerate(j["beats"]):
@@ -183,6 +194,10 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             nl += bool(s.get("subject"))
         if nl: log(f"  {nl} beat(s) locked to a story subject")
     plan = verify_quotes(plan, transcript, log)
+    if not smoke:   # the fact-check can lengthen the script after it passed the length check: cut again (render pace covers the last few %)
+        while len(plan["sections"]) > minb and sum(len(x["vo"].split()) for x in plan["sections"]) > words * 1.06:
+            cut = plan["sections"].pop(-2); log(f"  script grew in the fact-check; dropped a middle beat ({len(cut['vo'].split())} words)")
+        for i, x in enumerate(plan["sections"]): x["id"], x["title"] = f"b{i}", f"Beat {i + 1}"
     n = sum(len(x["vo"].split()) for x in plan["sections"])
     if n > words * 1.12: log(f"  NOTE: script is {n} words (target {words}); trim it in review or it will be sped up to fit 3:00")
     # closing call-to-action beat
@@ -433,7 +448,11 @@ def build(job, plan, cfg, log):
     secs = [s for s in plan["sections"] if s["id"] in tm]
     raw_total = sum(tm[s["id"]]["dur"] + GAP for s in secs) - GAP + TAIL
     speed = 1.0
-    if raw_total > MAX_SECS:
+    tgt = plan.get("target_secs")
+    if tgt and abs(raw_total - tgt) > 3:   # land within a few seconds of the chosen length: nudge the narration pace, at most 7% either way
+        speed = max(0.93, min(1.07, raw_total / tgt))
+        log(f"  narration {raw_total:.0f}s vs target {tgt:.0f}s; pace x{speed:.3f} -> {raw_total / speed:.0f}s")
+    if raw_total / speed > MAX_SECS:
         speed = raw_total / (MAX_SECS - 1)
         if speed > 1.12: log(f"  WARNING: narration is {raw_total:.0f}s; even sped up it would exceed 3 minutes. Shorten the script."); speed = 1.12
         log(f"  narration {raw_total:.0f}s is over the Shorts limit; speeding it up {speed:.2f}x")
@@ -522,7 +541,7 @@ def build(job, plan, cfg, log):
         beats.append({"id": s["id"], "start": round(t, 3), "dur": round(d, 3), "words": words, "bgs": bgs, "graphics": gfx})
         parts.append((sd / "voice" / f"{s['id']}.wav", d * speed)); t += d
     flt = "".join(f"[{i}:a]apad,atrim=duration={dd:.3f}[a{i}];" for i, (_, dd) in enumerate(parts)) + "".join(f"[a{i}]" for i in range(len(parts))) \
-        + f"concat=n={len(parts)}:v=0:a=1" + (f",atempo={speed:.4f}" if speed > 1.0 else "") + ",loudnorm=I=-14:TP=-1.5[out]"
+        + f"concat=n={len(parts)}:v=0:a=1" + (f",atempo={speed:.4f}" if abs(speed - 1.0) > 1e-4 else "") + ",loudnorm=I=-14:TP=-1.5[out]"
     args = sum([["-i", p] for p, _ in parts], [])
     media.ff(*args, "-filter_complex", flt, "-map", "[out]", "-ar", 48000, pub / "voice.wav")
     data = {"audio": "voice.wav", "total": round(t, 3), "tag": plan.get("tag", ""), "beats": beats}

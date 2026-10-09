@@ -34,7 +34,7 @@ DEFAULTS = {
     "presenter_image": str(ROOT / "assets" / "presenter.jpg"),
     "presenter_prompt": "A documentary TV presenter in his mid 40s is talking to the camera, speaking clearly and animatedly, his mouth opening and closing with every word, lips and teeth visible as he talks, natural head nods and eyebrow movement, modern studio, static camera",
     "wpm": 155,
-    "voice_wpm": 142,                 # real speaking pace of the cloned narrator (used to size Shorts so they land under 3:00)
+    "voice_wpm": 155,                 # real speaking pace of the cloned narrator, measured over 16 Shorts (146-165, median ~155); sizes Shorts to their target length
     "seconds_per_visual": 7,
     "motion_share": 0.10,
     "still_model": "flux2_klein_9b",

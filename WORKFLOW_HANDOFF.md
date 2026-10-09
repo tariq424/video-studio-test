@@ -268,3 +268,10 @@ This is the human or AI step the app can't do for itself:
 - No link given → `smoke_source` in config (the flydubai video; its transcript is cached, so YouTube isn't contacted).
 - Policy: use smoke mode for pipeline iteration; real lengths only for actual videos.
 - Measured 2026-10-08: job 20261008_190501, 33.0 s output, ~18 min end to end (about 15 min of it WanGP stills).
+
+## Short length accuracy (fixed 2026-10-08)
+- Cause of 2:04 vs 2:20: scripts were sized at 142 wpm; the narrator really reads ~155 wpm (16 jobs, 146-165), plus a loose +/-12% word check.
+- Now: voice_wpm 155; words sized from target minus pauses, tail and the closing line; check +/-5%; after 3 misses the closest try is kept
+  (not an unchecked re-ask); >10% long -> drop middle beats; the fact-check can lengthen the script, so it is cut again after (>6%).
+- Render: if the narration is more than 3 s off plan["target_secs"], the pace is nudged up to +/-7% (atempo; beat timings scale with it).
+- Verified: 2:20 job 20261008_201028 narration 138.5 s (stopped after narration); smoke 20261008_202035 37 s -> 35.0 s via the pace step.
