@@ -78,6 +78,8 @@ def create():
             def save(self, dst): import shutil; shutil.copy2(sp, dst)
         f = _F()
     if f is not None and f.filename and not kind_of(f.filename): return jsonify(error="Unsupported file type. Use audio (.mp3 .m4a .wav ...) or .txt .md .pdf .docx"), 400
+    if b.get("mode") == "smoke" and not b.get("url") and not b.get("transcript") and not (f and f.filename):   # no source: the standard smoke video
+        from studio import config as _cfg; b["url"] = _cfg.load().get("smoke_source", "")
     if not b.get("url") and not b.get("transcript") and not (f and f.filename): return jsonify(error="Give a YouTube link, a file, or paste some text."), 400
     try: mins, ssec = float(b.get("minutes", 15) or 15), float(b.get("short_secs", 165) or 165)
     except (TypeError, ValueError): return jsonify(error="Video lengths must be numbers."), 400
@@ -95,9 +97,8 @@ def create():
 
 @app.post("/api/smoke")
 def smoke():
-    """One-beat test job with a fixed script (exercises the visual ladder, the review pause, the render and the thumbnail)."""
-    b = request.get_json(silent=True) or {}
-    return jsonify(id=studio.create_smoke(b.get("visual_review", "every")))
+    """Deprecated (the old fixed one-beat job is gone). Use POST /api/jobs with mode=smoke: the one smoke path."""
+    return jsonify(error="Deprecated: start a smoke test with Make = 'Smoke test' (POST /api/jobs, mode=smoke)."), 410
 
 # ---- visual review (Shorts)
 def _ws(jid):

@@ -12,6 +12,24 @@ def stages_for(mode): return [s for s in STAGES if not ((mode == "short" and s i
 
 SMOKE_SECS = 30.0   # "smoke test" Shorts: about 75 words of narration including the closing line
 
+
+LENGTH_TOL = 0.10   # a finished video more than 10% off the requested length is flagged (never rejected)
+
+def _length_check(j, out, target, what, log):
+    """After a render: warn (log + job page) when the video misses the requested length by more than LENGTH_TOL."""
+    try:
+        from . import media
+        got, target = media.dur(out), float(target or 0)
+        if target <= 0: return
+        off = (got - target) / target
+        warns = [w for w in (j.state.get("length_warnings") or []) if not w.startswith(what + ":")]
+        if abs(off) > LENGTH_TOL:
+            w = f"{what}: {got:.0f}s vs {target:.0f}s requested ({off:+.0%})"
+            log(f"WARNING: length miss. {w}"); warns.append(w)
+        else: log(f"Length check: {what} {got:.0f}s vs {target:.0f}s requested ({off:+.0%}), OK")
+        j.save(length_warnings=warns)
+    except Exception as e: log(f"  length check skipped ({str(e)[:120]})")
+
 class Job:
     def __init__(self, path): self.dir = Path(path)
     @property
@@ -82,28 +100,6 @@ class Studio:
         d = j.state.get("done", [])
         if "short_review" not in d: d.append("short_review")
         j.save(done=d, status="queued"); j.log("Visual review done; rendering"); self.q.put(jid)
-
-    SMOKE_BEAT = {"id": "b0", "title": "Beat 1", "subject": None, "avoid": [],
-                  "vo": "A small passenger plane drops through dark storm clouds as it descends toward a coastal runway at dusk, its landing lights cutting through the rain.",
-                  "queries": ["airplane landing in storm", "plane descending through clouds"],
-                  "backdrop": {"kind": "headline", "kicker": "SMOKE TEST", "text": "A plane descends through a storm", "sub": ""},
-                  "still_prompt": "A small white twin-engine passenger plane with a plain grey tail descending through dark storm clouds toward a coastal runway at dusk, landing lights on, rain streaks, tense mood, photorealistic, vertical framing",
-                  "motion": "the plane descends slowly through the clouds, rain falls, camera tracks alongside",
-                  "visuals": [{"type": "chart", "chart": {"kind": "hook", "lines": ["SMOKE", "TEST"], "accent": 1}, "at": None}]}
-
-    def create_smoke(self, visual_review="every"):
-        """A one-beat Short with a fixed script (no YouTube, no script AI): exercises stock, the visual ladder, the review pause,
-        the render and the thumbnail in a couple of GPU minutes."""
-        jid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + "_smoke"
-        j = self.job(jid); (j.dir / "src").mkdir(parents=True)
-        (j.dir / "src" / "meta.json").write_text(json.dumps({"title": "Smoke test", "channel": "Video Studio", "webpage_url": ""}), encoding="utf-8")
-        (j.dir / "entities.json").write_text("[]", encoding="utf-8")
-        j.save_short_plan({"title": "Smoke test - visual review", "tag": "SMOKE TEST", "source_spoken": "a smoke test", "description": "Smoke test.",
-                           "mode": "short", "sections": [json.loads(json.dumps(self.SMOKE_BEAT))]})
-        j.save(url="", minutes=1.0, presenter=False, captions=False, auto_approve=True, provider="", mode="short", short_secs=120.0, upload="",
-               src_title="Smoke test", src_credit="", visual_review=visual_review if visual_review in ("auto", "every") else "every", smoke=True,
-               status="queued", stage="short_stock", done=["transcript", "short_script", "review"], title="Smoke test", created=time.time())
-        j.log(f"Smoke test job created (one beat, visual review: {visual_review})"); self.q.put(jid); return jid
 
     def rerender(self, jid):
         """Full re-render on request (post-render edits are kept: Shorts from the review decisions, long videos from edit_clip)."""
@@ -326,6 +322,7 @@ class Studio:
                 else:
                     meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
                     out = short.do_render(j.dir, sp, cfg, meta, log, stop); j.save(short_output=str(out))
+                    _length_check(j, out, sp.get("target_secs") or s.get("short_secs"), "Short", log)
                     from . import thumb916, review
                     try: j.save(thumbnail=str(thumb916.make(j.dir, sp, cfg, log)))
                     except Exception as e: log(f"  thumbnail failed ({str(e)[:200]})")
@@ -365,7 +362,7 @@ class Studio:
                 elif st == "assemble":
                     meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
                     parts = assemble.build(j.dir, plan, log, stop, use_presenter=s.get("presenter", False), use_captions=s.get("captions", True)); final = assemble.finalize(j.dir, plan, parts, meta, log)
-                    j.save(output=str(final))
+                    j.save(output=str(final)); _length_check(j, final, (s.get("minutes") or 0) * 60, "Long video", log)
             if stop(): j.save(status="stopped"); log("Stopped"); self.cancel.discard(jid); return
             d = j.state.get("done", []); d.append(st); j.save(done=d)
         j.save(status="finished", stage="done"); log("Finished.")

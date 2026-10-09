@@ -61,7 +61,7 @@ html.embed main{grid-template-columns:1fr;padding:0;max-width:none}html.embed bo
   <label>WanGP MCP URL (leave blank to find it automatically)</label><input id="wu" type="text" placeholder="e.g. http://127.0.0.1:8000/mcp">
   <label><input id="poq" type="checkbox"> When review is skipped, still pause if the fact-check raises questions</label>
   <label>Channel name (shown on the Short's 9:16 thumbnail; blank = none)</label><input id="chn" type="text">
-  <div class="row" style="margin-top:12px"><button onclick="saveSettings()">Save</button><button class="sec" onclick="testKey()">Test saved keys</button><button class="sec" onclick="smoke()">Run smoke test (1 beat)</button><span id="ssaved" class="mut"></span></div>
+  <div class="row" style="margin-top:12px"><button onclick="saveSettings()">Save</button><button class="sec" onclick="testKey()">Test saved keys</button><button class="sec" onclick="smoke()" aria-label="Run smoke test">Run smoke test (30-second Short)</button><span id="ssaved" class="mut"></span></div>
  </div>
  <div class="card" id="newvideo" data-testid="new-video-form"><h2>New video</h2>
   <label>Source</label><select id="srck" data-testid="input-type" aria-label="Source" onchange="srcUI()"><option value="yt">YouTube link</option><option value="file">Upload a file (NotebookLM audio, .mp3/.m4a/.wav, or .pdf/.docx/.txt/.md)</option><option value="text">Paste text (notes, briefing doc)</option></select>
@@ -118,7 +118,7 @@ async function loadDetail(){if(editing)return;const s=await j('/api/jobs/'+sel);
  if((s.status=='awaiting_review'||s.status=='awaiting_visuals'||s.status=='paused'||s.status=='finished'||(s.status=='error'&&s.stage=='transcript'))&&key==lastKey)return;   // don't redraw while you read/paste
  lastKey=key;
  const mtxt={both:`long ${s.minutes} min + Short ${fmt(Math.round(s.short_secs||165))}`,short:`${s.smoke?'Smoke test · ':''}Short ${fmt(Math.round(s.short_secs||165))}`,long:`long ${s.minutes} min`}[s.mode||'long'];
- let h=`<h2>${esc(s.title||s.url)}</h2><div class="mut">${mtxt} · <b data-testid="job-status" data-status="${esc(s.status)}" data-stage="${esc(s.stage)}">${statusText(s)}</b>${s.error?` · <span style="color:var(--bad)">${esc(s.error)}</span>`:''}</div>`;
+ let h=`<h2>${esc(s.title||s.url)}</h2><div class="mut">${mtxt} · <b data-testid="job-status" data-status="${esc(s.status)}" data-stage="${esc(s.stage)}">${statusText(s)}</b>${s.error?` · <span style="color:var(--bad)">${esc(s.error)}</span>`:''}</div>${(s.length_warnings||[]).map(w=>`<div data-testid="length-warning" style="color:var(--bad);font-size:13px">Length miss: ${esc(w)}</div>`).join('')}`;
  h+=`<div class="stages">${(s.stages||stages).map(t=>`<span class="st ${done.includes(t)?'done':(s.stage==t?'cur':'')}">${t}</span>`).join('')}</div>`;
  h+=`<div class="row">`;
  if(s.status=='awaiting_review'){h+=`<button onclick="act('approve')">Approve & render</button>`;if(s.plan_summary)h+=`<button class="sec" onclick="editPlan()">Edit long script</button>`;if(s.short_summary)h+=`<button class="sec" onclick="editShort()">Edit Short script</button>`}
@@ -216,7 +216,7 @@ async function showThumb(s){const o=await j(`/api/jobs/${sel}/thumbnail`);const 
  <label>Or your own picture (path or URL)</label><input type="text" id="tsrc" data-testid="thumb-source" aria-label="Thumbnail own picture (path or URL)">
  <div class="row" style="margin-top:8px"><button onclick="thumbGo()">Regenerate</button><button class="sec" onclick="thumbGo(true)">Approve</button><span id="tmsg" class="mut"></span></div>`}
 async function thumbGo(ap){$('tmsg').textContent='Working...';try{await rvPost(`/api/jobs/${sel}/thumbnail`,ap?{approve:true}:{beat:$('tb').value,text:$('tt').value,size:$('tsz').value,color:$('tcol').value,src:$('tsrc').value.trim()});$('tmsg').textContent='';showThumb()}catch(e){$('tmsg').textContent=e.message}}
-async function smoke(){$('ssaved').textContent='Starting smoke test...';const d=await rvPost('/api/smoke',{visual_review:'every'});sel=d.id;$('ssaved').textContent='Smoke test job '+d.id;loadJobs()}
+async function smoke(){$('ssaved').textContent='Starting smoke test...';try{const d=await rvPost('/api/jobs',{mode:'smoke'});sel=d.id;$('ssaved').textContent='Smoke test job '+d.id;loadJobs()}catch(e){$('ssaved').textContent='Smoke test failed to start: '+e.message}}
 
 // ---------------- post-render editing (every output type)
 let ED={beats:[],kind:null,cur:null,open:null,space:'short',rv:null,sel:[],fit:'auto',timer:null};

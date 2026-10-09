@@ -10,6 +10,30 @@ Video Studio is a fork of Explainer Studio (`F:\code\explainer-studio`, github `
 - **Outputs:** `F:\videos\video_studio\jobs\<job id>\`. A job's videos are in its `output\` folder.
 - **UI:** `http://127.0.0.1:42020` (fixed since Oct 4; `start-video-studio.bat` starts it without Pinokio). Start it from Pinokio → **Video Studio** → Start (launcher scripts in `C:\pinokio\api\video-studio`, with copies in `pinokio/` in the repo).
 
+## Status and policy (2026-10-09) — read first
+- **The pipeline is a draft generator.** Expect 2-5 beats per video to be wrong. The **timeline editor** (post-render editing, below)
+  is the repair path: swap the visual for something about the actual story. Pipeline tuning is stopped.
+- **Visual ladder per beat, in order:**
+  1. Stock footage (generic beats: Pexels / Pixabay / NASA) or real photos (subject beats) - short_stock / photos
+  2. WanGP AI still (from the beat's still_prompt), checked against the narration
+     - directional beats (descend/dive/fell/plummet/climb/bank): the still is **rotated first** by the verb (35 deg nose-down,
+       0 climb, 20 bank), cropped to fill; only "garbled" rejects
+  3. WanGP image-to-video of the still - **only on an explicit click** ("Show all options" / "Add animation"), never automatically
+  4. Parallax of the still (Remotion depth layers)
+  5. Hold with slow zoom (single layer) - a still rejected only for lettering/logo
+  6. 3D reconstruction / claymation (subject beats) or headline card (other beats)
+- **Motion policy:** rotation applies before either. Parallax on atmospheric scenes (clouds, skies, cityscapes, radar, distant buildings).
+  Single compact subjects (aircraft, small vehicles): **as built**, rigid 2-layer parallax (the subject moves as one piece);
+  hold-with-zoom is the fallback for them if tearing shows up again.
+- **Known limitations:** parallax on compact subjects can tear (the 2-layer split fixed the known case; watch for it);
+  wrong-airline, wrong-aircraft, wrong-action and wrong-moment visuals (e.g. a four-engine Turkish Airlines jet taxiing for a flydubai
+  descent) are expected and can't be fixed by tuning - fix them in the timeline editor.
+- **Length check:** after every render the video is compared with the requested length (Short: plan target_secs / short_secs;
+  long: minutes). More than 10% off -> "WARNING: length miss" in the log and a red "Length miss" line on the job page. Never rejects.
+- **Live and ready:** debugger, timeline editor (post-render editing), `/make` front-end, ui-blackbox tester (MCP in Claude Desktop,
+  venv F:\code\ui-blackbox\.venv, reports in F:\code\ui-blackbox\reports), smoke mode.
+- **Deprecated:** `/api/smoke` (old fixed one-beat job). Only the form's smoke mode is supported.
+
 ## Ground rules (owner: Tariq)
 - **Everything on F:.** Videos go in `F:\videos`. C: is for system files only; Ollama's model store on C: is the one accepted exception.
 - **Never print, paste or type API keys.**
@@ -235,7 +259,8 @@ This is the human or AI step the app can't do for itself:
   new prompts + stock searches -> new option set; History -> Revert), your own file (path on the PC or URL, with a label).
 - After the render: `output/thumbnail_9_16.png` (thumb916.py; options in short/thumb.json; regenerate/approve on the job page;
   Settings "Channel name"), then unused treatment files and previews are deleted (thumbnails kept; used files listed in short/used.json).
-- Smoke test: Settings -> "Run smoke test (1 beat)" or `POST /api/smoke {"visual_review":"every"}`: fixed one-beat script, no YouTube.
+- Smoke test: see "Smoke mode" below. The old `POST /api/smoke` one-beat job (fixed script, no script AI) is **deprecated and removed**:
+  the endpoint now returns 410.
 
 ## Post-render editing (Oct 2026) — app/studio/edit.py
 - Every finished job page: player + "Edit at m:ss (beat)" -> beat panel (thumbnails, 2 s previews, Refine, Supply, Add animation,
@@ -267,6 +292,8 @@ This is the human or AI step the app can't do for itself:
 - "smoke test" on /make (or Make → "Smoke test (30-second Short, pipeline check)" in the form) makes a ~30 s Short: 2 beats of narration (~58-word target, accepted 0.8-1.2x) plus the closing line, about 75 words. Real Shorts keep the 2:00 minimum.
 - No link given → `smoke_source` in config (the flydubai video; its transcript is cached, so YouTube isn't contacted).
 - Policy: use smoke mode for pipeline iteration; real lengths only for actual videos.
+- **This is the only smoke path.** Settings -> "Run smoke test (30-second Short)" posts `/api/jobs {"mode":"smoke"}` (no source -> `smoke_source`).
+  `/api/smoke` is deprecated (410). A "Smoke_test_visual_review_short.mp4" / 1-beat 12 s job came from the old path, not a length bug.
 - Measured 2026-10-08: job 20261008_190501, 33.0 s output, ~18 min end to end (about 15 min of it WanGP stills).
 
 ## Short length accuracy (fixed 2026-10-08)
@@ -300,4 +327,7 @@ This is the human or AI step the app can't do for itself:
   to fill, then Remotion parallax. The attitude check is ignored for these; only "garbled" rejects. Tested: 50 deg overshoots.
 - "Hold" rung: a still rejected only for lettering/logo is held with a slow zoom (single layer) instead of claymation.
 - Parallax is wired: it fires whenever an AI still passes the check (2 of the last 10 jobs before this); the drift is gentle (front layer 80 px).
+- Parallax split (depth.layers, 2026-10-09): one dominant subject clear of the bottom edge (>= 0.5% of the frame, e.g. an aircraft)
+  -> 2 layers: background with the subject painted out + the subject as ONE rigid layer (fixed the tail tearing off in job
+  20261009_131330 Beat 1). Everything else (skies, skylines, landscapes) -> the 3 depth layers as before.
 - Six-slot prompt / negative prompt / description-based check: branch wip/six-slot-image-prompts (not live).

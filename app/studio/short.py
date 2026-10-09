@@ -199,7 +199,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             cut = plan["sections"].pop(-2); log(f"  script grew in the fact-check; dropped a middle beat ({len(cut['vo'].split())} words)")
         for i, x in enumerate(plan["sections"]): x["id"], x["title"] = f"b{i}", f"Beat {i + 1}"
     n = sum(len(x["vo"].split()) for x in plan["sections"])
-    if n > words * 1.12: log(f"  NOTE: script is {n} words (target {words}); trim it in review or it will be sped up to fit 3:00")
+    if n > words * 1.12: log(f"  NOTE: script is {n} words (target {words}); trim it in review or it will be sped up to fit {f'{secs:.0f} s' if secs < 60 else f'{int(secs) // 60}:{int(secs) % 60:02d}'}")
     # closing call-to-action beat
     src_name = plan.get("source_spoken") or title
     if mode == "both":
