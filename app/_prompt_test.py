@@ -10,7 +10,7 @@ from studio.wangp import WanGP
 cfg = config.load(); log = lambda m: print(m, flush=True)
 job = Path(cfg["jobs_dir"]) / "20261008_210038"
 sec = json.loads((job / "short" / "plan.json").read_text(encoding="utf-8"))["sections"][0]
-out = config.ROOT / "_tests" / "prompt_test"; out.mkdir(parents=True, exist_ok=True)
+out = config.ROOT / "_tests" / "prompt_test2"; out.mkdir(parents=True, exist_ok=True)
 rules = '- "still_prompt":' + short.SHORT.split('- "still_prompt":', 1)[1].split('- "motion":', 1)[0]
 rules = rules.replace("{examples}", short.still_examples()).replace("{{", "{").replace("}}", "}")
 subj = sec.get("subject") or {}
@@ -23,21 +23,23 @@ def chk(j):
 with LLM(c, log, lambda: False) as llm:
     sp = llm.chat_json("You write image-model prompts for a news video. Reply with JSON only.", prompt, max_tokens=800, check=chk)["still_prompt"]
 log("NEW PROMPT: " + sp)
-res = {"narration": sec["vo"], "old_prompt": sec["still_prompt"] + render.STYLE, "new_prompt": sp + render.STYLE, "negative": render.NEGATIVE, "images": []}
+res = {"narration": sec["vo"], "old_prompt": sec["still_prompt"] + render.STYLE, "new_prompt": sp + render.STYLE, "negative": render.negative("air"), "images": []}
 shutil.copy2(job / "short" / "fallback" / "b0_0.jpg", out / "old_seed5100.jpg")
-ok, why = ladder.check(cfg, out / "old_seed5100.jpg", sec["vo"], sec.get("subject"))
-res["images"].append({"file": "old_seed5100.jpg", "check_ok": ok, "check": why})
+res["images"].append({"file": "old_seed5100.jpg"})
 wg = WanGP(cfg)
 for seed in (5100, 5101, 5102):
-    g = wg.gen({"model_type": cfg["still_model"], "prompt": sp + render.STYLE, "negative_prompt": render.NEGATIVE, "resolution": "1088x1920",
+    g = wg.gen({"model_type": cfg["still_model"], "prompt": sp + render.STYLE, "negative_prompt": render.negative(ladder._phase(sec)), "resolution": "1088x1920",
                 "num_inference_steps": 4, "seed": seed}, log, f"test still {seed}")
     if not g["ok"]: res["images"].append({"file": None, "seed": seed, "err": g.get("err")}); continue
     f = out / f"new_seed{seed}.jpg"; shutil.copy(g["file"], f)
     res["images"].append({"file": f.name, "seed": seed})
 from studio import footage
 footage.ensure_vet_model(cfg, log)
+for f in ("new_seed5100.jpg", "new_seed5101.jpg", "new_seed5102.jpg"):   # round 1 images, re-judged by the new check
+    src = config.ROOT / "_tests" / "prompt_test" / f
+    if src.exists(): shutil.copy2(src, out / f"round1_{f}"); res["images"].append({"file": f"round1_{f}"})
 for im in res["images"]:
-    if im.get("file") and im["file"].startswith("new"):
+    if im.get("file"):
         ok, why = ladder.check(cfg, out / im["file"], sec["vo"], sec.get("subject")); im["check_ok"], im["check"] = ok, why
 footage.unload_vet_model(cfg)
 (out / "result.json").write_text(json.dumps(res, indent=1), encoding="utf-8")

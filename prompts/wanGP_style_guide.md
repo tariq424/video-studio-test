@@ -19,27 +19,35 @@ So every image prompt states all six slots explicitly, in this order.
    never an airline name, logo, livery lettering, registration, flag or readable sign.
 2. **Action / attitude**: what it is doing, in physical terms. For an aircraft: nose angle, climbing/level/descending, bank,
    gear up or down. For people: posture and what they are doing.
-3. **Camera**: position, angle and shot size ("viewed from below and behind", "low angle wide shot", "over-the-shoulder close-up").
+3. **Camera**: position, angle and shot size ("side view from slightly above", "low angle wide shot", "over-the-shoulder close-up").
+   **When the beat describes a direction of motion, choose the camera angle where that direction is visible.** A dive or a
+   descent needs a side view (slightly above): from below or behind, a diving plane and a climbing plane look the same. A climb
+   also needs a side view. Level flight can use any angle (below, behind, three-quarter).
 4. **Setting**: where and when (place, sky, weather, time of day).
 5. **Mood / lighting**: the light that carries the emotion ("cold blue emergency lighting", "harsh floodlights", "backlit silhouette").
 6. **Style**: shot-specific look only ("motion blur on wingtips", "shallow depth of field"). The general look is added by the
    pipeline automatically.
+
+**Never name a part that should be absent.** "Landing gear retracted" makes the image model draw landing gear. Describe what IS
+there ("clean smooth underside") and leave the rest to the negative prompt: for a plane in the air the pipeline adds
+`landing gear, wheels, undercarriage` to the negative prompt automatically.
 
 Length: 45-75 words, one sentence of comma-separated phrases. Vertical framing for Shorts (the pipeline sets the resolution).
 
 Added automatically by the pipeline (do not write these):
 - Style ending: `cinematic photorealistic, natural dramatic lighting, 35mm film look, highly detailed, no text, no watermark`
 - Negative prompt: `text, watermark, logo, airline markings, registration numbers, deformed people, extra limbs, distorted faces, low quality, blurry, cartoon, anime`
+  (+ `landing gear, wheels, undercarriage` when the beat is in the air)
 
 ## Bad vs good
 
 Narration: "The jet then descended from sixteen thousand feet to three thousand in about two minutes."
 
 - Bad: `A jet descending steeply through clouds, tense mood.`
-  (No camera, no nose angle, no gear state, no light: the model guesses all four.)
-- Good: `A Boeing 737-800 airliner in a steep nose-down emergency dive, nose pitched down about 25 degrees, landing gear retracted,
-  viewed from below and behind, dark storm clouds over desert at dusk, cold blue emergency lighting and red wingtip strobes,
-  motion blur on the wingtips`
+  (No camera, no nose angle, no light: the model guesses all three, and its default is a calm level or climbing shot.)
+- Good: `A Boeing 737-800 airliner in a steep nose-down emergency dive, nose pitched down about 25 degrees toward the ground, clean
+  smooth underside, side view from slightly above so the downward angle is clear, dark storm clouds over desert at dusk, cold blue
+  emergency lighting and red wingtip strobes, motion blur on the wingtips`
 
 ## Keywords
 
@@ -58,9 +66,9 @@ Narration: "The jet then descended from sixteen thousand feet to three thousand 
 
 **1. Aircraft in descent**
 Narration: "Minutes later the airliner plunged eleven thousand feet as alarms sounded on board."
-Prompt: `A white twin-engine narrow-body airliner with a plain grey tail in a steep nose-down descent, nose pitched down sharply,
-landing gear retracted, slight right bank, viewed from below and behind, torn grey clouds over brown desert at dusk, harsh
-backlight with red wingtip strobes, motion blur on the wingtips and engine exhaust`
+Prompt: `A white twin-engine narrow-body airliner with a plain grey tail in a steep nose-down descent, nose pitched down sharply
+toward the desert, clean smooth underside, slight right bank, side view from slightly above so the downward angle is clear, torn
+grey clouds over brown desert at dusk, harsh backlight with red wingtip strobes, motion blur on the wingtips and engine exhaust`
 
 **2. Cockpit interior**
 Narration: "Inside the cockpit, the two pilots were fighting over the controls."
