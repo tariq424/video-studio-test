@@ -11,6 +11,7 @@ Video Studio is a fork of Explainer Studio (`F:\code\explainer-studio`, github `
 - **UI:** `http://127.0.0.1:42020` (fixed since Oct 4; `start-video-studio.bat` starts it without Pinokio). Start it from Pinokio → **Video Studio** → Start (launcher scripts in `C:\pinokio\api\video-studio`, with copies in `pinokio/` in the repo).
 
 ## Status and policy (2026-10-09) — read first
+- **Project closed 2026-10-09:** no new features, tweaks or tuning; only blockers (crash, failed render, editor can't splice, broken bridge) get fixed.
 - **The pipeline is a draft generator.** Expect 2-5 beats per video to be wrong. The **timeline editor** (post-render editing, below)
   is the repair path: swap the visual for something about the actual story. Pipeline tuning is stopped.
 - **Visual ladder per beat, in order:**
@@ -22,10 +23,12 @@ Video Studio is a fork of Explainer Studio (`F:\code\explainer-studio`, github `
   4. Parallax of the still (Remotion depth layers)
   5. Hold with slow zoom (single layer) - a still rejected only for lettering/logo
   6. 3D reconstruction / claymation (subject beats) or headline card (other beats)
-- **Motion policy:** rotation applies before either. Parallax on atmospheric scenes (clouds, skies, cityscapes, radar, distant buildings).
-  Single compact subjects (aircraft, small vehicles): **as built**, rigid 2-layer parallax (the subject moves as one piece);
-  hold-with-zoom is the fallback for them if tearing shows up again.
-- **Known limitations:** parallax on compact subjects can tear (the 2-layer split fixed the known case; watch for it);
+- **Motion policy (decided 2026-10-09):** rotation applies first (directional beats). Then:
+  - **Aircraft / single compact subjects -> rigid 2-layer parallax** (subject moves as one piece; tested on job 20261009_131330
+    Beat 1, tail stayed attached). **Fallback:** if tearing returns on a real job, switch these to hold-with-zoom (one-line change
+    in `depth.layers`: return only the full-frame layer when `subject_mask` finds a subject).
+  - **Atmosphere** (clouds, skies, cityscapes, radar, distant buildings) **-> 3-layer parallax.**
+- **Known limitations:** parallax on compact subjects tore before the 2-layer split (fixed; fallback above if it returns);
   wrong-airline, wrong-aircraft, wrong-action and wrong-moment visuals (e.g. a four-engine Turkish Airlines jet taxiing for a flydubai
   descent) are expected and can't be fixed by tuning - fix them in the timeline editor.
 - **Length check:** after every render the video is compared with the requested length (Short: plan target_secs / short_secs;
