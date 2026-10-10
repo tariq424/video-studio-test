@@ -22,3 +22,6 @@ pinokio/installed.flag
 remotion/out/
 remotion/_preview_bundle/
 screenshots/
+
+# cloud-stills browser profile (logins, cookies)
+cloud_profile/

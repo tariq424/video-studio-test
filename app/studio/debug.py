@@ -13,10 +13,10 @@ finished and saved there, so Resume continues with the next one). Never inside a
 
 Breakpoints (checked once per beat, after the beat's visuals are decided; only while debug is on and breakpoints aren't disabled):
   beat == N                      Beat N (1-based, as on the job page)
-  treatment == stock|photo|still|animate|parallax|3d|card   the beat ended up using that treatment
+  treatment == stock|photo|cloud|still|animate|parallax|3d|card   the beat ended up using that treatment (cloud = a cloud still)
                                  (still = an AI still, shown with parallax; 3d = reconstruction; card = headline card or map)
   stock_found == N               coherent stock clips found for the beat (also <, >, <=, >=)
-  escalated_past == stock|photo|still|animate   that step was tried and failed (stock also matches a failed real-photo step)
+  escalated_past == stock|photo|cloud|still|animate   that step was tried and failed (stock also matches a failed real-photo step)
   narration contains "word"      case-insensitive
 
 Trace: trace.jsonl (one event per line) and trace.md (readable: per-beat decision chains + timeline + chat) in the job folder.
@@ -24,8 +24,8 @@ The panel chat and the Claude chat read the same trace.md."""
 import json, re, time
 from pathlib import Path
 
-TREAT = ("stock", "photo", "still", "animate", "parallax", "3d", "card")
-STEPS = ("stock", "photo", "still", "animate")
+TREAT = ("stock", "photo", "cloud", "still", "animate", "parallax", "3d", "card")
+STEPS = ("stock", "photo", "cloud", "still", "animate")
 WHY_NOTE = "For deeper reasoning, ask in the Claude chat."
 
 class Paused(Exception):
@@ -51,8 +51,8 @@ def parse(text):
         return f"escalated_past == {v}"
     m = re.fullmatch(r"narration\s+contains\s+[\"']?(.+?)[\"']?", t, re.I)
     if m and m.group(1).strip(): return f'narration contains "{m.group(1).strip()}"'
-    raise ValueError(f'not a breakpoint: "{t[:60]}". Use: beat == N, treatment == stock|photo|still|animate|parallax|3d|card, '
-                     f'stock_found == N, escalated_past == stock|photo|still|animate, narration contains "word"')
+    raise ValueError(f'not a breakpoint: "{t[:60]}". Use: beat == N, treatment == stock|photo|cloud|still|animate|parallax|3d|card, '
+                     f'stock_found == N, escalated_past == stock|photo|cloud|still|animate, narration contains "word"')
 
 def parse_all(text_or_list):
     items = text_or_list if isinstance(text_or_list, list) else re.split(r"[\n;]+", text_or_list or "")

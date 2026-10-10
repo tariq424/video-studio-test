@@ -263,13 +263,14 @@ def depth_free(img, prefix, size=(1080, 1920)):
 
 def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
     """The visual ladder for beats that step 1 didn't cover (stock footage for generic beats, real photos for subject beats):
-    2 WanGP still -> 3 WanGP image-to-video (GENERATED) -> 4 parallax of the still (PARALLAX) -> 5 3D reconstruction / headline card.
+    2a cloud still (Gemini -> ChatGPT, GENERATED · CLOUD) -> 2b WanGP still -> 3 WanGP image-to-video (on click only) -> 4 parallax of the
+    still (PARALLAX) -> 5 3D reconstruction / headline card.
     Every step is checked against the beat's narration (ladder.py); a failed check escalates. A beat's map backdrop (geography)
     is kept as its first visual. Writes short/fallback.json = {beat: [bg items]} and logs one ladder line per beat.
     Also writes short/fallback/chains.json (every beat's decision chain: stock found, what was tried and why it failed, what is used)
     for the debugger and the trace. dbg (debug.Debugger): safe points for 'Pause now'; with breakpoints on, beats run one at a time
     and each is checked after its visuals are decided (normal runs keep the batched GPU order)."""
-    from . import depth, coherence, photos, ladder
+    from . import depth, coherence, photos, ladder, cloudgen
     sd = job / "short"; fd = sd / "fallback"; fd.mkdir(parents=True, exist_ok=True)
     tm = json.loads((sd / "timings.json").read_text(encoding="utf-8"))
     pick = json.loads((sd / "stock" / "pick.json").read_text(encoding="utf-8"))
@@ -293,7 +294,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         c = chs.get(sec["id"], {})
         return {"bid": sec["id"], "n": int(sec["id"][1:]) + 1, "vo": sec["vo"], "stock_found": c.get("stock_found", len(pick.get(sec["id"], []))),
                 "uses": c.get("uses", []), "failed": c.get("failed", [])}
-    log("Visual ladder per beat (1 stock/photo -> 2 still -> 3 animate -> 4 parallax -> 5 reconstruction):")
+    log("Visual ladder per beat (1 stock/photo -> 2 cloud still -> 3 WanGP still -> 4 parallax -> 5 reconstruction / headline; animate on click):")
     for s in beats:   # beats step 1 covered on its own
         if s["id"] in base_needs: continue
         log(f"  {s['id']}: stock ({len(pick.get(s['id'], []))} clip(s), coherent)"); stock_beat(s)
@@ -337,7 +338,8 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         rot = coherence.attitude_rotation(s["vo"], phases.get(s["id"])) if s.get("subject") else None
         for k in range(n - len(items)):
             slots.append({"key": f"{s['id']}_{k}", "beat": s["id"], "vo": s["vo"], "still_prompt": s.get("still_prompt", ""),
-                          "motion": s.get("motion", ""), "subject": s.get("subject"), "rotate": rot})
+                          "motion": s.get("motion", ""), "subject": s.get("subject"), "rotate": rot,
+                          "person": cloudgen.has_person(s["vo"], ents)})
 
     def finalize(s, st):
         items = pre[s["id"]]; bd = s.get("backdrop") or {}
@@ -346,9 +348,13 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         lines, k5, failed = [], 0, ([rung1] if why1 else [])
         for sl in [x for x in slots if x["beat"] == s["id"]]:
             r = st.get(sl["key"], {}); chain = [rung1]; why = [f"{rung1}: {why1}"] if why1 else []
-            chain.append("still")
+            cloud = r.get("src") == "cloud"
+            if "cloud" in r and not cloud:   # cloud tried (or skipped) and gave nothing usable: WanGP's still is next
+                chain.append("cloud"); why.append(f"cloud: {r.get('cloud_why') or 'failed'}"); failed.append("cloud")
+            chain.append(f"cloud still ({r.get('cloud_provider')})" if cloud else "still")
+            gtag = "GENERATED · CLOUD" if cloud else "GENERATED"
             sw = str(r.get("still_why") or "")
-            if sl.get("rotate") is not None and r.get("still") and not sw.startswith("garbled"):
+            if sl.get("rotate") is not None and r.get("still") and not cloud and not sw.startswith("garbled"):
                 # directional beat: the image model's nose angle is random, so the still is turned by the narration's verb and given
                 # parallax; it is rejected only when garbled (the attitude check can't judge it)
                 img = sd / r["still"]; deg = sl["rotate"]
@@ -364,7 +370,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                 # only marks (lettering/logo) - not a contradiction of the narration: hold the still with a slow zoom
                 chain.append("hold"); why.append(f"still: {sw}"); failed.append("still")
                 lay = depth_free(sd / r["still"], fd / f"{sl['key']}_hold")
-                items.append({"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED", "rung": "still"})
+                items.append({"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": gtag, "rung": "still", "cloud": cloud})
                 lines.append(" -> ".join(chain) + f"  ({'; '.join(why)})"); continue
             if r.get("still_ok"):
                 if "clip" in r: chain.append("animate")   # animation only exists after an explicit click
@@ -376,8 +382,9 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                 img = sd / r["still"]; pre_ = fd / sl["key"]
                 try: lay = depth.layers(img, pre_, log)
                 except Exception as e:
-                    log(f"  depth layers failed ({str(e)[:80]}); still without parallax"); lay = depth_free(img, pre_)
-                items.append({"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED · PARALLAX", "rung": "parallax"})
+                    log(f"  depth layers failed ({str(e)[:80]}); still held with a slow zoom"); lay = depth_free(img, pre_)
+                items.append({"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED · CLOUD" if cloud else "GENERATED · PARALLAX",
+                              "rung": "parallax", "cloud": cloud})
             else:
                 why.append(f"still: {r.get('still_why') or 'not made'}"); failed.append("still")
                 if s.get("subject"):
@@ -393,7 +400,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
             still = next((st[x["key"]]["still"] for x in slots if x["beat"] == s["id"] and st.get(x["key"], {}).get("still_ok")), None)
             if still:
                 lay = depth_free(sd / still, fd / f"{s['id']}_tail")
-                items.append({"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED · PARALLAX", "rung": "parallax (fill)"})
+                items.append({"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED · CLOUD" if str(still).startswith("fallback/cloud_") else "GENERATED · PARALLAX", "rung": "parallax (fill)"})
         if not items: items.append({"type": "graphic", "g": {"kind": "headline", "kicker": "", "text": s["vo"][:70], "sub": ""}, "rung": "headline"})
         items = [it for j, it in enumerate(items) if not (j and it["rung"] == "headline" and items[j - 1]["rung"] == "headline")]   # one card stretches
         out[s["id"]] = items
@@ -402,7 +409,10 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         for j, ln in enumerate(lines): log(f"  {s['id']}{'#' + str(j + 1) if len(lines) > 1 else ''}: {ln}")
         log(f"  {s['id']} uses: {got}")
         chs[s["id"]] = {"n": int(s["id"][1:]) + 1, "vo": s["vo"], "stock_found": len(pick.get(s["id"], [])), "chain": lines,
-                        "uses": [i["rung"] for i in items], "failed": sorted(set(failed)), "stock_rejected": srej(s["id"]), "photos_rejected": prej.get(s["id"], [])}
+                        "uses": [i["rung"] for i in items] + (["cloud"] if any(i.get("cloud") for i in items) else []),
+                        "failed": sorted(set(failed)), "stock_rejected": srej(s["id"]), "photos_rejected": prej.get(s["id"], []),
+                        "cloud": [{"slot": x["key"], "provider": st.get(x["key"], {}).get("cloud_provider"), "why": st.get(x["key"], {}).get("cloud_why", ""),
+                                   "tries": st.get(x["key"], {}).get("cloud_tries", [])} for x in slots if x["beat"] == s["id"] and "cloud" in st.get(x["key"], {})]}
         save_out()
 
     pause = (lambda: dbg.manual("short_fallback: AI stills")) if dbg else None
@@ -413,7 +423,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
             if s["id"] in needs and s["id"] not in out:
                 first = len(slots); prepare(s); sl = slots[first:]
                 st = ladder.run(cfg, wg, sd, fd, sl, log, stop, bool(sl) and wg.alive(), seed=5100 + first, full=full, pause=pause) if sl else {}
-                if sl and not wg.alive(): log("  WanGP isn't reachable: skipping steps 2-4")
+                if sl and not wg.alive(): log("  WanGP isn't reachable: cloud stills only")
                 finalize(s, st)
             elif s["id"] not in needs: stock_beat(s)
             save_out(); dbg.point(info(s))
@@ -424,7 +434,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
             prepare(s)
     run_slots = slots
     gpu = bool(run_slots) and wg.alive()
-    if run_slots and not gpu: log("  WanGP isn't reachable: skipping steps 2-4")
+    if run_slots and not gpu: log("  WanGP isn't reachable: cloud stills only" if cfg.get("cloud_on", True) else "  WanGP isn't reachable: skipping steps 2-4")
     st = ladder.run(cfg, wg, sd, fd, run_slots, log, stop, gpu, full=full, pause=pause) if run_slots else {}
     for s in beats:
         if s["id"] in needs: finalize(s, st)

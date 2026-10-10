@@ -112,6 +112,41 @@ def _still(cfg, wg, log, prompt, out, seed, stop, tag):
     if r.get("ok"): shutil.copy(r["file"], out); log(f"  {tag}: kept last attempt despite QA ({last_issue})")
     return r.get("ok", False)
 
+def _ents(job):
+    f = job / "entities.json"
+    try: return json.loads(f.read_text(encoding="utf-8")) if f.exists() else []
+    except Exception: return []
+
+def badge(src, dst, text="GENERATED · CLOUD"):
+    """Burn the honesty label into a long-video still (Shorts get it from Remotion), inside the Ken Burns safe area."""
+    from PIL import Image, ImageDraw, ImageFont
+    im = Image.open(src).convert("RGB"); W, H = im.size; fs = max(14, int(W * 0.018))
+    font = None
+    for f in ("arialbd.ttf", "C:/Windows/Fonts/arialbd.ttf", "DejaVuSans-Bold.ttf"):
+        try: font = ImageFont.truetype(f, fs); break
+        except Exception: pass
+    if font is None: font = ImageFont.load_default()
+    d = ImageDraw.Draw(im); x, y = int(W * 0.11), int(H * 0.11)
+    l, t, r, b = d.textbbox((x, y), text, font=font); p = int(fs * 0.5)
+    d.rounded_rectangle((l - p, t - p, r + p, b + p), radius=int(fs * 0.35), fill=(255, 200, 61))
+    d.text((x, y), text, font=font, fill=(17, 17, 17))
+    im.save(dst, quality=93)
+
+def cloud_still(cfg, job, v, vo, log):
+    """Long videos: a 16:9 cloud still (Gemini -> ChatGPT) for visual v -> stills/<id>.jpg with the GENERATED · CLOUD label.
+    Skipped for narration naming a real person; a still the image check rejects isn't used. -> True if made."""
+    if not cfg.get("cloud_on", True) or not v.get("prompt"): return False
+    from . import cloudgen
+    if cloudgen.has_person(vo, _ents(job)): log(f"  cloud {v['id']}: narration names a real person, cloud skipped"); return False
+    d = job / "stills"; d.mkdir(exist_ok=True); png = d / f"cloud_{v['id']}.png"
+    res = cloudgen.generate(cfg, v["prompt"], png, "16:9", log, f"cloud {v['id']}", job=job)
+    if not res["ok"]: return False
+    if qa_available(cfg):
+        good, issue = qa.check(cfg, png, v["prompt"])
+        if not good and not issue.startswith("qa-"): log(f"  cloud {v['id']}: image check rejected it ({issue[:100]}); WanGP next"); return False
+    badge(png, d / f"{v['id']}.jpg"); v["cloud"] = res["provider"]
+    return True
+
 def do_motion(job, plan, cfg, wg, log, stop):
     d = job / "motion"; d.mkdir(exist_ok=True); seed = 3000
     for s in plan["sections"]:
@@ -119,6 +154,8 @@ def do_motion(job, plan, cfg, wg, log, stop):
             if v["type"] != "motion" or v.get("stock"): continue
             seed += 1; out = d / f"{v['id']}.mp4"
             if media.ok(out): continue
+            if (job / "stills" / f"{v['id']}.jpg").exists() or cloud_still(cfg, job, v, s.get("vo", ""), log):   # cloud first: a still
+                v["type"] = "still"; log(f"Motion {v['id']}: cloud still instead of WanGP motion"); continue
             ok = False
             for t in range(2):
                 r = wg.gen({"model_type": cfg["video_model"], "prompt": v["prompt"] + STYLE, "resolution": "1280x720",
@@ -136,10 +173,12 @@ def do_motion(job, plan, cfg, wg, log, stop):
 
 def do_stills(job, plan, cfg, wg, log, stop):
     d = job / "stills"; d.mkdir(exist_ok=True); seed = 1000; n = 0
-    todo = [v for s in plan["sections"] for v in s["visuals"] if v["type"] == "still" and not v.get("stock")]
-    for i, v in enumerate(todo):
+    todo = [(v, s.get("vo", "")) for s in plan["sections"] for v in s["visuals"] if v["type"] == "still" and not v.get("stock")]
+    for i, (v, vo) in enumerate(todo):
         seed += 1; out = d / f"{v['id']}.jpg"
         if out.exists(): continue
+        if stop(): raise RuntimeError("cancelled")
+        if cloud_still(cfg, job, v, vo, log): continue   # cloud first; WanGP only when it gives nothing usable
         if not _still(cfg, wg, log, v["prompt"], out, seed, stop, f"still {v['id']}"):
             raise RuntimeError(f"still {v['id']} failed")
         n += 1

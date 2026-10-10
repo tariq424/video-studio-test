@@ -95,6 +95,19 @@ def create():
                         b.get("visual_review", "auto"), dbg_on=dbg_on, bps=bps)
     return jsonify(id=jid)
 
+@app.post("/api/cloud/login")
+def cloud_login():
+    """Open the normal browser on the cloud-stills profile (Gemini + ChatGPT) for a one-time manual sign-in."""
+    from studio import cloudgen, config as _c
+    try: return jsonify(cloudgen.login(_c.load()))
+    except Exception as e: return jsonify(error=str(e)[:200]), 400
+
+@app.get("/api/cloud/status")
+def cloud_status():
+    """Signed in? per provider (opens the profile briefly; close the login window first)."""
+    from studio import cloudgen, config as _c
+    return jsonify(cloudgen.status(_c.load()))
+
 @app.post("/api/smoke")
 def smoke():
     """Deprecated (the old fixed one-beat job is gone). Use POST /api/jobs with mode=smoke: the one smoke path."""

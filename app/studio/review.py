@@ -13,7 +13,7 @@ from pathlib import Path
 from . import media
 
 FPS = 30
-RUNG = {"stock": "Stock footage", "photo": "Real photo", "still": "AI still", "animate": "AI animation", "parallax": "Parallax",
+RUNG = {"stock": "Stock footage", "photo": "Real photo", "cloud": "Cloud still", "still": "AI still", "animate": "AI animation", "parallax": "Parallax",
         "reconstruction": "3D reconstruction", "headline": "Headline card", "map": "Map", "supplied": "Your file", "parallax (fill)": "Parallax"}
 STATIC = {"still", "headline", "photo"}          # click enlarges instead of playing
 _locks, _gpu = {}, threading.Lock()
@@ -67,11 +67,17 @@ def _slot_cands(rv, sec, key, r, sd, full, log):
     """Candidates from one ladder slot: the still, its animation, its parallax."""
     from . import short, depth
     bid = sec["id"]; fd = sd / "fallback"
+    cloud = r.get("src") == "cloud"; gtag = "GENERATED · CLOUD" if cloud else "GENERATED"
+    if r.get("cloud") and not cloud and (sd / r["cloud"]).exists():   # a cloud still that failed its check: still offered to the reviewer
+        pre = fd / f"{key}_cloudx"
+        lay = [Path(f"{pre}_L0.jpg")] if Path(f"{pre}_L0.jpg").exists() else short.depth_free(sd / r["cloud"], pre, _fsize(sd))
+        _add(rv, bid, {"type": "layers", "layers": [_rel(p, sd) for p in lay], "tag": "GENERATED · CLOUD"}, "cloud", False,
+             f"cloud still ({r.get('cloud_provider')}): {r.get('cloud_why') or 'failed its check'}")
     if r.get("still") and (sd / r["still"]).exists():
         img = sd / r["still"]
         pre = fd / f"{key}_still"
         lay = [Path(f"{pre}_L0.jpg")] if Path(f"{pre}_L0.jpg").exists() else short.depth_free(img, pre, _fsize(sd))
-        _add(rv, bid, {"type": "layers", "layers": [_rel(p, sd) for p in lay], "tag": "GENERATED"}, "still", r.get("still_ok"),
+        _add(rv, bid, {"type": "layers", "layers": [_rel(p, sd) for p in lay], "tag": gtag}, "cloud" if cloud else "still", r.get("still_ok"),
              "matches the narration" if r.get("still_ok") else (r.get("still_why") or "not checked"))
         if r.get("clip") and (sd / r["clip"]).exists():
             _add(rv, bid, {"type": "video", "src": r["clip"], "secs": round((r.get("clip_secs") or 7) / 0.85, 2), "tag": "GENERATED"}, "animate",
@@ -83,8 +89,9 @@ def _slot_cands(rv, sec, key, r, sd, full, log):
             except Exception as e: log(f"  parallax for {key} failed ({str(e)[:80]})")
         if par.exists():
             lays = [par] + [Path(f"{fd / key}_L{i}.png") for i in (1, 2) if Path(f"{fd / key}_L{i}.png").exists()]
-            _add(rv, bid, {"type": "layers", "layers": [_rel(p, sd) for p in lays], "tag": "GENERATED · PARALLAX"}, "parallax", r.get("still_ok"),
-                 "depth layers of the AI still" + ("" if r.get("still_ok") else f" (still: {r.get('still_why') or 'not checked'})"))
+            _add(rv, bid, {"type": "layers", "layers": [_rel(p, sd) for p in lays], "tag": "GENERATED · CLOUD" if cloud else "GENERATED · PARALLAX"},
+                 "parallax", r.get("still_ok"),
+                 f"depth layers of the {'cloud' if cloud else 'AI'} still" + ("" if r.get("still_ok") else f" (still: {r.get('still_why') or 'not checked'})"))
 
 def _cheap_cands(rv, sec, job, phases):
     """Treatments that cost nothing to offer: the map (if the script has one) and the reconstruction / headline card."""

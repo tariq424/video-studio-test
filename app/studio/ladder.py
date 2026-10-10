@@ -1,5 +1,6 @@
 """The visual ladder for Short beats that stock footage / real photos didn't cover (step 1 runs in short_stock / photos):
-  2. WanGP still (from the beat's still_prompt)   -> coherence check against the narration
+  2a. Cloud still (Gemini, then ChatGPT; cloudgen.py) -> coherence check; skipped for beats naming a real person
+  2b. WanGP still (from the beat's still_prompt) - only when 2a gave nothing usable -> coherence check
   3. WanGP image-to-video of that still           -> coherence + garble check on 3 frames      => tag GENERATED
   4. Parallax of the still (depth layers)         -> used when step 3 fails but the still passed => tag PARALLAX
   5. 3D reconstruction (subject beats) / headline card (other beats)                            => tag RECONSTRUCTION (in Recon.tsx)
@@ -83,14 +84,55 @@ def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False, animate=F
     st = json.loads(sf.read_text(encoding="utf-8")) if sf.exists() else {}
     def save(): sf.write_text(json.dumps(st, indent=1), encoding="utf-8")
     for s in slots: st.setdefault(s["key"], {})
+    def check_all():
+        todo = [s for s in slots if st[s["key"]].get("still") and "still_ok" not in st[s["key"]]]
+        if not todo: return
+        try: footage.ensure_vet_model(cfg, log)
+        except Exception as e: log(f"  {str(e)[:160]}")
+        for s in todo:
+            try: pause()
+            except Exception: footage.unload_vet_model(cfg); raise
+            r = st[s["key"]]; ok, why = check(cfg, sd / r["still"], s["vo"], s.get("subject"))
+            r["still_ok"], r["still_why"] = ok, why
+            if s.get("rotate") and r.get("src") != "cloud": r["nose"] = nose_side(cfg, sd / r["still"])   # which way to turn it (WanGP, directional beats)
+            save()
+        footage.unload_vet_model(cfg)
+    # step 2a: cloud still (Gemini -> ChatGPT); skipped for beats that name a real person
+    if cfg.get("cloud_on", True):
+        from . import cloudgen
+        aspect = "9:16" if space(sd)["orient"] == "portrait" else "16:9"
+        for s in slots:
+            if stop(): raise RuntimeError("cancelled")
+            r = st[s["key"]]
+            if "cloud" in r: continue
+            pause()
+            if s.get("person"): r["cloud"] = None; r["cloud_why"] = "names a real person: cloud skipped"; save(); continue
+            if not s.get("still_prompt"): r["cloud"] = None; r["cloud_why"] = "no scene prompt"; save(); continue
+            dst = fd / f"cloud_{s['key']}.png"
+            res = cloudgen.generate(cfg, s["still_prompt"], dst, aspect, log, f"cloud {s['key']}", job=sd.parent)
+            r["cloud"] = _rel(dst, sd) if res["ok"] else None
+            r["cloud_provider"], r["cloud_why"], r["cloud_tries"] = res.get("provider"), res.get("why", ""), res.get("tries", [])
+            if res["ok"]:
+                r["still"], r["src"] = r["cloud"], "cloud"
+                for k in ("still_ok", "still_why", "nose"): r.pop(k, None)
+            save()
+        check_all()
+        for s in slots:   # a cloud still that fails its check goes to WanGP (its reason is kept for the chain)
+            r = st[s["key"]]
+            if r.get("src") == "cloud" and r.get("still_ok") is False:
+                r["cloud_why"] = f"check: {r.get('still_why', '')}"; r["src"] = "cloud_rejected"
+                for k in ("still", "still_ok", "still_why"): r.pop(k, None)
+                save()
     if not gpu:
-        for s in slots: st[s["key"]].setdefault("still_why", "WanGP not available")
+        for s in slots:
+            if not st[s["key"]].get("still_ok"): st[s["key"]].setdefault("still_why", "WanGP not available")
         save(); return st
-    # step 2: stills
+    # step 2b: WanGP stills (only where the cloud gave nothing usable)
     for i, s in enumerate(slots):
         if stop(): raise RuntimeError("cancelled")
-        pause()
         r = st[s["key"]]; img = fd / f"{s['key']}.jpg"
+        if r.get("src") == "cloud": continue
+        pause()
         if "still" in r and (r["still"] is None or img.exists()): continue
         if not s.get("still_prompt"): r["still"] = None; r["still_why"] = "no scene prompt"; save(); continue
         if not img.exists():
@@ -100,21 +142,10 @@ def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False, animate=F
                 if g["ok"]: shutil.copy(g["file"], img)
             except Exception as e: log(f"  still {s['key']} failed ({str(e)[:100]})")
         r["still"] = _rel(img, sd) if img.exists() else None
+        if r["still"] is not None: r["src"] = "wangp"
         if r["still"] is None: r["still_why"] = "WanGP failed"
         save()
-    # step 2 check
-    todo = [s for s in slots if st[s["key"]].get("still") and "still_ok" not in st[s["key"]]]
-    if todo:
-        try: footage.ensure_vet_model(cfg, log)
-        except Exception as e: log(f"  {str(e)[:160]}")
-        for s in todo:
-            try: pause()
-            except Exception: footage.unload_vet_model(cfg); raise
-            r = st[s["key"]]; ok, why = check(cfg, sd / r["still"], s["vo"], s.get("subject"))
-            r["still_ok"], r["still_why"] = ok, why
-            if s.get("rotate"): r["nose"] = nose_side(cfg, sd / r["still"])   # which way to turn it (directional beats)
-            save()
-        footage.unload_vet_model(cfg)
+    check_all()
     # step 3: image-to-video of the stills that passed
     # animation (step 3) only on an explicit click (Show all options / Add animation -> animate=True); never in the
     # pipeline, Review every beat, Approve auto or Approve all remaining

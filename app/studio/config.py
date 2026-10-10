@@ -38,6 +38,13 @@ DEFAULTS = {
     "seconds_per_visual": 7,
     "motion_share": 0.10,
     "still_model": "flux2_klein_9b",
+    "cloud_on": True,                 # visual ladder: cloud stills (Gemini / ChatGPT via Playwright) before WanGP; False = WanGP as before
+    "cloud_primary": "gemini",        # gemini | chatgpt (the other one is the fallback)
+    "cloud_timeout": 90,              # seconds per provider attempt
+    "cloud_max_per_job": 8,           # cap on cloud attempts per video (expected use: 2-5)
+    "cloud_browser": "auto",          # auto (Chrome if installed, else Edge) | chrome | msedge - must match the browser you logged in with
+    "cloud_headless": False,          # headed is less likely to be challenged; the window closes after each still
+    "cloud_profile": "",              # "" = <project>/cloud_profile (logins live here; git-ignored)
     "video_model": "ltx2_distilled",
     "channel_name": "",
     "smoke_source": "https://youtu.be/xcQ7MhOMLrg",   # "smoke test" with no link: this video (its transcript is cached, so YouTube isn't contacted)
