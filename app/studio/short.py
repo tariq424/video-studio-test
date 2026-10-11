@@ -560,9 +560,11 @@ def _icons(cfg, sd, bid, words, gfx, d, log):
     out = []
     for g in groups:
         if not g.get("emoji"): continue
-        a, b = g["start"], max(g["start"] + 0.8, g["end"])
-        if any(x < b and a < y for x, y in busy): continue
-        out.append({"at": round(a, 3), "dur": round(b - a, 3), "e": g["emoji"]})
+        free = [(g["start"], max(g["start"] + 0.8, g["end"]))]   # the caption's time minus the graphic cards' time
+        for x, y in busy:
+            free = [seg for a, b in free for seg in ((a, min(b, x)), (max(a, y), b)) if seg[1] - seg[0] > 0.05]
+        best = max(free, key=lambda ab: ab[1] - ab[0], default=None)
+        if best and best[1] - best[0] >= 0.8: out.append({"at": round(best[0], 3), "dur": round(best[1] - best[0], 3), "e": g["emoji"]})
     return out
 
 def build(job, plan, cfg, log):

@@ -70,15 +70,19 @@ Video Studio is a fork of Explainer Studio (`F:\code\explainer-studio`, github `
   - Root cause of the end card during narration: the old layout put `_end` into the last section's visual slots.
   - Root cause of the "freezing" highlight: the old explainer captions had ONE static highlighted keyword per sentence, no
     word-by-word highlight at all.
-- **Guaranteed visual (Part 5):** a missing file, a blank chart (mean luma < 8) or a black frame (< 6) becomes a branded card
-  (animated gradient + text, HeadlineBackdrop), never black. Root cause of the black beats: charts that failed to render fell
-  back to an empty dark "cards" image.
+- **Guaranteed visual (Part 5):** a missing file, a blank image (no variance, or mean luma < 8) or a black clip (< 6) becomes a
+  branded card (animated gradient + text, HeadlineBackdrop, now laid out for 16:9 too), never black. Root cause of the black beats:
+  the script AI put Short-style `hook` cards into the long plan; the chart renderer didn't know that kind and silently drew an EMPTY
+  dark image (5 charts in job 20261011_082753). Hook cards now render as big-text slides. A simulation on a Short beat replaces
+  the beat's own graphic cards (they collided).
+- **Explainer render time:** about 29 min for a 14-min explainer on this PC (the old stitcher took ~5 min). Verified on job
+  20261011_082753 -> output/_TEST_explainer_remotion.mp4 (your original explainer file was not touched).
 - **Captions (Part 7):** at native resolution both formats measured sharp; renders now use JPEG quality 100 (explainer) and the
   captions render with antialiased font smoothing at final size; the explainer uses Montserrat ExtraBold (as the Short) instead of
   libass Arial with a soft shadow.
 - **Emoji (Part 8):** the picker asked for "about half, never two in a row" (and the explainer's ffmpeg overlay path dropped some);
-  now "about three in four, never the same twice in a row", drawn by Remotion above the caption in BOTH formats (Short: only while
-  no graphic card is on screen).
+  now "about three in four, never the same twice in a row", drawn by Remotion above the caption in BOTH formats (Short: in the free
+  part of the caption's time next to the graphic cards; a beat covered by cards end to end gets none).
 - **Airplanes in an AI explainer:** `coherence.phase` reads "taking off" as flight, so non-aviation beats got sky scenes and the
   aircraft lock. Flight phases and the sky / airport / radar scenes now apply only when the narration or prompt names an aircraft.
 - **UI (Parts 9-12):** thumbnails get a content-keyed `?v=` (candidate ids c1, c2 ... are reused when options are rebuilt, so the
