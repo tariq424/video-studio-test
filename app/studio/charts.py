@@ -29,6 +29,9 @@ def _fmt(v, unit):
     return f"{unit}{s}" if unit in ("$", "£", "€") else f"{s}{unit or ''}"
 
 def render(spec, out):
+    if spec.get("kind") == "hook" or (spec.get("lines") and spec.get("kind") not in ("title", "end", "stat", "quote", "bar", "line", "compare", "timeline", "cards")):
+        # a Short-style hook card in a long-video plan: big text slide (it used to fall through to an EMPTY "cards" image)
+        spec = {"kind": "title", "title": " ".join(str(x) for x in spec.get("lines") or []) or spec.get("text") or "", "subtitle": "", "credit": ""}
     k = spec.get("kind", "cards"); f = _fig()
     try:
         if k == "title":

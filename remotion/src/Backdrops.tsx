@@ -89,13 +89,13 @@ export const MapBackdrop: React.FC<{ g: Extract<Backdrop, { kind: "map" }>; dur:
 
 // Full-screen headline card for beats with no fitting footage.
 export const HeadlineBackdrop: React.FC<{ g: Extract<Backdrop, { kind: "headline" }>; dur: number }> = ({ g, dur }) => {
-  const f = useCurrentFrame(); const { fps } = useVideoConfig(); const t = f / fps;
+  const f = useCurrentFrame(); const { fps, width, height } = useVideoConfig(); const t = f / fps; const tall = height > width;
   const a = interpolate(t, [0.1, 0.6], [0, 1], { extrapolateRight: "clamp" });
   const drift = interpolate(t, [0, dur], [0, -160]);
   return (
     <AbsoluteFill style={{ background: "linear-gradient(160deg, #101a2e 0%, #070a12 60%, #1d1406 100%)" }}>
       <AbsoluteFill style={{ backgroundImage: "repeating-linear-gradient(135deg, rgba(255,255,255,0.04) 0 2px, transparent 2px 48px)", backgroundPosition: `${drift}px 0` }} />
-      <AbsoluteFill style={{ top: 860, bottom: "auto", height: 480, alignItems: "center", justifyContent: "center", padding: "0 80px", opacity: a, transform: `translateY(${(1 - a) * 30}px)` }}>
+      <AbsoluteFill style={{ top: tall ? 860 : 170, bottom: "auto", height: tall ? 480 : 560, alignItems: "center", justifyContent: "center", padding: tall ? "0 80px" : "0 200px", opacity: a, transform: `translateY(${(1 - a) * 30}px)` }}>
         {g.kicker ? <div style={{ fontFamily: BODY, fontWeight: 800, fontSize: 34, color: "#111", background: C.gold, borderRadius: 999, padding: "8px 26px", marginBottom: 28, letterSpacing: 1 }}>{g.kicker.toUpperCase()}</div> : null}
         <div style={{ fontFamily: HEAD, fontWeight: 900, fontSize: 70, lineHeight: 1.12, color: C.text, textAlign: "center" }}>{g.text}</div>
         {g.sub ? <div style={{ fontFamily: BODY, fontWeight: 600, fontSize: 38, color: C.mut, marginTop: 22, textAlign: "center" }}>{g.sub}</div> : null}

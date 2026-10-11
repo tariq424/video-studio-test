@@ -24,7 +24,13 @@ def _down(series, n=240):
 
 
 def aircraft_flight(p):
-    start = float(p.get("start_alt_ft") or 35000); end = float(p.get("end_alt_ft") or 10000)
+    drop = float(p.get("drop_ft") or 0); assumed = ""
+    start = float(p.get("start_alt_ft") or 0); end = float(p.get("end_alt_ft") or 0)
+    if drop:   # "lost 12,000 feet": the narration often gives the drop, not the altitudes
+        if start and not end: end = start - drop
+        elif end and not start: start = end + drop
+        elif not start: start = 35000.0; end = start - drop; assumed = "start assumed at a 35,000 ft cruise; "
+    start = start or 35000.0; end = end if end or end == 0 else 10000.0
     dur = float(p.get("descent_secs") or 0)
     rate = float(p.get("rate_fpm") or 0)   # feet per minute
     if not dur: dur = abs(start - end) / (rate or 6000) * 60
@@ -39,7 +45,7 @@ def aircraft_flight(p):
         series.append([round(t, 2), round(alt)]); t += step
     fpm = abs(start - end) / dur * 60 if dur else 0
     return {"title": p.get("title") or "Altitude", "unit": "ft", "series": _down(series), "icon": "plane",
-            "label": p.get("label") or f"{start:,.0f} ft -> {end:,.0f} ft in {dur:.0f} s", "notes": f"average descent {fpm:,.0f} ft/min",
+            "label": p.get("label") or f"{start:,.0f} ft -> {end:,.0f} ft in {dur:.0f} s", "notes": f"{assumed}average {'descent' if end < start else 'climb'} {fpm:,.0f} ft/min",
             "marks": [{"t": cruise, "text": "descent begins"}, {"t": cruise + dur, "text": "levels off"}]}
 
 
@@ -61,7 +67,7 @@ def _not_built(name):
 
 
 MODULES = {
-    "aircraft_flight": (aircraft_flight, "plane altitude / descent / climb profile. params: start_alt_ft, end_alt_ft, descent_secs, rate_fpm, cruise_secs, level_secs, title, label"),
+    "aircraft_flight": (aircraft_flight, "plane altitude / descent / climb profile. params: drop_ft (feet lost, when the narration says 'lost/dropped N feet'), start_alt_ft and end_alt_ft (only altitudes the narration states), descent_secs (how long it took), rate_fpm, title, label"),
     "submarine_descent": (submarine_descent, "submarine dive to depth with pressure. params: max_depth_m, sink_mps, crush_depth_m, title, label"),
     "vehicle_crash": (_not_built("vehicle_crash"), "car crash (not built yet)"),
     "structural_collapse": (_not_built("structural_collapse"), "building collapse (not built yet)"),

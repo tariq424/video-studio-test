@@ -663,6 +663,7 @@ def build(job, plan, cfg, log):
                     if at < gfx[-1]["at"] + 2.5: at = gfx[-1]["at"] + 2.5
                     if at > d - 1.5: continue
                 gfx.append({"at": round(at, 3), "g": v["chart"]})
+        if any((bg.get("g") or {}).get("kind") == "sim" for bg in bgs): gfx = []   # a simulation is the beat's data graphic: no cards over it
         icons = [] if s.get("cta") else _icons(cfg, sd, s["id"], words, gfx, d, log)
         beats.append({"id": s["id"], "start": round(t, 3), "dur": round(d, 3), "words": words, "bgs": bgs, "graphics": gfx, "icons": icons})
         parts.append((sd / "voice" / f"{s['id']}.wav", d * speed)); t += d

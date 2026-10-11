@@ -30,9 +30,11 @@ def _link(src, pub, sub):
 
 
 def _luma_image(p):
+    """Mean brightness, or 0 for an image with no content at all (flat colour, std-dev < 3: an empty chart)."""
     try:
         from PIL import Image, ImageStat
-        return ImageStat.Stat(Image.open(p).convert("L").resize((64, 36))).mean[0]
+        st = ImageStat.Stat(Image.open(p).convert("L").resize((96, 54)))
+        return 0.0 if st.stddev[0] < 3 else st.mean[0]
     except Exception: return 0.0
 
 
@@ -94,7 +96,10 @@ def _visual_bg(job, pub, v, slot, s, log):
         if not src.exists():
             log(f"  {v['id']}: {src.name} missing -> branded card"); return _card(title or s["vo"][:80])
         if kind == "chart":
-            if _luma_image(src) < 8: log(f"  {v['id']}: chart is blank -> branded card"); return _card((v.get("chart") or {}).get("title") or title)
+            if _luma_image(src) < 8:
+                ch = v.get("chart") or {}
+                text = " ".join(str(x) for x in ch.get("lines") or []) or ch.get("title") or ch.get("text") or title
+                log(f"  {v['id']}: chart is blank -> branded card"); return _card(text)
             return {"type": "image", "src": _link(src, pub, "charts"), "fit": "still"}
         if kind == "image":
             if _luma_image(src) < 6: log(f"  {v['id']}: image is black -> branded card"); return _card(title or s["vo"][:80])
