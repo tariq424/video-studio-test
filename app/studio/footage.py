@@ -112,6 +112,13 @@ def search_slot(queries, orient, text, log, want_long_side, cache):
             k = f"{name}|{orient}|{q}"
             if k not in cache: cache[k] = fn(q)
             lists.append(cache[k])
+        if i == 0 and orient != "portrait":   # Internet Archive: public-domain films (Prelinger first), one query per slot; long videos only
+                                              # (archive films are SD: a 9:16 crop of one is too soft for a Short)
+            k = f"archive|{orient}|{q}"
+            if k not in cache:
+                from . import archive
+                cache[k] = archive.videos(q, orient, log, want_long_side)
+            lists.append(cache[k])
         if space and i == 0:
             k = f"nasa|{q}"
             if k not in cache: cache[k] = nasa(q, log)

@@ -717,6 +717,7 @@ def do_render(job, plan, cfg, meta, log, stop):
     if plan.get("mode") == "both": desc += ["Full breakdown: <PASTE LONG VIDEO LINK HERE>", ""]
     desc += ["Summarized from: " + meta.get("title", "") + (f" - {meta.get('channel')}" if meta.get("channel") else "") + (f"\n{src}" if src else ""), ""]
     if "NASA" in srcs: desc += ["Space footage courtesy of NASA.", ""]
+    if "Internet Archive" in srcs: desc += ["Archival footage: Internet Archive (public domain).", ""]
     fbf = job / "short" / "fallback.json"
     creds = sorted({i["credit"] for v in (json.loads(fbf.read_text(encoding="utf-8")) if fbf.exists() else {}).values() for i in v if i.get("credit")})
     if creds: desc += creds + [""]

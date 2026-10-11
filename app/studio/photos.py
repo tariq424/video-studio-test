@@ -153,6 +153,9 @@ def find(cfg, subject, out_dir, log, want=4, keys=None):
     q = subject["name"]
     cands, problem = _openverse(q, log)
     if len(cands) < 6: cands += _commons(q, log)
+    if len(cands) < 6:   # Internet Archive: public-domain / CC0 only
+        from . import archive
+        cands += archive.images(q, log)
     if len(cands) < 4 and subject.get("brand") and subject["brand"].lower() != q.lower():
         if not problem:
             more, problem = _openverse(subject["brand"] + " " + (subject.get("kind") or ""), log); cands += more

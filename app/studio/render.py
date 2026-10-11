@@ -135,8 +135,8 @@ def badge(src, dst, text="GENERATED · CLOUD"):
 def cloud_still(cfg, job, v, vo, log):
     """Long videos: a 16:9 cloud still (Gemini -> ChatGPT) for visual v -> stills/<id>.jpg with the GENERATED · CLOUD label.
     Skipped for narration naming a real person; a still the image check rejects isn't used. -> True if made."""
-    if not cfg.get("cloud_on", True) or not v.get("prompt"): return False
     from . import cloudgen
+    if not cfg.get("cloud_on", True) or not v.get("prompt") or not cloudgen.providers_of(cfg): return False
     if cloudgen.has_person(vo, _ents(job)): log(f"  cloud {v['id']}: narration names a real person, cloud skipped"); return False
     d = job / "stills"; d.mkdir(exist_ok=True); png = d / f"cloud_{v['id']}.png"
     res = cloudgen.generate(cfg, v["prompt"], png, "16:9", log, f"cloud {v['id']}", job=job)

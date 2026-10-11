@@ -15,9 +15,10 @@ Video Studio is a fork of Explainer Studio (`F:\code\explainer-studio`, github `
 - **The pipeline is a draft generator.** Expect 2-5 beats per video to be wrong. The **timeline editor** (post-render editing, below)
   is the repair path: swap the visual for something about the actual story. Pipeline tuning is stopped.
 - **Visual ladder per beat, in order (cloud stills added 2026-10-10, see "Cloud stills" below):**
-  1. Stock footage (generic beats: Pexels / Pixabay / NASA) or real photos (subject beats: Openverse, Wikimedia Commons) - short_stock / photos
-  2. **Cloud still** (Gemini Pro, then ChatGPT Pro) -> checked against the narration -> Remotion parallax (label GENERATED · CLOUD);
-     held with a slow zoom if depth layers fail
+  1. Stock footage (generic beats: Pexels / Pixabay / NASA; long videos also Internet Archive films) or real photos (subject beats:
+     Openverse, Wikimedia Commons, Internet Archive) - short_stock / photos
+  2. **Cloud still** (providers in `cloud_providers`, none configured as of rev. 2) -> checked against the narration -> Remotion
+     parallax (label GENERATED · CLOUD); held with a slow zoom if depth layers fail
   3. WanGP AI still (local fallback: only when the cloud gave nothing usable), checked against the narration
      - directional beats (descend/dive/fell/plummet/climb/bank): the still is **rotated first** by the verb (35 deg nose-down,
        0 climb, 20 bank), cropped to fill; only "garbled" rejects
@@ -35,45 +36,47 @@ Video Studio is a fork of Explainer Studio (`F:\code\explainer-studio`, github `
   descent) are expected and can't be fixed by tuning - fix them in the timeline editor.
 - **Length check:** after every render the video is compared with the requested length (Short: plan target_secs / short_secs;
   long: minutes). More than 10% off -> "WARNING: length miss" in the log and a red "Length miss" line on the job page. Never rejects.
-- **Live and ready:** cloud stills (after the one-time login), debugger, timeline editor (post-render editing), `/make` front-end, ui-blackbox tester (MCP in Claude Desktop,
+- **Live and ready:** Internet Archive source, cloud-still rung (no provider configured), debugger, timeline editor (post-render editing), `/make` front-end, ui-blackbox tester (MCP in Claude Desktop,
   venv F:\code\ui-blackbox\.venv, reports in F:\code\ui-blackbox\reports), smoke mode.
 - **Deprecated:** `/api/smoke` (old fixed one-beat job). Only the form's smoke mode is supported.
 
-## Cloud stills (2026-10-10) — app/studio/cloudgen.py
-- **What:** when stock and real photos don't cover a beat, an AI still is made in the cloud first: Gemini (Pro) primary, ChatGPT (Pro)
-  fallback, then WanGP locally, then claymation (3D reconstruction, subject beats) / headline card. Same for long videos
-  (`render.do_stills` / `do_motion`): a 16:9 cloud still, with GENERATED · CLOUD burned in (`render.badge`); a long-video "motion"
-  visual becomes that still instead of a WanGP clip.
-- **How:** Playwright with fixed selectors (`cloudgen.SEL`), in a persistent browser profile `F:\code\video-studio\cloud_profile`
-  (git-ignored). Chrome if installed, else Edge (`cloud_browser`). Each still runs in its own process; a provider gets 90 s
-  (`cloud_timeout`), the whole call a hard limit (then the browser process tree is killed), so the pipeline never hangs.
-  The prompt is the beat's `still_prompt` + aspect (9:16 Shorts, 16:9 long / long-edit workspace) + "no text/logos/real faces".
-  The image is fetched at full size (cookie-authenticated URL, else in-page fetch, else element screenshot), cropped to fill the aspect.
-- **Files:** Shorts `short/fallback/cloud_<beat>_<slot>.png` (e.g. cloud_b3_0.png); long `stills/cloud_<id>.png` -> `stills/<id>.jpg`.
-  A failed attempt leaves `<name>_<provider>_fail.png` (screenshot of the page) next to it. Every attempt: `<job>/cloud_log.jsonl`.
-- **Falls through (never hangs, never asks):** timeout; CAPTCHA / "verify you are human" (never solved or bypassed); logged out
-  (log WARNING; that provider is skipped for 10 min so a run doesn't open a browser per beat); refusal (reply ends with no image);
-  page changed (prompt box not found); browser profile in use (the login window is still open). Gemini success = ChatGPT not tried.
-- **Checks:** a cloud still goes through the same vision check as a WanGP still (`ladder.check`); if it fails, WanGP is tried and
-  the cloud still is still offered in the review panel ("Cloud still", ✗ with the reason). No rotation for cloud stills (WanGP only).
-- **Login (one time):** Settings -> **Log in for cloud stills** opens the normal browser (not automated) on the profile with Gemini and
-  ChatGPT tabs: sign in to both, then close that window. **Check cloud login** reports signed in / logged out per provider.
-  CLI: `python -m studio.cloudgen login|status|gen --prompt ... --out x.png --aspect 9:16`.
-- **Config** (settings.json): `cloud_on` (true), `cloud_primary` (gemini|chatgpt), `cloud_timeout` (90), `cloud_max_per_job` (8),
-  `cloud_browser` (auto|chrome|msedge), `cloud_headless` (false: a window appears briefly per still; headless is more likely to be
-  challenged), `cloud_profile`.
-- **Choices made:**
-  - "Subject-locked" for the cloud skip = the narration names a **real person** from the story's entity list (`cloudgen.has_person`).
-    Vehicle/object subjects (e.g. the flydubai jet) do go to the cloud with the brand-free still_prompt; those are the beats that used
-    to fall to claymation. Person beats: WanGP -> claymation as before.
-  - Openverse and Wikimedia were already the real-photo sources (step 1 for subject beats); they were not added as generic stock.
-  - The WanGP workarounds (rotation, rigid 2-layer parallax, skipped attitude check) stay in code but only apply to WanGP stills.
-  - Debugger: `treatment == cloud`, `escalated_past == cloud`; chains.json has a `cloud` list (slot, provider, why, tries per provider).
-- **Status 2026-10-10:** built and smoke-tested **logged out** (job 20261010_164420): both providers detected as logged out in
-  ~1-3 s with no prompt sent, fell through to WanGP, b1 to claymation, Short rendered. The success path was tested on mock pages
-  (image found, downloaded, cropped; refusal and CAPTCHA fall through) but **not yet on the real sites**: the selectors for the
-  logged-in pages (prompt box, send, generated image) are best guesses until the first signed-in run. If a provider fails with
-  "prompt box not found" or "timed out waiting for the image" after login, look at the `_fail.png` screenshot and update `SEL`.
+## Cloud stills (rev. 2, 2026-10-10) — app/studio/cloudgen.py, app/studio/archive.py
+- **Gemini / ChatGPT removed** (Tariq, 2026-10-10: automated login trips Google's verification and risks suspension of the whole
+  Google account; same class of risk for ChatGPT). Gone: browser profile, login button + endpoints, login detection, skip logic,
+  failure screenshots, `cloud_primary / cloud_browser / cloud_headless / cloud_profile`. The old profile folder on F: was moved to
+  `F:\code\video-studio\_to_delete\cloud_profile_20261010` (delete it when convenient; it holds no logins).
+- **The cloud rung stays, provider-neutral:** `cloudgen.PROVIDERS` = {name: fn(prompt, aspect, timeout) -> image bytes}; config
+  `cloud_providers` lists the ones to use, in order (first image wins). Each attempt runs with a hard `cloud_timeout` (60 s); any
+  failure falls through to the next, then WanGP. Everything else from rev. 1 is unchanged: skip for beats naming a real person,
+  vision check (a failed cloud still goes to WanGP and stays in the review panel ✗), GENERATED · CLOUD label, cap 8 per video
+  (`cloud_max_per_job`), `short/fallback/cloud_<beat>_<slot>.png`, long videos 16:9 with the label burned in, chains/debugger.
+- **Providers in the rev. 2 spec, and why none is wired in yet (`cloud_providers` = [] -> straight to WanGP, as before):**
+  - **Goblin AI** (`goblin-ai` 2.0.0): declined. All its logic ships only as compiled binaries (.pyd/.so, "runtime protection"),
+    licence "Proprietary", one release, and it depends on Camoufox (an anti-detection browser) and curl_cffi (browser TLS
+    fingerprint spoofing) - i.e. it gets "unlimited free" images by evading some other service's bot detection. Can't be
+    reviewed before running on the PC, and evading bot detection is a line Claude doesn't cross.
+  - **Veida** (`veida` 0.1.0): source reviewed (110 lines, stdlib only, calls veida.ai). Not installed: installing new third-party
+    packages on the PC was blocked by the session's safety check. Also note: the client makes a fresh anonymous id per call
+    because each anonymous caller only gets one image - it works around the per-caller allowance (the per-IP cap of ~7/day still
+    applies) - and free images are watermarked, which the vision check rejects as "text/logo". Wiring it is ~15 lines in
+    `PROVIDERS` if you decide it's acceptable (install `veida==0.1.0` yourself).
+  - **URVILLAIN Imagine** (urvillain.ai): the site didn't load from this PC's browser pane (navigation failed), and there's no
+    API to check; no selectors could be written or tested. Not wired.
+  - **Grok Automata** (Chrome extension): needs your Grok account signed in, a visible Grok tab and a manually installed extension
+    - the same account-automation risk as Gemini, and nothing the pipeline can drive. Not wired. For hand-picked images, the
+    review panel / timeline editor already take "your own file" (path or URL).
+- **Internet Archive (new free source, archive.py):** public HTTP API (advancedsearch + metadata) with `requests` - no package,
+  no login. Licence rule: only items whose `licenseurl` is creativecommons.org/publicdomain/... (CC0 or Public Domain Mark),
+  re-checked on the item itself; anything else (no licence, "no known copyright", NC/ND, CC BY) is skipped. 60 s budget per
+  search; on any failure it returns nothing.
+  - **Films** (stock rung, `footage.search_slot`): Prelinger Archives first, then any public-domain film; one query per visual;
+    **long videos only** - archive films are SD and a 9:16 crop is too soft for a Short (portrait would need >= 1920 px files).
+    Ranked and vision-checked like Pexels/Pixabay; contact sheet from the item's thumbnails. Description credit:
+    "Archival footage: Internet Archive (public domain)."
+  - **Photos** (real-photo rung, `photos.find`): after Openverse and Commons when they give fewer than 6 candidates; same checks;
+    credit "Public domain" / "CC0" (no attribution is legally required; the credit line is kept as a courtesy).
+  - Not tested against the live API from here (archive.org isn't reachable from Claude's shells); the parser was tested on
+    canned replies, and the smoke test runs it on the PC.
 
 ## Ground rules (owner: Tariq)
 - **Everything on F:.** Videos go in `F:\videos`. C: is for system files only; Ollama's model store on C: is the one accepted exception.

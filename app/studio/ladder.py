@@ -98,8 +98,8 @@ def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False, animate=F
             save()
         footage.unload_vet_model(cfg)
     # step 2a: cloud still (Gemini -> ChatGPT); skipped for beats that name a real person
-    if cfg.get("cloud_on", True):
-        from . import cloudgen
+    from . import cloudgen
+    if cfg.get("cloud_on", True) and cloudgen.providers_of(cfg):
         aspect = "9:16" if space(sd)["orient"] == "portrait" else "16:9"
         for s in slots:
             if stop(): raise RuntimeError("cancelled")
