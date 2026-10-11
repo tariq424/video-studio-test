@@ -100,6 +100,12 @@ Video Studio is a fork of Explainer Studio (`F:\code\explainer-studio`, github `
   not built: vehicle_crash, structural_collapse, earthquake, ship_route, weather_event (they return nothing -> the beat keeps its
   illustration). Real data sources (OpenSky ADS-B, pyBADA, pycrash, PyBullet, libcomcat, neptune-ais, NOAA) are not wired:
   installing new packages on the PC was blocked earlier this week, and OpenSky history needs an account.
+- **Overlap rule (2026-10-11, `short._resolve_overlaps`):** one text layer per screen zone. A background that carries its own text
+  (headline card, simulation, map with a title) owns the middle of the frame while it is on screen: a graphic card (stat / hook /
+  quote ...) that would play over it is dropped and logged ("b0: dropped the hook card at 0.3s - it would cover text already on the
+  background"), and emoji keep out of that time. Narration captions have their own zone at the bottom and always stay. Found in
+  smoke job 20261011_183723 (hook card over the simulation title); verified by re-rendering that job. The 16:9 simulation readout
+  moved to the top so it never meets the explainer's captions.
 - **Map (Part 15 Q2):** the map backdrop takes any list of points (`{name, lat, lon, role}`), it is not hard-coded to Dubai-Tabuk.
 
 ## Make video / Stop video (2026-10-11)

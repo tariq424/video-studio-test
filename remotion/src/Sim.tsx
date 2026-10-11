@@ -13,7 +13,7 @@ export const SimBackdrop: React.FC<{ g: Sim; dur: number }> = ({ g, dur }) => {
   const p = Math.min(1, Math.max(0, (t - 0.4) / Math.max(0.5, dur - 1.2)));   // series time shown so far (0..1)
   const tNow = p * T;
   const vs = s.map((x) => x[1]); const vmin = Math.min(...vs), vmax = Math.max(...vs); const span = vmax - vmin || 1;
-  const box = tall ? { x: 160, y: 520, w: W - 250, h: 760 } : { x: 160, y: 200, w: W - 320, h: H - 420 };
+  const box = tall ? { x: 160, y: 520, w: W - 250, h: 760 } : { x: 200, y: 250, w: W - 400, h: H - 520 };
   const X = (tt: number) => box.x + (tt / T) * box.w, Y = (v: number) => box.y + box.h - ((v - vmin) / span) * box.h;
   const shown = s.filter((x) => x[0] <= tNow);
   const cur = (() => { const i = s.findIndex((x) => x[0] > tNow); if (i <= 0) return s[i === 0 ? 0 : s.length - 1];
@@ -25,8 +25,8 @@ export const SimBackdrop: React.FC<{ g: Sim; dur: number }> = ({ g, dur }) => {
   const fmt = (v: number) => `${Math.round(v).toLocaleString("en-US")} ${g.unit}`;
   return (
     <AbsoluteFill style={{ background: "linear-gradient(170deg, #0d1626 0%, #070a12 70%)" }}>
-      <div style={{ position: "absolute", top: tall ? 330 : 60, left: 0, right: 0, textAlign: "center", fontFamily: HEAD, fontWeight: 900, fontSize: tall ? 56 : 46, color: C.text }}>{g.title}</div>
-      {g.label ? <div style={{ position: "absolute", top: tall ? 410 : 122, left: 0, right: 0, textAlign: "center", fontFamily: BODY, fontWeight: 600, fontSize: tall ? 30 : 26, color: C.mut }}>{g.label}</div> : null}
+      <div style={{ position: "absolute", top: tall ? 330 : 50, left: 0, right: 0, textAlign: "center", fontFamily: HEAD, fontWeight: 900, fontSize: tall ? 56 : 46, color: C.text }}>{g.title}</div>
+      {g.label ? <div style={{ position: "absolute", top: tall ? 410 : 112, left: 0, right: 0, textAlign: "center", fontFamily: BODY, fontWeight: 600, fontSize: tall ? 30 : 26, color: C.mut }}>{g.label}</div> : null}
       <svg width={W} height={H} style={{ position: "absolute", inset: 0 }}>
         {ticks.map((v, i) => <g key={i}><line x1={box.x} x2={box.x + box.w} y1={Y(v)} y2={Y(v)} stroke="rgba(255,255,255,0.1)" />
           <text x={box.x - 12} y={Y(v) + 8} fill="rgba(255,255,255,0.55)" fontSize={tall ? 24 : 20} textAnchor="end" fontFamily="Inter">{Math.round(v).toLocaleString("en-US")}</text></g>)}
@@ -40,8 +40,8 @@ export const SimBackdrop: React.FC<{ g: Sim; dur: number }> = ({ g, dur }) => {
                 <path d="M6,-4 L-22,-34 L-12,-34 L22,-4 Z M6,4 L-22,34 L-12,34 L22,4 Z" /></g>}
         </g>
       </svg>
-      <div style={{ position: "absolute", right: tall ? 90 : 160, top: tall ? 1300 : H - 200, fontFamily: HEAD, fontWeight: 900, fontSize: tall ? 64 : 52, color: C.gold }}>{fmt(cur[1])}</div>
-      {g.notes ? <div style={{ position: "absolute", left: tall ? 90 : 160, top: tall ? 1310 : H - 188, fontFamily: BODY, fontWeight: 600, fontSize: tall ? 26 : 22, color: C.mut, maxWidth: tall ? 520 : 900 }}>{g.notes}</div> : null}
+      <div style={{ position: "absolute", right: tall ? 90 : 200, top: tall ? 1300 : 52, fontFamily: HEAD, fontWeight: 900, fontSize: tall ? 64 : 52, color: C.gold }}>{fmt(cur[1])}</div>
+      {g.notes ? <div style={{ position: "absolute", left: tall ? 90 : 200, top: tall ? 1310 : 180, fontFamily: BODY, fontWeight: 600, fontSize: tall ? 26 : 22, color: C.mut, maxWidth: tall ? 520 : 900 }}>{g.notes}</div> : null}
     </AbsoluteFill>
   );
 };

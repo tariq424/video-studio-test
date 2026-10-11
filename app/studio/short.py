@@ -542,7 +542,32 @@ def _clip_len(sd, c):
     if p not in _lens: _lens[p] = media.dur(p) if p.exists() else 0.0
     return _lens[p]
 
-def _icons(cfg, sd, bid, words, gfx, d, log):
+TEXT_BG = ("headline", "sim")   # backgrounds that carry their own text in the middle of the frame (+ a map with a title)
+
+def _resolve_overlaps(bid, bgs, gfx, d, log):
+    """One text layer per screen zone at a time. A background that carries its own text (headline card, simulation, titled map)
+    owns the middle of the frame while it is on screen: a graphic card (stat / hook / quote ...) that would play over it is dropped
+    (and logged), and emoji keep out of that time too. Narration captions sit in their own zone at the bottom and always stay.
+    -> (gfx kept, [(t0, t1)] text-background windows)."""
+    wins = []
+    for i, bg in enumerate(bgs):
+        g = bg.get("g") or {}
+        if bg.get("type") == "graphic" and (g.get("kind") in TEXT_BG or (g.get("kind") == "map" and g.get("title"))):
+            t1 = bgs[i + 1]["from"] if i + 1 < len(bgs) else d
+            wins.append((bg["from"], t1))
+    if not wins: return gfx, []
+    keep = []
+    for i, g in enumerate(gfx):
+        if g["g"].get("kind") == "cta": keep.append(g); continue
+        nxt = gfx[i + 1]["at"] if i + 1 < len(gfx) else d
+        a, b = g["at"], g["at"] + min(nxt - g["at"], 4.6)
+        hit = next((w for w in wins if w[0] < b and a < w[1]), None)
+        if hit:
+            log(f"  {bid}: dropped the {g['g'].get('kind')} card at {a:.1f}s - it would cover text already on the background ({hit[0]:.1f}-{hit[1]:.1f}s)")
+        else: keep.append(g)
+    return keep, wins
+
+def _icons(cfg, sd, bid, words, gfx, d, log, extra_busy=()):
     """Emoji above the caption, one per caption sentence where it fits (same picker as the explainer), only while no graphic
     card is on screen. Cached in short/icons_<beat>.json."""
     from . import captions as C
@@ -553,7 +578,7 @@ def _icons(cfg, sd, bid, words, gfx, d, log):
         try: groups = C.pick_emojis(cfg, groups, log) if groups else []
         except Exception as e: log(f"  emoji pick failed for {bid} ({str(e)[:80]})")
         f.write_text(json.dumps(groups, ensure_ascii=False), encoding="utf-8")
-    busy = []
+    busy = list(extra_busy)
     for i, g in enumerate(gfx):
         nxt = gfx[i + 1]["at"] if i + 1 < len(gfx) else d
         busy.append((g["at"], g["at"] + min(nxt - g["at"], 4.6)))
@@ -665,8 +690,8 @@ def build(job, plan, cfg, log):
                     if at < gfx[-1]["at"] + 2.5: at = gfx[-1]["at"] + 2.5
                     if at > d - 1.5: continue
                 gfx.append({"at": round(at, 3), "g": v["chart"]})
-        if any((bg.get("g") or {}).get("kind") == "sim" for bg in bgs): gfx = []   # a simulation is the beat's data graphic: no cards over it
-        icons = [] if s.get("cta") else _icons(cfg, sd, s["id"], words, gfx, d, log)
+        gfx, text_bg = _resolve_overlaps(s["id"], bgs, gfx, d, log)
+        icons = [] if s.get("cta") else _icons(cfg, sd, s["id"], words, gfx, d, log, extra_busy=text_bg)
         beats.append({"id": s["id"], "start": round(t, 3), "dur": round(d, 3), "words": words, "bgs": bgs, "graphics": gfx, "icons": icons})
         parts.append((sd / "voice" / f"{s['id']}.wav", d * speed)); t += d
     flt = "".join(f"[{i}:a]apad,atrim=duration={dd:.3f}[a{i}];" for i, (_, dd) in enumerate(parts)) + "".join(f"[a{i}]" for i in range(len(parts))) \
