@@ -13,7 +13,7 @@ finished and saved there, so Resume continues with the next one). Never inside a
 
 Breakpoints (checked once per beat, after the beat's visuals are decided; only while debug is on and breakpoints aren't disabled):
   beat == N                      Beat N (1-based, as on the job page)
-  treatment == stock|photo|cloud|still|animate|parallax|3d|card   the beat ended up using that treatment (cloud = a cloud still)
+  treatment == stock|photo|cloud|still|animate|parallax|illustration|silhouette|3d|card   the beat ended up using that treatment
                                  (still = an AI still, shown with parallax; 3d = reconstruction; card = headline card or map)
   stock_found == N               coherent stock clips found for the beat (also <, >, <=, >=)
   escalated_past == stock|photo|cloud|still|animate   that step was tried and failed (stock also matches a failed real-photo step)
@@ -24,7 +24,7 @@ The panel chat and the Claude chat read the same trace.md."""
 import json, re, time
 from pathlib import Path
 
-TREAT = ("stock", "photo", "cloud", "still", "animate", "parallax", "3d", "card")
+TREAT = ("stock", "photo", "cloud", "still", "animate", "parallax", "illustration", "silhouette", "3d", "card")
 STEPS = ("stock", "photo", "cloud", "still", "animate")
 WHY_NOTE = "For deeper reasoning, ask in the Claude chat."
 
@@ -51,7 +51,7 @@ def parse(text):
         return f"escalated_past == {v}"
     m = re.fullmatch(r"narration\s+contains\s+[\"']?(.+?)[\"']?", t, re.I)
     if m and m.group(1).strip(): return f'narration contains "{m.group(1).strip()}"'
-    raise ValueError(f'not a breakpoint: "{t[:60]}". Use: beat == N, treatment == stock|photo|cloud|still|animate|parallax|3d|card, '
+    raise ValueError(f'not a breakpoint: "{t[:60]}". Use: beat == N, treatment == stock|photo|cloud|still|animate|parallax|illustration|silhouette|3d|card, '
                      f'stock_found == N, escalated_past == stock|photo|cloud|still|animate, narration contains "word"')
 
 def parse_all(text_or_list):

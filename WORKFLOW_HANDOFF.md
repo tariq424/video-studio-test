@@ -24,6 +24,7 @@ Video Studio is a fork of Explainer Studio (`F:\code\explainer-studio`, github `
        0 climb, 20 bank), cropped to fill; only "garbled" rejects
   3. WanGP image-to-video of the still - **only on an explicit click** ("Show all options" / "Add animation"), never automatically
   4. Parallax of the still (Remotion depth layers)
+  4b. **Flat illustration / silhouette** (Remotion SVG, labels ILLUSTRATION / SILHOUETTE) - when the WanGP still fails or WanGP is down
   5. Hold with slow zoom (single layer) - a still rejected only for lettering/logo
   6. 3D reconstruction / claymation (subject beats) or headline card (other beats)
 - **Motion policy (decided 2026-10-09):** rotation applies first (directional beats). Then:
@@ -39,6 +40,32 @@ Video Studio is a fork of Explainer Studio (`F:\code\explainer-studio`, github `
 - **Live and ready:** Internet Archive source, cloud-still rung (no provider configured), debugger, timeline editor (post-render editing), `/make` front-end, ui-blackbox tester (MCP in Claude Desktop,
   venv F:\code\ui-blackbox\.venv, reports in F:\code\ui-blackbox\reports), smoke mode.
 - **Deprecated:** `/api/smoke` (old fixed one-beat job). Only the form's smoke mode is supported.
+
+## Illustrations and silhouettes (2026-10-11) — app/studio/illustrate.py, remotion/src/Illustration.tsx
+- **Where:** the Short ladder rung after the WanGP still (+ parallax) and before claymation (3D reconstruction) / headline card.
+  When the WanGP still fails its check, or WanGP fails / isn't running, the beat gets a flat Remotion illustration or silhouette
+  instead of claymation. Claymation now fires only when nothing can be drawn for the beat. Pure SVG: CPU only, no model,
+  renders in seconds. Labels in the video: **ILLUSTRATION** / **SILHOUETTE** (same yellow tag as GENERATED).
+- **Templates** (`Illustration.tsx`, work in 9:16 and 16:9):
+  - `illustration` scenes: `sky` (flat airliner in flight, nose by the narration: down 16° / up 12° / level, drifting clouds,
+    sun, ground band), `airport` (runway in perspective, terminal, tower, edge lights; airliner landing or on the ground),
+    `city` (two-layer skyline with lit windows and a domed government building), `radar` (sweeping scope, blips; a falling
+    trail for a descent), `cockpit` (windscreen frames, banking sky, instrument panels, two crew silhouettes from behind, red
+    warning light when the narration has alarm/fight/hijack words), `sea` (waves and a ship). Time of day from the narration +
+    still prompt: day / dusk (default) / night / storm (lightning flashes); ground desert / green.
+  - `silhouette`: airliner (with gear when landing / on the ground), fighter jet (military subject or F-35/fighter words),
+    person, people (3 figures), buildings, car, ship - in black against a sky gradient with a large sun/moon disc; optional
+    text = the beat's headline backdrop text.
+- **Selection** (`illustrate.options`, keyword rules, no AI call): scenes from narration words (radar / cockpit / airport /
+  sea / city), aircraft beats get `sky` (in the air) or `airport` (landing, ground); in the air never a runway. Then a
+  silhouette when a shape is known. A beat with several failed slots cycles through the options. No options (abstract
+  narration, nothing to draw) -> claymation for subject beats, headline card otherwise.
+- **Review / editor:** every illustration and silhouette that fits a beat is offered as a candidate (rung "Illustration" /
+  "Silhouette", real thumbnails rendered with Remotion). Debugger: `treatment == illustration|silhouette`; chains.json and the
+  trace show `... -> still -> illustration`.
+- **"Data viz / text card" rung:** not a new template - a beat's own charts / stats / quote graphics already play over whatever
+  background it gets, and the headline card is the text card (last rung).
+- **Long videos:** unchanged (their stills come from stock / WanGP with re-rolls; there is no claymation there to replace).
 
 ## Cloud stills (rev. 2, 2026-10-10) — app/studio/cloudgen.py, app/studio/archive.py
 - **Gemini / ChatGPT removed** (Tariq, 2026-10-10: automated login trips Google's verification and risks suspension of the whole

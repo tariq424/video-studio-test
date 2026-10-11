@@ -270,7 +270,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
     Also writes short/fallback/chains.json (every beat's decision chain: stock found, what was tried and why it failed, what is used)
     for the debugger and the trace. dbg (debug.Debugger): safe points for 'Pause now'; with breakpoints on, beats run one at a time
     and each is checked after its visuals are decided (normal runs keep the batched GPU order)."""
-    from . import depth, coherence, photos, ladder, cloudgen
+    from . import depth, coherence, photos, ladder, cloudgen, illustrate
     sd = job / "short"; fd = sd / "fallback"; fd.mkdir(parents=True, exist_ok=True)
     tm = json.loads((sd / "timings.json").read_text(encoding="utf-8"))
     pick = json.loads((sd / "stock" / "pick.json").read_text(encoding="utf-8"))
@@ -294,7 +294,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         c = chs.get(sec["id"], {})
         return {"bid": sec["id"], "n": int(sec["id"][1:]) + 1, "vo": sec["vo"], "stock_found": c.get("stock_found", len(pick.get(sec["id"], []))),
                 "uses": c.get("uses", []), "failed": c.get("failed", [])}
-    log("Visual ladder per beat (1 stock/photo -> 2 cloud still -> 3 WanGP still -> 4 parallax -> 5 reconstruction / headline; animate on click):")
+    log("Visual ladder per beat (1 stock/photo -> 2 cloud still -> 3 WanGP still -> 4 parallax -> 5 illustration / silhouette -> 6 reconstruction / headline; animate on click):")
     for s in beats:   # beats step 1 covered on its own
         if s["id"] in base_needs: continue
         log(f"  {s['id']}: stock ({len(pick.get(s['id'], []))} clip(s), coherent)"); stock_beat(s)
@@ -345,7 +345,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         items = pre[s["id"]]; bd = s.get("backdrop") or {}
         cap = bd.get("text", "") if bd.get("kind") == "headline" else bd.get("title", "")
         rung1, why1 = step1[s["id"]]
-        lines, k5, failed = [], 0, ([rung1] if why1 else [])
+        lines, k5, kill, failed = [], 0, 0, ([rung1] if why1 else [])
         for sl in [x for x in slots if x["beat"] == s["id"]]:
             r = st.get(sl["key"], {}); chain = [rung1]; why = [f"{rung1}: {why1}"] if why1 else []
             cloud = r.get("src") == "cloud"
@@ -387,7 +387,10 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                               "rung": "parallax", "cloud": cloud})
             else:
                 why.append(f"still: {r.get('still_why') or 'not made'}"); failed.append("still")
-                if s.get("subject"):
+                ill = illustrate.pick(s, ents, phases.get(s["id"], ""), k5 + kill)
+                if ill:   # a flat illustration / silhouette looks like a design choice; claymation only when nothing fits
+                    chain.append(ill["rung"]); items.append(ill); kill += 1
+                elif s.get("subject"):
                     chain.append("reconstruction")
                     items.append({"type": "graphic", "g": coherence.recon(s["subject"], ents, s["vo"], k5, cap if k5 == 0 else "", moment=phases.get(s["id"], "")), "rung": "reconstruction"}); k5 += 1
                 else:

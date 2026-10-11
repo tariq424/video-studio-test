@@ -167,7 +167,7 @@ async function savePlan(ap){planCache.title=$('pt').value;planCache.subtitle=$('
  await j(`/api/jobs/${sel}/plan`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(planCache)});if(ap)await act('approve');else{editing=false;lastKey='';loadDetail()}}
 
 // ---------------- visual review
-const RUNG={stock:'Stock footage',photo:'Real photo',cloud:'Cloud still',still:'AI still',animate:'AI animation',parallax:'Parallax',reconstruction:'3D reconstruction',headline:'Headline card',map:'Map',supplied:'Your file'};
+const RUNG={stock:'Stock footage',photo:'Real photo',cloud:'Cloud still',illustration:'Illustration',silhouette:'Silhouette',still:'AI still',animate:'AI animation',parallax:'Parallax',reconstruction:'3D reconstruction',headline:'Headline card',map:'Map',supplied:'Your file'};
 let RV=null,rvSel={},rvTimer=null,rvOpen={};
 async function showReview(){try{RV=await j(`/api/jobs/${sel}/review`)}catch(e){if(!DBG_PAUSED)$('rvp').innerHTML='<p class="mut">Review data not ready yet.</p>';return}drawReview();
  clearTimeout(rvTimer);if(Object.values(RV.beats).some(b=>b.busy))rvTimer=setTimeout(()=>{if($('rvp'))showReview()},4000)}

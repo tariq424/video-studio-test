@@ -9,10 +9,11 @@ import { C, HEAD, BODY } from "./theme";
 
 export type MapPoint = { name: string; lat: number; lon: number; role: "origin" | "planned" | "actual" | "stop" | "place" };
 import type { Recon } from "./Recon";
+import type { Illustration, Silhouette } from "./Illustration";
 export type Backdrop =
   | { kind: "map"; title?: string; points: MapPoint[] }
   | { kind: "headline"; kicker?: string; text: string; sub?: string }
-  | Recon;
+  | Recon | Illustration | Silhouette;
 
 const countries = (feature as any)(world as any, (world as any).objects.countries);
 
