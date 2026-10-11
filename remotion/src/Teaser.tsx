@@ -29,7 +29,15 @@ const Tag: React.FC<{ tag: string; hideFrom: number }> = ({ tag, hideFrom }) => 
   );
 };
 
-export const Teaser: React.FC<TeaserProps> = ({ audio, total, tag, beats }) => {
+// emoji above the caption (a small pop-in), for the caption it belongs to
+const Icon: React.FC<{ e: string; dur: number }> = ({ e, dur }) => {
+  const f = useCurrentFrame(); const { fps, width, height } = useVideoConfig(); const t = f / fps; const tall = height > width;
+  const k = interpolate(t, [0, 0.18], [0.6, 1], { extrapolateRight: "clamp" }); const o = interpolate(t, [0, 0.12, dur - 0.15, dur], [0, 1, 1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  return <div style={{ position: "absolute", left: 0, right: 0, top: tall ? 1240 : height - 330, textAlign: "center", fontSize: tall ? 110 : 96, opacity: o,
+    transform: `scale(${k})`, fontFamily: "'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif", filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.6))" }}>{e}</div>;
+};
+
+export const Teaser: React.FC<TeaserProps> = ({ audio, total, tag, beats, progress }) => {
   const { fps } = useVideoConfig();
   const fr = (s: number) => Math.max(1, Math.round(s * fps));
   const shots = beats.flatMap((b, bi) => b.bgs.map((bg, i) => ({ bg, start: b.start + bg.from, seed: bi * 3 + i,
@@ -54,11 +62,14 @@ export const Teaser: React.FC<TeaserProps> = ({ audio, total, tag, beats }) => {
               </Sequence>
             );
           })}
+          {(b.icons || []).map((ic, i) => (
+            <Sequence key={"i" + i} from={fr(ic.at)} durationInFrames={fr(ic.dur)}><Icon e={ic.e} dur={ic.dur} /></Sequence>
+          ))}
           {b.words.length > 0 && b.graphics[0]?.g.kind !== "cta" && <Captions words={b.words} />}
         </Sequence>
       ))}
       <Tag tag={tag} hideFrom={(beats.find((b) => b.graphics.some((g) => g.g.kind === "cta"))?.start ?? 1e9)} />
-      <Progress total={total} />
+      {progress === false ? null : <Progress total={total} />}
       <Audio src={asset(audio)} />
     </AbsoluteFill>
   );

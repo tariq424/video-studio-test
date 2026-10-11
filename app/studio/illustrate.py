@@ -12,7 +12,7 @@ import re
 from . import coherence
 
 SCENES = [
-    ("radar", r"\b(radar|transponder|squawk\w*|air traffic control\w*|controllers?|tracking|tracked|signal|flight ?radar)\b"),
+    ("radar", r"\b(radar|transponder|squawk\w*|air traffic control\w*|air traffic controllers?|flight ?radar|hijack (code|signal))\b"),
     ("cockpit", r"\b(cockpit|flight deck|pilots?|captain|co-?pilot|first officer)\b"),
     ("airport", r"\b(airport|runway|tarmac|apron|land(ed|ing|s)?|touch(ed|es)? down|taxi\w*|terminal|parked|on the ground)\b"),
     ("sea", r"\b(sea|ocean|coast\w*|ship|navy|harbou?r|vessel)\b"),
@@ -58,7 +58,7 @@ def ground(text):
 
 def shape_of(subject, text, ents):
     kind = (subject or {}).get("kind")
-    if kind == "aircraft" or re.search(r"\b(plane|jet|airliner|aircraft|flight|boeing|airbus)\b", text, re.I) or re.search(MILITARY, text, re.I):
+    if kind == "aircraft" or re.search(AIRCRAFT, text, re.I):
         mil = re.search(MILITARY, (subject or {}).get("name", ""), re.I) if subject else re.search(MILITARY, text, re.I)
         return "jet" if mil else "airliner"
     if kind == "vehicle" or re.search(r"\b(car|truck|bus|vehicle)\b", text, re.I): return "car"
@@ -73,16 +73,17 @@ def options(sec, ents, moment=None, k=0):
     """Every illustration / silhouette that fits this beat, best first: [{"type": "graphic", "g": ..., "rung", "tag"}]."""
     vo = sec.get("vo", ""); look = vo + " " + (sec.get("still_prompt") or "")
     subject = sec.get("subject")
-    ph = coherence.phase(vo) if moment is None else moment
-    tod, att, gr = time_of_day(look), attitude(vo, ph), ground(look)
+    aero = (subject or {}).get("kind") == "aircraft" or bool(re.search(AIRCRAFT, look, re.I))
+    ph = (coherence.phase(vo) if moment is None else moment) if aero else ""   # flight phases only mean something in an aviation beat
+    tod, att, gr = time_of_day(look), (attitude(vo, ph) if aero else "level"), ground(look)
     seed = 3 + int(re.sub(r"\D", "", sec.get("id", "0")) or 0) * 7 + k
     scenes = [name for name, rx in SCENES if re.search(rx, vo, re.I)]
     if (subject or {}).get("interior") and "cockpit" not in scenes: scenes.insert(0, "cockpit")
-    if (subject or {}).get("kind") == "aircraft" or re.search(r"\b(plane|jet|airliner|aircraft|flight)\b", vo, re.I) or ph == "air":
+    if aero:
         if att in ("dive", "climb", "bank"): scenes = ["sky"] + [s for s in scenes if s != "sky"]
         elif ph in ("ground", "landing"): scenes = ["airport"] + [s for s in scenes if s != "airport"]
         elif "sky" not in scenes: scenes.insert(0 if ph == "air" or not scenes else 1, "sky")
-    if ph == "air" or att in ("dive", "climb", "bank"):   # in the air (or the verb says so): never on a runway, the sky first
+    if aero and (ph == "air" or att in ("dive", "climb", "bank")):   # in the air (or the verb says so): never on a runway, the sky first
         scenes = [s for s in scenes if s != "airport"]
         if "sky" in scenes: scenes = ["sky"] + [s for s in scenes if s != "sky"]
     out = []
@@ -122,7 +123,8 @@ def wangp_lock(sec, ents, moment=None):
     kind = (sec.get("subject") or {}).get("kind")
     ph = coherence.phase(vo) if moment is None else moment
     if kind == "aircraft" or re.search(AIRCRAFT, both, re.I): return "aircraft beat"
-    if ph in ("air", "landing") or (ph == "ground" and re.search(r"\b(airport|runway|tarmac|apron|gate)\b", both, re.I)): return "aircraft beat (in the air / at an airport)"
+    if re.search(r"\b(airport|runway|tarmac|apron|flight|pilots?|airline)\b", both, re.I) and ph in ("air", "landing", "ground"):
+        return "aircraft beat (in the air / at an airport)"
     if kind in ("vehicle", "ship", "train") or re.search(VEHICLE, both, re.I): return "vehicle beat"
     if kind == "building" or re.search(LANDMARK, both, re.I): return "specific building"
     if kind == "person" or has_person(vo, ents): return "names a real person"

@@ -17,13 +17,14 @@ export const paginate = (words: Word[], max = 6): Word[][] => {
 };
 
 export const Captions: React.FC<{ words: Word[] }> = ({ words }) => {
-  const f = useCurrentFrame(); const { fps } = useVideoConfig(); const t = f / fps;
-  const pages = paginate(words);
+  const f = useCurrentFrame(); const { fps, width, height } = useVideoConfig(); const t = f / fps; const tall = height > width;
+  const pages = paginate(words, tall ? 6 : 9);
   let page = pages.find((p, i) => t >= p[0][1] - 0.05 && (i === pages.length - 1 || t < pages[i + 1][0][1] - 0.05));
   if (!page) { if (t < (pages[0]?.[0][1] ?? 0)) return null; page = pages[pages.length - 1]; }
   return (
-    <AbsoluteFill style={{ top: 1390, height: 190, bottom: "auto", alignItems: "center", justifyContent: "center", padding: "0 80px" }}>
-      <div style={{ textAlign: "center", fontFamily: HEAD, fontWeight: 800, fontSize: 46, lineHeight: 1.25, letterSpacing: -0.5 }}>
+    <AbsoluteFill style={{ top: tall ? 1390 : height - 210, height: tall ? 190 : 170, bottom: "auto", alignItems: "center", justifyContent: "center", padding: tall ? "0 80px" : "0 220px" }}>
+      <div style={{ textAlign: "center", fontFamily: HEAD, fontWeight: 800, fontSize: tall ? 46 : 52, lineHeight: 1.25, letterSpacing: -0.5,
+        WebkitFontSmoothing: "antialiased", textRendering: "geometricPrecision" }}>
         {page.map(([w, a, b], i) => {
           const next = page[i + 1]; const active = t >= a - 0.03 && t < (next ? Math.min(b + 0.08, next[1] - 0.03) : b + 0.08);
           const spoken = t >= b;

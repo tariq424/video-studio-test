@@ -73,7 +73,8 @@ PHOTO = """This is a photo found by searching for: {subject}.
 2. "same_subject": does it clearly show {subject} itself (the same airline livery / the same make and model / the same building),
    as the main subject? "yes", "no" or "unclear". Judge only WHAT it is, not what it is doing: parked, taxiing, landing or
    flying are all fine.
-3. "watermark": is there a large watermark, caption, frame or text overlaid on the photo? true or false.
+3. "watermark": is there a large watermark, caption, frame or text overlaid on the photo - or is it a screen capture of other media
+   (a YouTube / social page or player, a video thumbnail, a TV broadcast with a channel logo, a film/TV still)? true or false.
 5. "phase": what the aircraft or vehicle is doing: "air" (flying), "landing" (on approach or touching down), "takeoff",
    "taxi" (moving on the ground), "ground" (parked or standing), or "other".
 4. "looks_ok": a clear, sharp, real photo of the real thing (not a drawing, scale model, simulator, screenshot, factory part or

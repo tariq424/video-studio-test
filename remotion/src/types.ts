@@ -12,7 +12,7 @@ export type Graphic =
 import type { Backdrop } from "./Backdrops";
 // from = seconds into beat. "layers": AI still split into depth layers (2.5D). "graphic": full-screen map/headline backdrop.
 export type Bg =
-  | { src: string; type: "image" | "video"; from: number; fit?: "cover" | "frame"; credit?: string; tag?: string }   // tag: "FILE" / "ILLUSTRATIVE"
+  | { src: string; type: "image" | "video"; from: number; fit?: "cover" | "frame" | "still"; credit?: string; tag?: string; rate?: number; freezeAt?: number }   // tag: "FILE" / "ILLUSTRATIVE"; still = a slide (chart) with a slow push-in
   | { type: "layers"; layers: string[]; from: number }
   | { type: "graphic"; g: Backdrop; from: number };
 
@@ -23,6 +23,7 @@ export type Beat = {
   words: Word[];
   bgs: Bg[];
   graphics: { at: number; g: Graphic }[]; // at = seconds into beat
+  icons?: { at: number; dur: number; e: string }[]; // emoji shown above the caption, seconds into beat
 };
 
 export type TeaserProps = {
@@ -30,4 +31,6 @@ export type TeaserProps = {
   total: number;
   tag: string;
   beats: Beat[];
+  w?: number; h?: number;   // explainer: 1920 x 1080 (default: the Short's 1080 x 1920)
+  progress?: boolean;       // the top progress bar (Shorts); off for the explainer
 };

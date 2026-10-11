@@ -5,6 +5,7 @@ import { asset } from "./asset";
 import { MapBackdrop, HeadlineBackdrop, LayersBackdrop } from "./Backdrops";
 import { ReconBackdrop } from "./Recon";
 import { IllustrationBackdrop, SilhouetteBackdrop } from "./Illustration";
+import { SimBackdrop } from "./Sim";
 
 // Stills are wide (16:9) in a tall frame, so we SCROLL across them to reveal the whole scene.
 // Videos play slightly slowed so a 5 s clip fills ~6 s.
@@ -47,6 +48,7 @@ const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, s
     if (k === "recon") return <ReconBackdrop g={bg.g} dur={dur} />;
     if (k === "illustration") return <IllustrationBackdrop g={bg.g} dur={dur} />;
     if (k === "silhouette") return <SilhouetteBackdrop g={bg.g} dur={dur} />;
+    if (k === "sim") return <SimBackdrop g={bg.g} dur={dur} />;
     return <HeadlineBackdrop g={bg.g as any} dur={dur} />;
   }
   if (bg.type === "layers") return <LayersBackdrop layers={bg.layers} dur={dur} seed={seed} />;
@@ -70,6 +72,15 @@ const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, s
       <AbsoluteFill style={{ opacity: fadeIn, overflow: "hidden" }}>
         <Vid bg={bg} style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${z})` }} />
         <AbsoluteFill style={{ background: shade }} />
+      </AbsoluteFill>
+    );
+  }
+  if (bg.type === "image" && bg.fit === "still") {
+    // a slide (chart / card) that must stay readable: cover, a slow 3% push-in, no scrolling
+    const z = interpolate(p, [0, 1], [1.0, 1.03]);
+    return (
+      <AbsoluteFill style={{ opacity: fadeIn, overflow: "hidden", background: "#0b0f17" }}>
+        <Img src={asset(bg.src)} style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${z})` }} />
       </AbsoluteFill>
     );
   }

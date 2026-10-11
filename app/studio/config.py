@@ -38,6 +38,7 @@ DEFAULTS = {
     "seconds_per_visual": 7,
     "motion_share": 0.10,
     "still_model": "flux2_klein_9b",
+    "long_renderer": "remotion",      # explainer: remotion (one timeline, the Short's captions) | ffmpeg (old stitcher; used when the presenter is on)
     "cloud_on": True,                 # visual ladder: cloud stills before WanGP (only if a provider is listed below)
     "cloud_providers": [],            # provider names from cloudgen.PROVIDERS, tried in order; [] = none (straight to WanGP)
     "cloud_timeout": 60,              # seconds per provider attempt

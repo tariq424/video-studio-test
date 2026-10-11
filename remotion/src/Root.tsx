@@ -64,7 +64,7 @@ const Root: React.FC = () => (
     defaultProps={{ audio: "", total: 120, tag: "", beats: [] } as TeaserProps}
     calculateMetadata={async ({ props }) => {
       const p = (props as TeaserProps).beats.length ? (props as TeaserProps) : ((await (await fetch(staticFile("teaser.json"))).json()) as TeaserProps);
-      return { durationInFrames: Math.ceil(p.total * FPS), props: p };
+      return { durationInFrames: Math.ceil(p.total * FPS), props: p, width: p.w || W, height: p.h || H };
     }}
   />
   </>

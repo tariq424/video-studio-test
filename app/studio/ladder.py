@@ -21,7 +21,8 @@ First look at the picture and describe what it ACTUALLY shows, then judge it. Re
  "fits": "yes" or "no" - does it show what this sentence describes: the same kind of subject, the same moment and action
   (e.g. a plane diving if the narration says it dropped, on the ground if it says it landed or sat on the tarmac) and the same mood
   (tense for an emergency, never cheerful)?,
- "marks": true or false - any readable text, letters, numbers, logo, brand name, airline name or livery lettering, flag or registration?,
+ "marks": true or false - any readable text, letters, numbers, logo, brand name, airline name or livery lettering, flag or registration,
+  or anything that looks like a screenshot, video thumbnail, TV-channel logo or another channel's watermark?,
  "garbled": true or false - melted or deformed objects, broken shapes, extra or missing limbs, warped faces, impossible geometry{extra}?,
  "why": "max 12 words: what the narration needs that the picture does NOT show - it must agree with \"seen\""{worst}}}"""
 

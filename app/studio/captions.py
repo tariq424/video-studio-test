@@ -65,9 +65,10 @@ def groups(wt, max_words=24):
         res[i]["end"] = max(res[i]["end"], res[i + 1]["start"])
     return res
 
-EMOJI_PROMPT = """Below are the on-screen captions of an explainer video, numbered. Pick an emoji icon for about half of them (these are full sentences),
-only where one clearly illustrates the caption's key word (e.g. money -> 💰, AI -> 🤖, brain -> 🧠, space -> 🚀, danger -> ⚠️,
-school -> 🎓, time -> ⏰, growth -> 📈, energy -> ⚡, eye -> 👁️, lock/security -> 🔒, globe -> 🌍). Never two captions in a row.
+EMOJI_PROMPT = """Below are the on-screen captions of an explainer video, numbered. Pick an emoji icon for most of them (about three in four; these are full sentences),
+one that illustrates the caption's key word or idea (e.g. money -> 💰, AI -> 🤖, brain -> 🧠, space -> 🚀, danger -> ⚠️,
+school -> 🎓, time -> ⏰, growth -> 📈, energy -> ⚡, eye -> 👁️, lock/security -> 🔒, globe -> 🌍, law -> ⚖️, chip -> 💾, robot -> 🦾,
+plane -> ✈️, factory -> 🏭, data -> 📊, warning -> 🚨, idea -> 💡). Never the same emoji twice in a row.
 Use common, unambiguous emoji only. No flags, no faces of specific people.
 Reply with ONLY JSON mapping caption number to emoji, e.g. {{"1":"🤖","4":"💰"}}.
 
@@ -83,7 +84,7 @@ def pick_emojis(cfg, caps, log):
         last = -5
         for k, e in sorted(((int(k), v) for k, v in j.items() if str(k).isdigit()), key=lambda x: x[0]):
             i = k - 1
-            if 0 <= i < len(caps) and isinstance(e, str) and 0 < len(e) <= 8 and i - last >= 2:
+            if 0 <= i < len(caps) and isinstance(e, str) and 0 < len(e) <= 8 and not (i - last == 1 and caps[last].get("emoji") == e):
                 caps[i]["emoji"] = e; last = i
     except Exception as ex:
         log(f"  (emoji picking skipped: {str(ex)[:100]})")

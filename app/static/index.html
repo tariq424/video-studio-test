@@ -105,9 +105,10 @@ async function status(){try{const s=await j('/api/status');stages=s.stages;$('pw
 function fmt(x){return Math.floor(x/60)+':'+String(x%60).padStart(2,'0')}
 function srcUI(){const k=$('srck').value,m=$('mode').value;$('s_yt').style.display=k=='yt'?'':'none';$('s_file').style.display=k=='file'?'':'none';$('s_text').style.display=k=='text'?'':'none';$('s_meta').style.display=k=='yt'?'none':'';$('m_short').style.display=m=='long'||m=='smoke'?'none':'';$('m_long').style.display=m=='short'||m=='smoke'?'none':'';$('m_vr').style.display=m=='long'?'none':''}
 let RUNJOB=null,STARTING=false;
-function runUI(js){const r=(js||[]).find(x=>['running','queued'].includes(x.status));RUNJOB=r?r.id:null;const busy=!!r||STARTING;
+const BUSY=['running','queued','paused','awaiting_visuals','awaiting_review'];
+function runUI(js){const r=(js||[]).find(x=>BUSY.includes(x.status));RUNJOB=r?r.id:null;const busy=!!r||STARTING;
  $('makebtn').disabled=busy;$('makebtn').title=busy?'A job is running: stop it or wait for it to finish':'';$('stopbtn').style.display=r?'':'none';
- $('jobrun').textContent=r?('● Job running: '+(r.title||r.id).slice(0,60)+(r.cancel_req?' · stopping at the next safe point…':'')):'';$('jobrun').style.color=r?'var(--acc)':''}
+ $('jobrun').textContent=r?('● '+({running:'Job running',queued:'Job queued',paused:'Job paused',awaiting_visuals:'Job waiting for your visual choices',awaiting_review:'Job waiting for script review'}[r.status]||'Job active')+': '+(r.title||r.id).slice(0,60)+(r.cancel_req?' · stopping at the next safe point…':'')):'';$('jobrun').style.color=r?'var(--acc)':''}
 async function stopVideo(){if(!RUNJOB)return;$('stopbtn').disabled=true;try{const d=await j(`/api/jobs/${RUNJOB}/stop`,{method:'POST'});$('cmsg').textContent=d.state=='stopping'?'Stopping at the next safe point (never mid-render)…':'Stopped.'}catch(e){$('cmsg').textContent=e.message}$('stopbtn').disabled=false;loadJobs()}
 async function createJob(){if(RUNJOB||STARTING)return;STARTING=true;$('makebtn').disabled=true;$('cmsg').textContent='Starting...';const k=$('srck').value;const fd=new FormData();
  const f={mode:$('mode').value,short_secs:$('ssec').value,minutes:$('min').value,presenter:$('pres').checked,captions:$('caps').checked,auto_approve:$('auto').checked,provider:$('jp').value,visual_review:$('vrev').value,debug:$('dbgon').checked,breakpoints:$('dbgbps').value,src_title:$('stt').value,src_credit:$('scr').value,
@@ -118,12 +119,27 @@ async function createJob(){if(RUNJOB||STARTING)return;STARTING=true;$('makebtn')
 async function loadJobs(){const js=await j('/api/jobs');runUI(js);$('jobs').innerHTML=js.length?js.map(x=>`<div class="job ${x.id==sel?'sel':''}" onclick="sel='${x.id}';editing=false;planCache=null;loadJobs()"><b>${esc(x.title||x.url||x.id)}</b><div class="mut" style="font-size:12px">${x.id} · ${x.cancelled&&x.status=='stopped'?'cancelled':x.status} · ${x.stage}</div></div>`).join(''):'No jobs yet.';if(sel)loadDetail()}
 function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 let lastKey='';
+// one status line per output (Short / Explainer): finished (with file), working (stage, beat n of N), or waiting
+const STAGE_NAME={transcript:'transcript',script:'script',short_script:'script',review:'script review',short_stock:'stock footage',short_voice:'narration',
+ short_fallback:'visuals',short_review:'visual review',short_render:'rendering',charts:'charts',voice:'narration',captions:'captions',broll:'stock footage',
+ presenter:'presenter',motion:'motion clips',stills:'stills',assemble:'rendering'};
+function outputsHtml(s){const p=s.prog||{},m=s.mode||'long',rows=[],busy=['running','queued','paused','awaiting_visuals','awaiting_review'].includes(s.status);
+ const one=(name,key,file)=>{let t;
+  if(file)t=`✓ Finished <code style="font-size:12px">${esc(file.replace(/\\/g,'/').split('/').slice(-1)[0])}</code>`;
+  else if(busy&&(p.out===key||p.out==='both'))t=`<b>${s.status=='running'?'Working':esc(statusText(s))}</b> — ${esc(STAGE_NAME[p.stage||s.stage]||p.stage||s.stage||'')}${p.of?` · ${key=='short'?'Beat':'Section'} ${p.n} of ${p.of}`:''}`;
+  else if(s.status=='finished')t='—';else t=busy?'Waiting':esc(s.status||'');
+  rows.push(`<div data-testid="output-${key}" style="font-size:13.5px">${name}: ${t}</div>`)};
+ if(m=='short'||m=='both')one('Short','short',s.short_output);
+ if(m=='long'||m=='both')one('Explainer','explainer',s.output);
+ return rows.length?`<div style="margin:6px 0">${rows.join('')}</div>`:''}
+function hk(x){let h=0;x=String(x||'');for(let i=0;i<x.length;i++)h=(h*31+x.charCodeAt(i))|0;return (h>>>0).toString(36)}   // thumbnail cache key
+function tq(c){return '?v='+hk((c.key||'')+'|'+(c.thumb||''))}
 async function loadDetail(){if(editing)return;const s=await j('/api/jobs/'+sel);const done=s.done||[];
- const key=sel+'|'+s.status+'|'+s.stage;
+ const key=sel+'|'+s.status+'|'+s.stage+'|'+((s.prog||{}).n||0);
  if((s.status=='awaiting_review'||s.status=='awaiting_visuals'||s.status=='paused'||s.status=='finished'||(s.status=='error'&&s.stage=='transcript'))&&key==lastKey)return;   // don't redraw while you read/paste
  lastKey=key;
  const mtxt={both:`long ${s.minutes} min + Short ${fmt(Math.round(s.short_secs||165))}`,short:`${s.smoke?'Smoke test · ':''}Short ${fmt(Math.round(s.short_secs||165))}`,long:`long ${s.minutes} min`}[s.mode||'long'];
- let h=`<h2>${esc(s.title||s.url)}</h2><div class="mut">${mtxt} · <b data-testid="job-status" data-status="${esc(s.status)}" data-stage="${esc(s.stage)}">${statusText(s)}</b>${s.error?` · <span style="color:var(--bad)">${esc(s.error)}</span>`:''}</div>${(s.length_warnings||[]).map(w=>`<div data-testid="length-warning" style="color:var(--bad);font-size:13px">Length miss: ${esc(w)}</div>`).join('')}`;
+ let h=`<h2>${esc(s.title||s.url)}</h2><div class="mut">${mtxt} · <b data-testid="job-status" data-status="${esc(s.status)}" data-stage="${esc(s.stage)}">${statusText(s)}</b>${s.error?` · <span style="color:var(--bad)">${esc(s.error)}</span>`:''}</div>${outputsHtml(s)}${(s.length_warnings||[]).map(w=>`<div data-testid="length-warning" style="color:var(--bad);font-size:13px">Length miss: ${esc(w)}</div>`).join('')}`;
  h+=`<div class="stages">${(s.stages||stages).map(t=>`<span class="st ${done.includes(t)?'done':(s.stage==t?'cur':'')}">${t}</span>`).join('')}</div>`;
  h+=`<div class="row">`;
  if(s.status=='awaiting_review'){h+=`<button onclick="act('approve')">Approve & render</button>`;if(s.plan_summary)h+=`<button class="sec" onclick="editPlan()">Edit long script</button>`;if(s.short_summary)h+=`<button class="sec" onclick="editShort()">Edit Short script</button>`}
@@ -172,7 +188,7 @@ async function savePlan(ap){planCache.title=$('pt').value;planCache.subtitle=$('
  await j(`/api/jobs/${sel}/plan`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(planCache)});if(ap)await act('approve');else{editing=false;lastKey='';loadDetail()}}
 
 // ---------------- visual review
-const RUNG={stock:'Stock footage',photo:'Real photo',cloud:'Cloud still',illustration:'Illustration',silhouette:'Silhouette',still:'AI still',animate:'AI animation',parallax:'Parallax',reconstruction:'3D reconstruction',headline:'Headline card',map:'Map',supplied:'Your file'};
+const RUNG={stock:'Stock footage',photo:'Real photo',cloud:'Cloud still',illustration:'Illustration',silhouette:'Silhouette',simulation:'Simulation',still:'AI still',animate:'AI animation',parallax:'Parallax',reconstruction:'3D reconstruction',headline:'Headline card',map:'Map',supplied:'Your file'};
 let RV=null,rvSel={},rvTimer=null,rvOpen={};
 async function showReview(){try{RV=await j(`/api/jobs/${sel}/review`)}catch(e){if(!DBG_PAUSED)$('rvp').innerHTML='<p class="mut">Review data not ready yet.</p>';return}drawReview();
  clearTimeout(rvTimer);if(Object.values(RV.beats).some(b=>b.busy))rvTimer=setTimeout(()=>{if($('rvp'))showReview()},4000)}
@@ -189,7 +205,7 @@ function beatHTML(bid,b){const n=+bid.slice(1)+1;const dec=b.decision?{auto:'✓
  let h=`<div class="rv-beat ${b.uncertain&&!b.decision?'unsure':''} ${b.decision?'done':''}" id="rv_${bid}"><div class="row"><b>Beat ${n}</b><span class="rv-badge">${dec}</span>${b.uncertain?`<span class="rv-badge" style="color:#d29922">⚠ ${esc(b.why)}</span>`:''}${b.busy?`<span class="rv-badge" style="color:var(--acc)">${esc(b.busy)}</span>`:''}</div>
  <p style="margin:6px 0">${esc(b.vo)}</p><div class="mut" style="font-size:13px">Pipeline pick: <b>${esc(autoTxt)}</b>${b.why&&!b.uncertain?' — '+esc(b.why):''}</div><div class="rv-row">`;
  for(const cid of b.cands){const c=RV.cands[cid];const i=s.indexOf(cid);const tag=c.item.tag?` · ${esc(c.item.tag)}`:'';
-  h+=`<div class="rv-c ${i>=0?'sel':''} ${b.auto.includes(cid)?'auto':''}" data-testid="review-treatment" data-beat="${bid}" data-cand="${cid}" data-rung="${c.rung}" data-index="${b.cands.indexOf(cid)}"><div class="${c.worst?'wrn':''}"><img data-testid="review-treatment-thumb" loading="lazy" src="${c.thumb?`/files/${sel}/short/${c.thumb}`:''}" onclick="rvPrev('${bid}','${cid}')" title="Click to preview"></div>
+  h+=`<div class="rv-c ${i>=0?'sel':''} ${b.auto.includes(cid)?'auto':''}" data-testid="review-treatment" data-beat="${bid}" data-cand="${cid}" data-rung="${c.rung}" data-index="${b.cands.indexOf(cid)}"><div class="${c.worst?'wrn':''}"><img data-testid="review-treatment-thumb" loading="lazy" src="${c.thumb?`/files/${sel}/short/${c.thumb}${tq(c)}`:''}" onclick="rvPrev('${bid}','${cid}')" title="Click to preview"></div>
   <b>${D&&D.debug&&D.debug.on?(b.cands.indexOf(cid)+1)+'. ':''}${esc(RUNG[c.rung]||c.rung)}</b>${tag}<br><span class="${c.ok?'ok':'bad'}">${c.ok?'✓':'✗'} ${esc(c.why)}</span><br>
   <label style="margin:2px 0;color:var(--fg)"><input type="checkbox" data-testid="review-choose" data-cand="${cid}" ${i>=0?'checked':''} onchange="rvTick('${bid}','${cid}',this.checked)"> Use${i>=0&&s.length>1?' #'+(i+1):''}</label></div>`}
  h+=`</div><div class="rv-prev" id="pv_${bid}"></div>
@@ -208,8 +224,11 @@ async function rvDo(bid,a,i){try{const body={action:a};if(a=='choose')body.cands
  RV=await rvPost(`/api/jobs/${sel}/review/${bid}`,body);if(a=='auto'||a=='skip')rvSel[bid]=[];drawReview();if(a=='expand'||a=='animate')showReview()}catch(e){alert(e.message)}}
 async function rvRefine(bid){const t=$('rf_'+bid).value.trim();if(!t)return;try{RV=await rvPost(`/api/jobs/${sel}/review/${bid}`,{action:'refine',text:t,tag:$('st_'+bid).value});rvOpen[bid]=true;showReview()}catch(e){alert(e.message)}}
 async function rvSupply(bid){const t=$('sp_'+bid).value.trim();if(!t)return;$('rvmsg').textContent='Adding your file...';try{RV=await rvPost(`/api/jobs/${sel}/review/${bid}`,{action:'supply',src:t,tag:$('st_'+bid).value});rvSel[bid]=[...RV.beats[bid].chosen];$('rvmsg').textContent='';drawReview()}catch(e){$('rvmsg').textContent='';alert(e.message)}}
+function pvVideo(src){const id='pv'+Math.random().toString(36).slice(2,8);
+ return `<video id="${id}" controls autoplay loop muted playsinline preload="auto" src="${src}" style="max-width:100%"></video><div class="row" style="gap:6px;align-items:center;font-size:12.5px">Speed `+
+ [0.25,0.5,1,1.5,2].map(r=>`<button class="sec" style="padding:3px 8px" onclick="document.getElementById('${id}').playbackRate=${r}">${r}×</button>`).join('')+`</div>`}
 async function rvPrev(bid,cid){const el=$('pv_'+bid);el.innerHTML='<span class="mut">Rendering a 2-second preview…</span>';
- try{const d=await rvPost(`/api/jobs/${sel}/preview/${cid}`);el.innerHTML=d.video?`<video autoplay loop muted playsinline src="/files/${sel}/short/${d.video}"></video>`:`<img src="/files/${sel}/short/${d.image}">`;el.innerHTML+=` <button class="sec" onclick="this.parentElement.innerHTML=''">Close</button>`}catch(e){el.innerHTML=`<span style="color:var(--bad)">${esc(e.message)}</span>`}}
+ try{const d=await rvPost(`/api/jobs/${sel}/preview/${cid}`);el.innerHTML=d.video?pvVideo(`/files/${sel}/short/${d.video}`):`<img src="/files/${sel}/short/${d.image}">`;el.innerHTML+=` <button class="sec" onclick="this.parentElement.innerHTML=''">Close</button>`}catch(e){el.innerHTML=`<span style="color:var(--bad)">${esc(e.message)}</span>`}}
 async function rvAll(a){try{await rvPost(`/api/jobs/${sel}/review_all/${a}`);lastKey='';rvSel={};loadJobs()}catch(e){alert(e.message)}}
 // ---------------- 9:16 thumbnail
 async function showThumb(s){const o=await j(`/api/jobs/${sel}/thumbnail`);const el=$('thumbp');if(!el)return;
@@ -254,7 +273,7 @@ function edDraw(){const bid=ED.open,b=ED.rv.beats[bid],bt=ED.beats.find(x=>x.id=
  <p style="margin:6px 0">${esc(b.vo)}</p>${b.busy?`<span class="rv-badge" style="color:var(--acc)">${esc(b.busy)}</span>`:''}
  <div class="mut" style="font-size:13px">Tick the treatment(s) to use (they play in the order ticked); click a thumbnail to preview it. Blue outline = in the video now.</div><div class="rv-row">`;
  for(const cid of b.cands){const c=ED.rv.cands[cid];if(c.missing)continue;const i=ED.sel.indexOf(cid);const tag=c.item.tag?` · ${esc(c.item.tag)}`:'';
-  h+=`<div class="rv-c ${i>=0?'sel':''} ${(b.current||[]).includes(cid)?'auto':''}" data-testid="edit-treatment" data-cand="${cid}" data-rung="${c.rung}" data-index="${b.cands.indexOf(cid)}"><div class="${c.worst?'wrn':''}"><img data-testid="edit-treatment-thumb" loading="lazy" src="${c.thumb?edBase()+c.thumb:''}" onclick="edCand('${cid}')" style="${ED.space=='long'?'width:213px;height:120px':''}"></div>
+  h+=`<div class="rv-c ${i>=0?'sel':''} ${(b.current||[]).includes(cid)?'auto':''}" data-testid="edit-treatment" data-cand="${cid}" data-rung="${c.rung}" data-index="${b.cands.indexOf(cid)}"><div class="${c.worst?'wrn':''}"><img data-testid="edit-treatment-thumb" loading="lazy" src="${c.thumb?edBase()+c.thumb+tq(c):''}" onclick="edCand('${cid}')" style="${ED.space=='long'?'width:213px;height:120px':''}"></div>
   <b>${esc(RUNG[c.rung]||(c.rung=='current'?((b.current||[]).includes(cid)?'In the video now':'Before your edit'):c.rung))}</b>${tag}<br><span class="${c.ok?'ok':'bad'}">${c.ok?'✓':'✗'} ${esc(c.rung=='current'&&!(b.current||[]).includes(cid)?'was in the video':c.why)}</span><br>
   <label style="margin:2px 0;color:var(--fg)"><input type="checkbox" data-testid="edit-choose" data-cand="${cid}" ${i>=0?'checked':''} onchange="edTickC('${cid}',this.checked)"> Use${i>=0&&ED.sel.length>1?' #'+(i+1):''}</label></div>`}
  h+=`</div><div id="edpv" class="rv-prev"></div>
@@ -270,7 +289,7 @@ function edDraw(){const bid=ED.open,b=ED.rv.beats[bid],bt=ED.beats.find(x=>x.id=
 async function edRefresh(){if(!ED.open)return;try{ED.rv=await j(`/api/jobs/${sel}/review${edQ()}`);const r=await fetch(`/api/jobs/${sel}/edit/open/${ED.open}`,{method:'POST'});const d=await r.json();if(r.ok)ED.rv=d.rv;edDraw()}catch(e){}}
 function edTickC(cid,on){const i=ED.sel.indexOf(cid);if(on&&i<0)ED.sel.push(cid);if(!on&&i>=0)ED.sel.splice(i,1);edDraw()}
 async function edCand(cid){const el=$('edpv');el.innerHTML='<span class="mut">Rendering a 2-second preview…</span>';
- try{const d=await rvPost(`/api/jobs/${sel}/preview/${cid}${edQ()}`);el.innerHTML=(d.video?`<video autoplay loop muted playsinline src="${edBase()}${d.video}"></video>`:`<img src="${edBase()}${d.image}">`)+` <button class="sec" onclick="this.parentElement.innerHTML=''">Close</button>`}catch(e){el.innerHTML=`<span style="color:var(--bad)">${esc(e.message)}</span>`}}
+ try{const d=await rvPost(`/api/jobs/${sel}/preview/${cid}${edQ()}`);el.innerHTML=(d.video?pvVideo(`${edBase()}${d.video}`):`<img src="${edBase()}${d.image}">`)+` <button class="sec" onclick="this.parentElement.innerHTML=''">Close</button>`}catch(e){el.innerHTML=`<span style="color:var(--bad)">${esc(e.message)}</span>`}}
 async function edPreview(){const el=$('edpv');el.innerHTML='<span class="mut">Rendering the beat as it will look in the video (half resolution)…</span>';
  try{const d=await rvPost(`/api/jobs/${sel}/edit/preview/${ED.open}`,{cands:ED.sel,fit:ED.fit});el.innerHTML=`<div class="mut" style="font-size:13px">Fit: <b>${esc(d.fit)}</b> — ${esc(d.why)}</div><video controls autoplay playsinline src="/files/${sel}/${d.video}" style="max-height:480px"></video> <button class="sec" onclick="this.parentElement.innerHTML=''">Close</button>`}catch(e){el.innerHTML=`<span style="color:var(--bad)">${esc(e.message)}</span>`}}
 async function edApply(){if(!ED.sel.length)return;$('edmsg').textContent='Applying…';try{await rvPost(`/api/jobs/${sel}/edit/apply/${ED.open}`,{cands:ED.sel,fit:ED.fit});edWait()}catch(e){$('edmsg').textContent='';alert(e.message)}}
@@ -308,9 +327,9 @@ function drawDebug(){const el=$('dbp');if(!el||!D)return;const on=D.debug&&D.deb
    <ol class="dbg-chain">${(c.chain||[]).map(x=>`<li>${esc(x)}</li>`).join('')}${(c.stock_rejected||[]).map(x=>`<li>stock clip rejected: ${esc(x.why||'')}</li>`).join('')}${(c.photos_rejected||[]).map(x=>`<li>real photo rejected: ${esc(x.why||'')}</li>`).join('')}</ol></div>`}
   else h+=`<p class="mut" style="font-size:13px">No beats have been through the visual ladder yet.</p>`}
  if(paused&&dbgBeat&&RV&&RV.beats&&RV.beats[dbgBeat])h+=beatHTML(dbgBeat,RV.beats[dbgBeat]);
- if(on){const ch=(D.debug.chat||[]);
-  h+=`<div style="margin-top:10px"><b>Panel chat (DeepSeek)</b> <span class="mut" style="font-size:12.5px">For why-questions, use the Claude chat.</span>
-   <div class="dbg-chat" data-testid="debug-chat-log">${ch.map(x=>`<div class="you">Beat ${+x.beat.slice(1)+1} · you: ${esc(x.you)}</div><div class="ai">${esc(x.reply)} <span style="opacity:.7">[${esc(x.backend)}${x.action&&x.action!='none'?' · '+esc(x.action):''}]</span></div>`).join('')}</div>
+ if(on||paused||D.status=='awaiting_visuals'){const ch=((D.debug||{}).chat||[]).filter(x=>!dbgBeat||x.beat==dbgBeat);
+  h+=`<div style="margin-top:10px"><b>Pause chat${dbgBeat?' · Beat '+(+dbgBeat.slice(1)+1):''}</b> <span class="mut" style="font-size:12.5px">Remembers this beat's conversation. Clear instructions run here (DeepSeek); judgment calls get a ready-to-paste note for the Claude chat. Try “simulate the descent using real physics”.</span>
+   <div class="dbg-chat" data-testid="debug-chat-log">${ch.map(x=>`<div class="you">Beat ${+x.beat.slice(1)+1} · you: ${esc(x.you)}</div><div class="ai">${esc(x.reply)} <span style="opacity:.7">[${esc(x.backend)}${x.action&&x.action!='none'?' · '+esc(x.action):''}]</span>${x.handoff?` <button class="sec" style="padding:2px 8px;font-size:12px" data-h="${esc(x.handoff)}" onclick="navigator.clipboard.writeText(this.dataset.h);this.textContent='Copied — paste it in the Claude chat'">Copy for Claude</button>`:''}</div>`).join('')}</div>
    <div class="row"><textarea id="dbgmsg" data-testid="debug-chat-input" aria-label="Panel chat message" rows="2" style="flex:1" placeholder="e.g. show 3 more stock options · swap to option 2 · redo the still with the plane diving"></textarea><button data-testid="debug-chat-send" ${dbgBeat?'':'disabled'} onclick="dbgChat()">Send</button></div></div>`}
  h+=`</div>`;el.innerHTML=h}
 async function dbgSet(b){try{D=await rvPost(`/api/jobs/${sel}/debug`,b);drawDebug();if(D.status=='awaiting_visuals')drawReviewOnly()}catch(e){alert(e.message)}}

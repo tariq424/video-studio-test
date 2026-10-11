@@ -492,7 +492,9 @@ def do_voice(job, plan, cfg, wg, log, stop):
     groups = _batches(todo)
     if groups: log(f"Narration: {len(todo)} beats in {len(groups)} voice call(s)")
     seed = 9100
+    from .pipeline import progress
     for gi, grp in enumerate(groups):
+        progress(job, sum(len(g) for g in groups[:gi]) + len(grp), len(todo))
         if stop(): raise RuntimeError("cancelled")
         text = " ".join(s["vo"] for s in grp)
         ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()   # WanGP mangles non-ASCII
@@ -539,6 +541,29 @@ def _clip_len(sd, c):
     p = sd / "stock" / "clips" / f"{c['id']}.mp4"
     if p not in _lens: _lens[p] = media.dur(p) if p.exists() else 0.0
     return _lens[p]
+
+def _icons(cfg, sd, bid, words, gfx, d, log):
+    """Emoji above the caption, one per caption sentence where it fits (same picker as the explainer), only while no graphic
+    card is on screen. Cached in short/icons_<beat>.json."""
+    from . import captions as C
+    f = sd / f"icons_{bid}.json"
+    if f.exists(): groups = json.loads(f.read_text(encoding="utf-8"))
+    else:
+        groups = C.groups([tuple(w) for w in words]) if words else []
+        try: groups = C.pick_emojis(cfg, groups, log) if groups else []
+        except Exception as e: log(f"  emoji pick failed for {bid} ({str(e)[:80]})")
+        f.write_text(json.dumps(groups, ensure_ascii=False), encoding="utf-8")
+    busy = []
+    for i, g in enumerate(gfx):
+        nxt = gfx[i + 1]["at"] if i + 1 < len(gfx) else d
+        busy.append((g["at"], g["at"] + min(nxt - g["at"], 4.6)))
+    out = []
+    for g in groups:
+        if not g.get("emoji"): continue
+        a, b = g["start"], max(g["start"] + 0.8, g["end"])
+        if any(x < b and a < y for x, y in busy): continue
+        out.append({"at": round(a, 3), "dur": round(b - a, 3), "e": g["emoji"]})
+    return out
 
 def build(job, plan, cfg, log):
     sd = job / "short"; pub = sd / "public"; (pub / "media" / "stock").mkdir(parents=True, exist_ok=True)
@@ -638,7 +663,8 @@ def build(job, plan, cfg, log):
                     if at < gfx[-1]["at"] + 2.5: at = gfx[-1]["at"] + 2.5
                     if at > d - 1.5: continue
                 gfx.append({"at": round(at, 3), "g": v["chart"]})
-        beats.append({"id": s["id"], "start": round(t, 3), "dur": round(d, 3), "words": words, "bgs": bgs, "graphics": gfx})
+        icons = [] if s.get("cta") else _icons(cfg, sd, s["id"], words, gfx, d, log)
+        beats.append({"id": s["id"], "start": round(t, 3), "dur": round(d, 3), "words": words, "bgs": bgs, "graphics": gfx, "icons": icons})
         parts.append((sd / "voice" / f"{s['id']}.wav", d * speed)); t += d
     flt = "".join(f"[{i}:a]apad,atrim=duration={dd:.3f}[a{i}];" for i, (_, dd) in enumerate(parts)) + "".join(f"[a{i}]" for i in range(len(parts))) \
         + f"concat=n={len(parts)}:v=0:a=1" + (f",atempo={speed:.4f}" if abs(speed - 1.0) > 1e-4 else "") + ",loudnorm=I=-14:TP=-1.5[out]"

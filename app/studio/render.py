@@ -36,7 +36,9 @@ def do_voice(job, plan, cfg, wg, log, stop):
     d = job / "voice"; d.mkdir(exist_ok=True)
     gap = d / "_gap.wav"; media.ff("-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", 0.25, gap)
     seed = 9000
+    from .pipeline import progress
     for si, s in enumerate(plan["sections"]):
+        progress(job, si + 1, len(plan["sections"]))
         out = d / f"{s['id']}.wav"
         if media.ok(out): continue
         parts = []
@@ -164,9 +166,15 @@ def illustration_still(cfg, job, v, vo, log):
     bg = {k: item[k] for k in ("type", "g")}
     if item.get("tag"): bg["tag"] = item["tag"]
     md = job / "motion"; md.mkdir(exist_ok=True); clip = md / f"{v['id']}.mp4"
-    try: review._remotion(ws, bg, 6, clip, cfg, log, frames=(0, 179), scale=1, crf=16)
+    raw = ws / f"{v['id']}_raw.mp4"
+    try:
+        review._remotion(ws, bg, 6, raw, cfg, log, frames=(0, 179), scale=1, crf=16)
+        # Remotion writes full-range (yuvj420p) video; mixed with limited-range clips in one concat it corrupted a whole section
+        # (job 20261011_082753: 39 s frozen on one blended frame). Normalise to limited range like every other clip.
+        media.ff("-i", raw, "-an", "-vf", "scale=in_range=pc:out_range=tv,format=yuv420p", "-color_range", "tv", "-c:v", "libx264",
+                 "-preset", "veryfast", "-crf", 16, clip); raw.unlink(missing_ok=True)
     except Exception as e: log(f"  illustration {v['id']} failed ({str(e)[:100]})"); return None
-    v["illustration"] = item["rung"]; v["type"] = "motion"
+    v["illustration"] = item["rung"]; v["type"] = "motion"; v["g"] = item["g"]   # the explainer renders the graphic itself
     log(f"  {v['id']}: {item['rung']}" + (f" (WanGP skipped: {lock})" if lock else " (before WanGP)"))
     return item["rung"]
 
@@ -198,7 +206,9 @@ def do_motion(job, plan, cfg, wg, log, stop):
 def do_stills(job, plan, cfg, wg, log, stop):
     d = job / "stills"; d.mkdir(exist_ok=True); seed = 1000; n = 0
     todo = [(v, s.get("vo", "")) for s in plan["sections"] for v in s["visuals"] if v["type"] == "still" and not v.get("stock")]
+    from .pipeline import progress
     for i, (v, vo) in enumerate(todo):
+        progress(job, i + 1, len(todo))
         seed += 1; out = d / f"{v['id']}.jpg"
         if out.exists(): continue
         if stop(): raise RuntimeError("cancelled")

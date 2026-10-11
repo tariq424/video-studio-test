@@ -30,6 +30,19 @@ def _length_check(j, out, target, what, log):
         j.save(length_warnings=warns)
     except Exception as e: log(f"  length check skipped ({str(e)[:120]})")
 
+
+SHORT_STAGES = {"short_script", "short_stock", "short_voice", "short_fallback", "short_review", "short_render"}
+LONG_STAGES = {"script", "charts", "voice", "captions", "broll", "presenter", "motion", "stills", "assemble"}
+
+def output_of(st):
+    return "short" if st in SHORT_STAGES else "explainer" if st in LONG_STAGES else "both"
+
+def progress(job, n, of):
+    """Beat / section counter for the job page ("Explainer: voice - Beat 7 of 16"). Never raises."""
+    try:
+        j = Job(Path(job)); p = dict(j.state.get("prog") or {}); p.update(n=int(n), of=int(of)); j.save(prog=p)
+    except Exception: pass
+
 class Job:
     def __init__(self, path): self.dir = Path(path)
     @property
@@ -281,6 +294,7 @@ class Studio:
             if st in j.state.get("done", []): continue
             if stop(): j.save(status="stopped"); log("Stopped"); self.cancel.discard(jid); return
             dbg.manual(st)
+            j.save(prog={"out": output_of(st), "stage": st, "n": 0, "of": 0})
             j.save(stage=st); log(f"== {st} ==")
             if st == "transcript":
                 man = j.dir / "src" / "transcript_manual.txt"
@@ -382,7 +396,11 @@ class Studio:
                     render.do_stills(j.dir, plan, cfg, wg, log, stop); j.save_plan(plan)   # illustrations turn stills into motion clips
                 elif st == "assemble":
                     meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
-                    parts = assemble.build(j.dir, plan, log, stop, use_presenter=s.get("presenter", False), use_captions=s.get("captions", True)); final = assemble.finalize(j.dir, plan, parts, meta, log)
+                    if s.get("presenter", False) or cfg.get("long_renderer", "remotion") == "ffmpeg":   # the old stitcher (presenter PIP lives there)
+                        parts = assemble.build(j.dir, plan, log, stop, use_presenter=s.get("presenter", False), use_captions=s.get("captions", True)); final = assemble.finalize(j.dir, plan, parts, meta, log)
+                    else:   # one timeline from the narration, rendered like the Short (explainer.py)
+                        from . import explainer
+                        final = explainer.render(j.dir, plan, cfg, meta, log, stop)
                     j.save(output=str(final)); _length_check(j, final, (s.get("minutes") or 0) * 60, "Long video", log)
             if stop(): j.save(status="stopped"); log("Stopped"); self.cancel.discard(jid); return
             d = j.state.get("done", []); d.append(st); j.save(done=d)

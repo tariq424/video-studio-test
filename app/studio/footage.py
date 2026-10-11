@@ -179,7 +179,10 @@ Answer each question about what you actually see:
    or a crisis). Also answer "no" if the clip's main subject is one person who would be taken to BE someone the narration names
    (a particular country's officials, agents, spokesperson, pilot or politician): a stranger must not stand in for a real
    person or a real agency's staff. Places, documents, maps, screens and crowds are fine. "yes" or "partly" otherwise.
-Reply with JSON only: {{"shows": "yes|partly|no", "overlay_text": false, "same_scene": true, "looks_ok": true, "brands": [], "fits": "yes|partly|no", "seen": "10-20 words: what the clip shows"}}"""
+7. "platform": is any frame a screen capture of other media - a YouTube or social-media page or player, a video thumbnail,
+   a TV broadcast with a channel logo or news ticker, a streaming-app interface, a film/TV still, or another channel's
+   watermark? (A generic computer screen in the background does not count.) true or false.
+Reply with JSON only: {{"shows": "yes|partly|no", "overlay_text": false, "same_scene": true, "looks_ok": true, "brands": [], "fits": "yes|partly|no", "platform": false, "seen": "10-20 words: what the clip shows"}}"""
 
 STRICT = """The LEFT image is a reference photo of: {subject}.
 The RIGHT image shows 4 frames from a stock video clip.
@@ -191,7 +194,9 @@ Answer about the RIGHT frames only:
 3. "overlay_text": large text, captions or watermarks overlaid on the video? true or false.
 4. "same_scene": all 4 frames from one continuous scene? true or false.
 5. "looks_ok": clear, real footage (not blurry, glitchy or distorted)? true or false.
-Reply with JSON only: {{"brands": [], "same_subject": "yes|no|unclear", "overlay_text": false, "same_scene": true, "looks_ok": true, "seen": "10-20 words: what the clip shows"}}"""
+6. "platform": a screen capture of other media (YouTube / social page or player, video thumbnail, TV broadcast with a channel logo
+   or ticker, streaming-app interface, film/TV still, another channel's watermark)? true or false.
+Reply with JSON only: {{"brands": [], "same_subject": "yes|no|unclear", "overlay_text": false, "same_scene": true, "looks_ok": true, "platform": false, "seen": "10-20 words: what the clip shows"}}"""
 
 def _frames_from_video(url, out_dir, tag):
     """4 frames from a (small) preview video; returns image paths and duration."""
@@ -288,6 +293,7 @@ def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None, narratio
         log(f"  vision check unavailable ({str(e)[:80]}); accepting {c['id']}"); return True, "", c["desc"]
     yes = lambda k, d: str(j.get(k, d)).strip().lower() in ("true", "yes", "1")
     seen = str(j.get("seen") or c["desc"])[:160]
+    if yes("platform", False): return False, "copyright: screen capture / thumbnail / channel watermark", seen
     if yes("overlay_text", False): return False, "text/logo overlay", seen
     if not yes("same_scene", True): return False, "scene cut", seen
     if not yes("looks_ok", True): return False, "poor footage", seen

@@ -51,6 +51,53 @@ Video Studio is a fork of Explainer Studio (`F:\code\explainer-studio`, github `
   venv F:\code\ui-blackbox\.venv, reports in F:\code\ui-blackbox\reports), smoke mode.
 - **Deprecated:** `/api/smoke` (old fixed one-beat job). Only the form's smoke mode is supported.
 
+## Bug batch from job 20261011_082753 (2026-10-11)
+- **Copyright (Part 1):** the rendered explainer and Short were checked frame by frame (end card at 812-828 s, the whole
+  explainer every 12 s, the Short every 5 s): **no YouTube thumbnails, platform screenshots or channel logos are in the files**.
+  The end card is "Thanks for watching" + the source credit only. Three video thumbnails at the end are what a YouTube /
+  browser player shows after a video ends, not part of the MP4. Still added: a copyright check in every vision prompt
+  (stock: "platform" field -> reject "screen capture / thumbnail / channel watermark"; real photos: screen captures count as
+  watermark; AI stills: screenshots / thumbnails / TV logos count as marks).
+- **Explainer renderer (Parts 2-4, 6):** `explainer.py` renders the long video with the Short's Remotion `Teaser` composition at
+  1920x1080 (config `long_renderer`: remotion, default; the old ffmpeg stitcher `assemble.py` is used only when the presenter PIP
+  is on). One timeline from the narration: section = 0.4 s + narration wav + 0.8 s, video length = the sum (never a fixed
+  target, never trimmed); word times from faster-whisper (as the Short) drive the same karaoke `Captions` (spoken word lights
+  up); the end card is its own 5 s beat AFTER the narration with no captions; SRT and chapters from the same timeline.
+  - Root cause of the 39 s frozen frame (8:36-9:15): section s7's file had 838 of 1,965 frames - the Windows ffmpeg pass that
+    burns in emoji overlays + ASS captions dropped frames, after the section had been stitched from clips of mixed colour range
+    (the new illustration clips were full-range yuvj420p). Illustration clips are now converted to limited range, and the new
+    renderer doesn't stitch or burn in at all.
+  - Root cause of the end card during narration: the old layout put `_end` into the last section's visual slots.
+  - Root cause of the "freezing" highlight: the old explainer captions had ONE static highlighted keyword per sentence, no
+    word-by-word highlight at all.
+- **Guaranteed visual (Part 5):** a missing file, a blank chart (mean luma < 8) or a black frame (< 6) becomes a branded card
+  (animated gradient + text, HeadlineBackdrop), never black. Root cause of the black beats: charts that failed to render fell
+  back to an empty dark "cards" image.
+- **Captions (Part 7):** at native resolution both formats measured sharp; renders now use JPEG quality 100 (explainer) and the
+  captions render with antialiased font smoothing at final size; the explainer uses Montserrat ExtraBold (as the Short) instead of
+  libass Arial with a soft shadow.
+- **Emoji (Part 8):** the picker asked for "about half, never two in a row" (and the explainer's ffmpeg overlay path dropped some);
+  now "about three in four, never the same twice in a row", drawn by Remotion above the caption in BOTH formats (Short: only while
+  no graphic card is on screen).
+- **Airplanes in an AI explainer:** `coherence.phase` reads "taking off" as flight, so non-aviation beats got sky scenes and the
+  aircraft lock. Flight phases and the sky / airport / radar scenes now apply only when the narration or prompt names an aircraft.
+- **UI (Parts 9-12):** thumbnails get a content-keyed `?v=` (candidate ids c1, c2 ... are reused when options are rebuilt, so the
+  browser showed cached images); previews have controls + speed buttons (0.25x-2x); Make video stays disabled and Stop video
+  visible while a job is running, queued, paused or awaiting review / visuals (Stop cancels those at once); the job page shows one
+  line per output: `Short: ✓ Finished <file>` / `Explainer: Working — narration · Section 7 of 12`.
+- **Pause chat (Part 13):** the panel chat now appears at every pause (debug pause, awaiting visuals), per beat, and remembers that
+  beat's conversation (last 6 turns go to the model). Clear instructions run through DeepSeek (refine, more stock, use options,
+  skip, continue, simulate); judgment calls are answered as "goes to Claude" with a **Copy for Claude** button holding a
+  ready-to-paste context (beat, narration, ladder, options, conversation). There is no way to call Claude Desktop without an API
+  key, so the hand-off is a paste. Backend shown on every message.
+- **Simulations (Part 14):** `physics.py` registry, one interface (params -> time series), rendered by `Sim.tsx` (animated profile,
+  subject riding the curve, live readout, event marks; label SIMULATION). Built: `aircraft_flight` (cruise -> smooth descent /
+  climb -> level-off from the narration's altitudes / time / rate) and `submarine_descent` (depth vs time, p = rho*g*h). Registered,
+  not built: vehicle_crash, structural_collapse, earthquake, ship_route, weather_event (they return nothing -> the beat keeps its
+  illustration). Real data sources (OpenSky ADS-B, pyBADA, pycrash, PyBullet, libcomcat, neptune-ais, NOAA) are not wired:
+  installing new packages on the PC was blocked earlier this week, and OpenSky history needs an account.
+- **Map (Part 15 Q2):** the map backdrop takes any list of points (`{name, lat, lon, role}`), it is not hard-coded to Dubai-Tabuk.
+
 ## Make video / Stop video (2026-10-11)
 - **Make video** is disabled while any job is running or queued, with "● Job running: <title>" next to it (the page polls every
   5 s; the button also locks the moment it's clicked, so a double click can't queue two jobs).

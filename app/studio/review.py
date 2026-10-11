@@ -13,7 +13,7 @@ from pathlib import Path
 from . import media
 
 FPS = 30
-RUNG = {"stock": "Stock footage", "photo": "Real photo", "cloud": "Cloud still", "illustration": "Illustration", "silhouette": "Silhouette", "still": "AI still", "animate": "AI animation", "parallax": "Parallax",
+RUNG = {"stock": "Stock footage", "photo": "Real photo", "cloud": "Cloud still", "illustration": "Illustration", "silhouette": "Silhouette", "simulation": "Simulation", "still": "AI still", "animate": "AI animation", "parallax": "Parallax",
         "reconstruction": "3D reconstruction", "headline": "Headline card", "map": "Map", "supplied": "Your file", "parallax (fill)": "Parallax"}
 STATIC = {"still", "headline", "photo"}          # click enlarges instead of playing
 _locks, _gpu = {}, threading.Lock()
@@ -285,7 +285,7 @@ def _thumb(job, c, cfg, log):
             _frame(src, tt, out.with_suffix(".tmp.jpg")); _cover(out.with_suffix(".tmp.jpg"), out, ts); out.with_suffix(".tmp.jpg").unlink()
         elif t == "image": _contain(sd / it["src"], out, ts) if it.get("fit") == "frame" else _cover(sd / it["src"], out, ts)
         elif t == "layers": _cover(sd / it["layers"][0], out, ts)
-        elif t == "graphic" and it["g"].get("kind") in ("recon", "illustration", "silhouette"):
+        elif t == "graphic" and it["g"].get("kind") in ("recon", "illustration", "silhouette", "sim"):
             _remotion(sd, it, 6, out, cfg, log, frame=FPS * 3, scale=0.25)
         elif t == "graphic" and it["g"].get("kind") == "map":
             _card(it["g"].get("title") or "Map", "map: " + ", ".join(p["name"] for p in it["g"].get("points", []))[:28], out)

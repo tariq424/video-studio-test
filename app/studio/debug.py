@@ -178,6 +178,9 @@ Treatments currently offered for this beat (option number. type, accepted or rej
 Recent pipeline log:
 {log}
 
+Earlier in this conversation about this beat (oldest first):
+{history}
+
 The editor says: "{text}"
 
 Actions:
@@ -187,10 +190,17 @@ Actions:
 - "thumbnails": generate the thumbnails.
 - "skip": use the headline card for this beat.
 - "continue": resume the pipeline.
+- "simulate": build a data / physics simulation of what physically happened in this beat; "module" = one of the modules below,
+  "params" = its parameters, taken from the narration (numbers as plain numbers; leave out what the narration doesn't give).
 - "none": no action (a question, or unclear).
-Reply with ONLY JSON: {{"kind": "action" or "why", "action": "...", "instruction": "", "queries": [], "count": 2, "options": [],
+Simulation modules:
+{modules}
+Reply with ONLY JSON: {{"kind": "action" or "why" or "claude", "action": "...", "instruction": "", "queries": [], "count": 2, "options": [],
+"module": "", "params": {{}},
 "reply": "one or two short sentences to the editor: what you are doing, or the answer (from the facts above only; say so if they don't tell)"}}
-"kind" is "why" when they ask why something happened / was rejected / was chosen, or ask you to diagnose or explain."""
+"kind" is "why" when they ask why something happened / was rejected / was chosen, or ask you to diagnose or explain.
+"kind" is "claude" (with action "none") when the request needs judgment or taste beyond these actions (rewrite the narration's
+argument, design a new kind of visual, weigh editorial trade-offs): say in "reply" that it goes to Claude."""
 
 WHYISH = re.compile(r"^\s*(why|how come|what made|explain|diagnose|what went wrong|reason)\b|\bwhy\b.*\?$", re.I)
 
@@ -221,18 +231,28 @@ def chat(studio, jid, bid, text, cfg):
     if ch.get("stock_rejected"): chain += "\n" + "\n".join(f"- stock clip rejected: {r.get('why')}" for r in ch["stock_rejected"][:6])
     if ch.get("photos_rejected"): chain += "\n" + "\n".join(f"- real photo rejected: {r.get('why')}" for r in ch["photos_rejected"][:6])
     chain += f"\n- stock clips found: {ch.get('stock_found', 0)}; used: {', '.join(ch.get('uses', [])) or '?'}"
-    prompt = CHAT.format(n=int(bid[1:]) + 1 if bid[1:].isdigit() else bid, vo=(ch.get("vo") or (rv or {}).get("beats", {}).get(bid, {}).get("vo", ""))[:400],
-                         label=label, chain=chain, cands=ctext, log=logtail[-3000:], text=text.replace('"', "'"))
+    from . import physics
+    past = [e for e in (s.get("debug") or {}).get("chat", []) if e.get("beat") == bid][-6:]   # multi-turn: this beat's conversation
+    history = "\n".join(f"- editor: {e['you']}\n  you: {e['reply'][:300]} (action: {e.get('action')})" for e in past) or "- (none)"
+    vo = (ch.get("vo") or (rv or {}).get("beats", {}).get(bid, {}).get("vo", ""))
+    prompt = CHAT.format(n=int(bid[1:]) + 1 if bid[1:].isdigit() else bid, vo=vo[:400],
+                         label=label, chain=chain, cands=ctext, log=logtail[-3000:], text=text.replace('"', "'"), history=history,
+                         modules=physics.describe())
     def chk(x):
-        if x.get("action") not in ("refine", "more_stock", "use", "thumbnails", "skip", "continue", "none"): raise ValueError("unknown action")
+        if x.get("action") not in ("refine", "more_stock", "use", "thumbnails", "skip", "continue", "simulate", "none"): raise ValueError("unknown action")
     with LLM(c, j.log, lambda: False) as llm:
         backend = llm.name
         try: x = llm.chat_json("You are a precise assistant for a video editor. Reply with JSON only.", prompt, max_tokens=800, check=chk)
         except RuntimeError: x = {"kind": "why", "action": "none", "reply": "I couldn't work out what to do; try rephrasing."}
     why = x.get("kind") == "why" or bool(WHYISH.search(text))
+    to_claude = x.get("kind") == "claude"
     reply = str(x.get("reply") or "").strip()[:500]
     act, err = x.get("action", "none"), ""
-    if why: act = "none"; reply = (reply + ("\n" if reply else "") + WHY_NOTE)
+    if why or to_claude: act = "none"; reply = (reply + ("\n" if reply else "") + WHY_NOTE)
+    handoff = ""
+    if why or to_claude:   # ready-to-paste context for the Claude chat (no API key needed: you paste it)
+        handoff = (f"Video Studio job {jid}, beat {bid} (paused: {label}).\nNarration: \"{vo[:600]}\"\nVisual ladder for this beat:\n{chain}\n"
+                   f"Treatments offered:\n{ctext}\nEarlier in the pause chat:\n{history}\nMy request: {text}")
     try:
         if act == "refine":
             err = review.start(studio, jid, bid, "refine", {"text": x.get("instruction") or text})
@@ -244,12 +264,21 @@ def chat(studio, jid, bid, text, cfg):
             else: review.decide(jd, bid, "choose", cids, cfg, j.log)
         elif act == "skip": review.decide(jd, bid, "skip")
         elif act == "thumbnails": review.thumbs(jd, cfg, j.log, [i for i in ids])
+        elif act == "simulate":
+            g = physics.run(str(x.get("module") or ""), x.get("params") or {})
+            if not g: err = f"no simulation for '{x.get('module')}' (not built yet, or the narration gave no usable numbers)"
+            else:
+                rv2 = review.load(jd); cid = review._add(rv2, bid, {"type": "graphic", "g": g, "tag": "SIMULATION"}, "simulation", True,
+                                                           f"{g['module']}: {g.get('label') or g.get('title')}")
+                review.save(jd, rv2); review.decide(jd, bid, "choose", [cid], cfg, j.log)
+                reply += f"\n(Simulation added and selected for this beat: {g.get('label') or g['title']}.)"
         elif act == "continue":
             if s.get("status") == "paused": studio.resume(jid)
             else: err = "use Continue to render on the review panel"
     except Exception as e: err = str(e)[:200]
     if err: reply += f"\n(Couldn't do it: {err})"
-    ent = {"t": time.strftime("%H:%M:%S"), "beat": bid, "you": text[:500], "reply": reply, "backend": backend, "action": act, "kind": "why" if why else "action"}
+    ent = {"t": time.strftime("%H:%M:%S"), "beat": bid, "you": text[:500], "reply": reply, "backend": "Claude (paste)" if to_claude else backend,
+           "action": act, "kind": "claude" if to_claude else "why" if why else "action", "handoff": handoff}
     d = j.state.get("debug") or {}; d.setdefault("chat", []).append(ent); j.save(debug=d)
     trace(jd, {"ev": "chat", **{k: ent[k] for k in ("beat", "you", "reply", "backend", "action")}}, force=True)
     render_md(jd)
