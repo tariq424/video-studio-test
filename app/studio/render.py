@@ -148,8 +148,9 @@ def cloud_still(cfg, job, v, vo, log):
     return True
 
 def illustration_still(cfg, job, v, vo, log):
-    """Long videos, before WanGP: a 16:9 flat illustration / silhouette (illustrate.py, Remotion) -> stills/<id>.jpg (the Ken Burns
-    move then animates it; the ILLUSTRATION / SILHOUETTE label is drawn by Remotion). Beats WanGP must not draw (aircraft,
+    """Long videos, before WanGP: a 16:9 flat illustration / silhouette (illustrate.py, Remotion), rendered as a 6 s animated clip
+    (layer parallax, the aircraft moving at its attitude) -> motion/<id>.mp4 and the visual becomes "motion" (assemble stretches it
+    to its slot); the ILLUSTRATION / SILHOUETTE label is drawn by Remotion. Beats WanGP must not draw (aircraft,
     vehicles, specific buildings, real people) get the headline card when no illustration fits. -> rung name, or None (WanGP may
     draw it: atmospheric filler)."""
     from . import illustrate, review
@@ -162,12 +163,10 @@ def illustration_still(cfg, job, v, vo, log):
     (ws / "space.json").write_text(json.dumps({"orient": "landscape", "still_res": "1920x1088", "i2v_res": "1280x720", "w": 1920, "h": 1080}), encoding="utf-8")
     bg = {k: item[k] for k in ("type", "g")}
     if item.get("tag"): bg["tag"] = item["tag"]
-    png = ws / f"{v['id']}.png"
-    try: review._remotion(ws, bg, 6, png, cfg, log, frame=90, scale=1)
+    md = job / "motion"; md.mkdir(exist_ok=True); clip = md / f"{v['id']}.mp4"
+    try: review._remotion(ws, bg, 6, clip, cfg, log, frames=(0, 179), scale=1, crf=16)
     except Exception as e: log(f"  illustration {v['id']} failed ({str(e)[:100]})"); return None
-    from PIL import Image
-    Image.open(png).convert("RGB").save(d / f"{v['id']}.jpg", quality=93)
-    v["illustration"] = item["rung"]
+    v["illustration"] = item["rung"]; v["type"] = "motion"
     log(f"  {v['id']}: {item['rung']}" + (f" (WanGP skipped: {lock})" if lock else " (before WanGP)"))
     return item["rung"]
 
@@ -178,9 +177,9 @@ def do_motion(job, plan, cfg, wg, log, stop):
             if v["type"] != "motion" or v.get("stock"): continue
             seed += 1; out = d / f"{v['id']}.mp4"
             if media.ok(out): continue
-            if (job / "stills" / f"{v['id']}.jpg").exists() or cloud_still(cfg, job, v, s.get("vo", ""), log) \
-                    or illustration_still(cfg, job, v, s.get("vo", ""), log):   # cloud, then illustration: a still instead of WanGP motion
-                v["type"] = "still"; log(f"Motion {v['id']}: still instead of WanGP motion"); continue
+            if (job / "stills" / f"{v['id']}.jpg").exists() or cloud_still(cfg, job, v, s.get("vo", ""), log):   # cloud still
+                v["type"] = "still"; log(f"Motion {v['id']}: cloud still instead of WanGP motion"); continue
+            if illustration_still(cfg, job, v, s.get("vo", ""), log): continue   # animated illustration clip (motion/<id>.mp4)
             ok = False
             for t in range(2):
                 r = wg.gen({"model_type": cfg["video_model"], "prompt": v["prompt"] + STYLE, "resolution": "1280x720",

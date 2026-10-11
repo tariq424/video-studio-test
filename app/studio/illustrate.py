@@ -29,12 +29,25 @@ def time_of_day(text):
     return "dusk"
 
 
+DIVE = r"\b(descen\w*|dropp?\w*|dives?|dived|dove|diving|plunge\w*|plummet\w*|fell|fall\w*|lost altitude|losing altitude|nose-?dive\w*|sank|sinking|crash\w*)\b"
+CLIMB = r"\b(climb\w*|took off|taking off|take-?off|gained altitude|ascend\w*|rose|rising|soar\w*)\b"
+BANK = r"\b(bank\w*|turn\w*|veer\w*|swerv\w*|circl\w*|divert\w*|u-?turn)\b"
+
+
 def attitude(text, ph):
+    """Aircraft attitude from the narration's verb: dive | climb | bank | level; the verb wins over the phase (a beat about a dive
+    that also mentions the later landing still shows the dive); without a verb, landing / ground from the phase."""
+    if re.search(DIVE, text, re.I): return "dive"
+    if re.search(CLIMB, text, re.I): return "climb"
+    if re.search(BANK, text, re.I) and ph not in ("ground",): return "bank"
     if ph == "ground": return "ground"
     if ph == "landing": return "landing"
-    if re.search(r"\b(descen\w*|dropp?\w*|dive|diving|plunge\w*|plummet\w*|fell|fall\w*|lost altitude|losing altitude|nosedive\w*)\b", text, re.I): return "down"
-    if re.search(r"\b(climb\w*|took off|taking off|gained altitude|ascend\w*)\b", text, re.I): return "up"
     return "level"
+
+
+def pose(text):
+    """Cars / people: moving (drive, race, flee, run, walk...) or still. Buildings have no pose."""
+    return "moving" if re.search(r"\b(driv\w*|drove|speed\w*|rac\w*|chas\w*|flee\w*|fled|run\w*|ran|rush\w*|walk\w*|march\w*|evacuat\w*)\b", text, re.I) else "still"
 
 
 def ground(text):
@@ -66,9 +79,12 @@ def options(sec, ents, moment=None, k=0):
     scenes = [name for name, rx in SCENES if re.search(rx, vo, re.I)]
     if (subject or {}).get("interior") and "cockpit" not in scenes: scenes.insert(0, "cockpit")
     if (subject or {}).get("kind") == "aircraft" or re.search(r"\b(plane|jet|airliner|aircraft|flight)\b", vo, re.I) or ph == "air":
-        if ph in ("ground", "landing"): scenes = ["airport"] + [s for s in scenes if s != "airport"]
+        if att in ("dive", "climb", "bank"): scenes = ["sky"] + [s for s in scenes if s != "sky"]
+        elif ph in ("ground", "landing"): scenes = ["airport"] + [s for s in scenes if s != "airport"]
         elif "sky" not in scenes: scenes.insert(0 if ph == "air" or not scenes else 1, "sky")
-    if ph == "air": scenes = [s for s in scenes if s != "airport"]   # in the air: never on a runway
+    if ph == "air" or att in ("dive", "climb", "bank"):   # in the air (or the verb says so): never on a runway, the sky first
+        scenes = [s for s in scenes if s != "airport"]
+        if "sky" in scenes: scenes = ["sky"] + [s for s in scenes if s != "sky"]
     out = []
     for s in dict.fromkeys(scenes):
         g = {"kind": "illustration", "scene": s, "time": tod, "attitude": "landing" if s == "airport" and ph == "landing" else att,
@@ -79,7 +95,7 @@ def options(sec, ents, moment=None, k=0):
     if sh:
         # a black shape needs a light sky behind it: night and day become dusk. No text: the beat's own graphics carry the words.
         out.append({"type": "graphic", "g": {"kind": "silhouette", "shape": sh, "time": "storm" if tod == "storm" else "dusk",
-                    "attitude": att if sh in ("airliner", "jet") else "level", "seed": seed},
+                    "attitude": att if sh in ("airliner", "jet") else "level", "pose": pose(vo), "seed": seed},
                     "rung": "silhouette", "tag": "SILHOUETTE"})
     return out
 

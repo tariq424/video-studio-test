@@ -379,7 +379,7 @@ class Studio:
                     render.do_motion(j.dir, plan, cfg, wg, log, stop); j.save_plan(plan)
                 elif st == "stills":
                     if any(v["type"] == "still" and not v.get("stock") for x in plan["sections"] for v in x["visuals"]): _need_wangp(wg)
-                    render.do_stills(j.dir, plan, cfg, wg, log, stop)
+                    render.do_stills(j.dir, plan, cfg, wg, log, stop); j.save_plan(plan)   # illustrations turn stills into motion clips
                 elif st == "assemble":
                     meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
                     parts = assemble.build(j.dir, plan, log, stop, use_presenter=s.get("presenter", False), use_captions=s.get("captions", True)); final = assemble.finalize(j.dir, plan, parts, meta, log)

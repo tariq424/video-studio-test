@@ -76,6 +76,17 @@ Video Studio is a fork of Explainer Studio (`F:\code\explainer-studio`, github `
   - `silhouette`: airliner (with gear when landing / on the ground), fighter jet (military subject or F-35/fighter words),
     person, people (3 figures), buildings, car, ship - in black against a sky gradient with a large sun/moon disc; optional
     text = the beat's headline backdrop text.
+- **Motion (2026-10-11):** every illustration / silhouette moves: layer parallax (sky 0.1-0.15, clouds 0.3-0.45, ground /
+  skyline 0.6-0.8, subject 1.1-1.2 of a 3.5%-of-width camera drift, the same idea as the AI-still parallax) inside a slow 1.09 ->
+  1.15 zoom, plus drifting clouds, the aircraft travelling along its attitude, blinking lights, radar sweep. Long videos get
+  them as animated 6 s clips (`motion/<id>.mp4`, CRF 16), not Ken Burns stills.
+- **Attitude / pose from the narration verb** (`illustrate.attitude` / `pose`): dive (descend, dive, dropped, fell, plunged,
+  plummeted, lost altitude, crash ...) -> nose 24° down and sinking; climb (climb, ascend, rose, took off, soar) -> 15° up and
+  rising; bank (bank, turn, veer, circle, divert) -> side view squashed (wings toward the camera) with a slight roll; else level;
+  without a verb, landing / ground from the phase. The verb beats the phase, and a dive / climb / bank puts the sky scene first
+  (never a runway). Silhouette aircraft use the same poses. Cars: `moving` (drive, speed, race, chase, flee ...) drive across
+  with speed lines, else parked; people: `moving` (run, walk, flee, rush, evacuate ...) walk with a bob, else stand.
+  Buildings have no pose.
 - **Selection** (`illustrate.options`, keyword rules, no AI call): scenes from narration words (radar / cockpit / airport /
   sea / city), aircraft beats get `sky` (in the air) or `airport` (landing, ground); in the air never a runway. Then a
   silhouette when a shape is known. A beat with several failed slots cycles through the options. No options (abstract

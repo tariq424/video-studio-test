@@ -251,14 +251,14 @@ def _urlify(bg, sd):
     if bg.get("layers"): bg["layers"] = [base + x for x in bg["layers"]]
     return bg
 
-def _remotion(sd, bg, secs, out, cfg, log, frame=None, frames=None, scale=0.25):
+def _remotion(sd, bg, secs, out, cfg, log, frame=None, frames=None, scale=0.25, crf=26):
     from . import short
     rdir, bundle = _bundle(log); out = Path(out); out.parent.mkdir(parents=True, exist_ok=True)
     w, h = _fsize(sd)
     pf = out.with_name(out.stem + "_props.json"); pf.write_text(json.dumps({"bg": _urlify(bg, sd), "secs": secs, "w": w, "h": h}), encoding="utf-8")
     cmd = [short._npx(), "remotion", "still" if frame is not None else "render", str(bundle), "ShotPreview", str(out), f"--props={pf}",
            f"--gl={short._gl(cfg)}", f"--scale={scale}", "--log=error"]
-    cmd += [f"--frame={frame}"] if frame is not None else [f"--frames={frames[0]}-{frames[1]}", "--crf=26", "--concurrency=2"]
+    cmd += [f"--frame={frame}"] if frame is not None else [f"--frames={frames[0]}-{frames[1]}", f"--crf={crf}", "--concurrency=2"]
     for attempt in range(2):
         p = subprocess.run(cmd, cwd=rdir, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900)
         if p.returncode == 0 and out.exists(): break

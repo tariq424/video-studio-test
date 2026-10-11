@@ -9,7 +9,7 @@ export type Illustration = {
   kind: "illustration";
   scene: "sky" | "airport" | "city" | "radar" | "cockpit" | "sea";
   time?: "day" | "dusk" | "night" | "storm";
-  attitude?: "level" | "down" | "up" | "landing" | "ground";
+  attitude?: "level" | "dive" | "climb" | "bank" | "down" | "up" | "landing" | "ground";
   ground?: "desert" | "green" | "sea";
   alarm?: boolean;
   seed?: number;
@@ -18,7 +18,8 @@ export type Silhouette = {
   kind: "silhouette";
   shape: "airliner" | "jet" | "person" | "people" | "building" | "car" | "ship";
   time?: "day" | "dusk" | "night" | "storm";
-  attitude?: "level" | "down" | "up" | "landing" | "ground";
+  attitude?: "level" | "dive" | "climb" | "bank" | "down" | "up" | "landing" | "ground";
+  pose?: "still" | "moving";   // cars drive past, people walk; buildings have no pose
   text?: string;
   seed?: number;
 };
@@ -31,7 +32,21 @@ const SKY: Record<string, [string, string, string]> = {
 };
 const GROUND: Record<string, string> = { desert: "#c99a5b", green: "#4f7a4a", sea: "#1f4f78" };
 const rnd = (i: number) => { const x = Math.sin(i * 12.9898 + 78.233) * 43758.5453; return x - Math.floor(x); };
-const ANGLE: Record<string, number> = { level: 0, down: 16, up: -12, landing: -4, ground: 0 };
+const ANGLE: Record<string, number> = { level: 0, dive: 24, down: 24, climb: -15, up: -15, bank: 0, landing: -4, ground: 0 };
+// pose of a flying aircraft over the shot: pitch angle, vertical travel, and for a bank a squashed side view (wings tilted to camera)
+const airPose = (att: string, p: number, t: number, W: number, H: number) => {
+  const a = att === "down" ? "dive" : att === "up" ? "climb" : att;
+  const dy = a === "dive" ? interpolate(p, [0, 1], [-H * 0.09, H * 0.11]) : a === "climb" ? interpolate(p, [0, 1], [H * 0.08, -H * 0.08])
+    : a === "bank" ? -Math.sin(p * Math.PI) * H * 0.05 : Math.sin(t * 1.4) * 8;
+  const ang = (ANGLE[a] ?? 0) + (a === "bank" ? interpolate(p, [0, 1], [0, 5]) : 0);
+  return { ang, dy, sy: a === "bank" ? 0.72 : 1 };
+};
+// camera parallax: layers drift sideways at different speeds (near layers further), as on the AI-still parallax
+const useCam = (seed: number, p: number, W: number) => {
+  const e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+  const span = W * 0.035 * (seed % 2 === 0 ? 1 : -1);
+  return (d: number) => `translate(${interpolate(e, [0, 1], [span, -span]) * d},0)`;
+};
 
 // Side-view airliner facing right, drawn in a 400 x 120 box (nose at x=395, y=60). flat=true: coloured flat illustration.
 const Airliner: React.FC<{ flat?: boolean; fill?: string; gear?: boolean; night?: boolean; f: number }> = ({ flat, fill = "#0b0f17", gear, night, f }) => {
@@ -74,7 +89,7 @@ const Sky: React.FC<{ W: number; H: number; time: string; id: string }> = ({ W, 
   return (
     <>
       <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={a} /><stop offset="0.62" stopColor={b} /><stop offset="1" stopColor={c} /></linearGradient></defs>
-      <rect width={W} height={H} fill={`url(#${id})`} />
+      <rect x={-W * 0.1} width={W * 1.2} height={H} fill={`url(#${id})`} />
       {time === "night" ? Array.from({ length: 70 }, (_, i) => <circle key={i} cx={rnd(i) * W} cy={rnd(i + 99) * H * 0.6} r={1 + rnd(i + 7) * 2} fill="#fff" opacity={0.25 + rnd(i + 3) * 0.6} />) : null}
     </>
   );
@@ -117,20 +132,19 @@ const Skyline: React.FC<{ W: number; base: number; f: number; fill: string; lit:
 export const IllustrationBackdrop: React.FC<{ g: Illustration; dur: number }> = ({ g, dur }) => {
   const f = useCurrentFrame(); const { fps, width: W, height: H } = useVideoConfig(); const t = f / fps;
   const p = Math.min(1, t / Math.max(dur, 0.1)); const seed = g.seed ?? 3; const time = g.time || "dusk";
-  const zoom = interpolate(p, [0, 1], [1.0, 1.06]); const tall = H > W; const u = Math.min(W, H) / 1080;
+  const zoom = interpolate(p, [0, 1], [1.09, 1.15]); const tall = H > W; const u = Math.min(W, H) / 1080; const cam = useCam(seed, p, W);
   const ground = GROUND[g.ground || "desert"]; const id = `sky${seed}`;
   let scene: React.ReactNode = null;
   if (g.scene === "sky") {
-    const att = g.attitude || "level"; const ang = ANGLE[att] ?? 0;
-    const k = (tall ? 1.85 : 2.3) * u, dy = att === "down" ? interpolate(p, [0, 1], [-H * 0.06, H * 0.08]) : att === "up" ? interpolate(p, [0, 1], [H * 0.06, -H * 0.06]) : Math.sin(t * 1.4) * 8;
-    const dx = interpolate(p, [0, 1], [-W * 0.05, W * 0.05]);
+    const { ang, dy, sy } = airPose(g.attitude || "level", p, t, W, H);
+    const k = (tall ? 1.85 : 2.3) * u, dx = interpolate(p, [0, 1], [-W * 0.05, W * 0.05]);
     scene = (<>
-      <Sky W={W} H={H} time={time} id={id} />
-      {time === "dusk" || time === "day" ? <circle cx={W * 0.72} cy={H * 0.74} r={W * 0.16} fill={time === "dusk" ? "#ffd27a" : "#fff6cf"} opacity={0.9} /> : null}
-      <Clouds W={W} H={H} f={f} time={time} seed={seed} band={[0.06, 0.55]} />
-      <path d={`M0,${H * 0.84} C${W * 0.25},${H * 0.8} ${W * 0.55},${H * 0.86} ${W},${H * 0.81} L${W},${H} L0,${H} Z`} fill={ground} opacity={0.95} />
-      <path d={`M0,${H * 0.9} C${W * 0.3},${H * 0.86} ${W * 0.7},${H * 0.93} ${W},${H * 0.88} L${W},${H} L0,${H} Z`} fill="#000" opacity={0.18} />
-      <g transform={`translate(${W / 2 - 200 * k + dx},${H * 0.42 + dy}) scale(${k}) rotate(${ang} 200 60)`}><Airliner flat night={time === "night"} f={f} /></g>
+      <g transform={cam(0.15)}><Sky W={W} H={H} time={time} id={id} />
+      {time === "dusk" || time === "day" ? <circle cx={W * 0.72} cy={H * 0.74} r={W * 0.16} fill={time === "dusk" ? "#ffd27a" : "#fff6cf"} opacity={0.9} /> : null}</g>
+      <g transform={cam(0.45)}><Clouds W={W} H={H} f={f} time={time} seed={seed} band={[0.06, 0.55]} /></g>
+      <g transform={cam(0.8)}><path d={`M0,${H * 0.84} C${W * 0.25},${H * 0.8} ${W * 0.55},${H * 0.86} ${W},${H * 0.81} L${W},${H} L0,${H} Z`} fill={ground} opacity={0.95} />
+      <path d={`M0,${H * 0.9} C${W * 0.3},${H * 0.86} ${W * 0.7},${H * 0.93} ${W},${H * 0.88} L${W},${H} L0,${H} Z`} fill="#000" opacity={0.18} /></g>
+      <g transform={cam(1.2)}><g transform={`translate(${W / 2 - 200 * k + dx},${H * 0.42 + dy}) scale(${k}) rotate(${ang} 200 60) translate(0,${60 * (1 - sy)}) scale(1,${sy})`}><Airliner flat night={time === "night"} f={f} /></g></g>
       {time === "storm" && Math.floor(t * 2.3) % 7 === 3 ? <rect width={W} height={H} fill="#fff" opacity={0.18} /> : null}
     </>);
   } else if (g.scene === "airport") {
@@ -139,36 +153,37 @@ export const IllustrationBackdrop: React.FC<{ g: Illustration; dur: number }> = 
     const px = landing ? interpolate(p, [0, 1], [W * 0.02, W * 0.22]) : interpolate(p, [0, 1], [W * 0.05, W * 0.12]);
     const py = landing ? interpolate(p, [0, 1], [hz - H * 0.26, hz - H * 0.13]) : hz + H * 0.07;
     scene = (<>
-      <Sky W={W} H={hz + 2} time={time} id={id} />
-      <Clouds W={W} H={hz} f={f} time={time} seed={seed} band={[0.1, 0.6]} />
+      <g transform={cam(0.15)}><Sky W={W} H={hz + 2} time={time} id={id} /></g>
+      <g transform={cam(0.4)}><Clouds W={W} H={hz} f={f} time={time} seed={seed} band={[0.1, 0.6]} /></g>
       <rect y={hz} width={W} height={H - hz} fill={ground} />
+      <g transform={cam(0.6)}>
       <g fill={time === "night" ? "#1a2233" : "#5d6878"}>
         <rect x={W * 0.05} y={hz - H * 0.05} width={W * 0.5} height={H * 0.05} /><rect x={W * 0.08} y={hz - H * 0.065} width={W * 0.3} height={H * 0.016} />
         <rect x={W * 0.74} y={hz - H * 0.15} width={W * 0.03} height={H * 0.15} /><path d={`M${W * 0.71},${hz - H * 0.15} L${W * 0.8},${hz - H * 0.15} L${W * 0.79},${hz - H * 0.18} L${W * 0.72},${hz - H * 0.18} Z`} />
       </g>
-      {Array.from({ length: 14 }, (_, i) => <rect key={i} x={W * 0.07 + i * W * 0.034} y={hz - H * 0.035} width={W * 0.018} height={H * 0.012} fill="#ffd27a" opacity={time === "night" || time === "dusk" ? 0.9 : 0.35} />)}
+      {Array.from({ length: 14 }, (_, i) => <rect key={i} x={W * 0.07 + i * W * 0.034} y={hz - H * 0.035} width={W * 0.018} height={H * 0.012} fill="#ffd27a" opacity={time === "night" || time === "dusk" ? 0.9 : 0.35} />)}</g>
       <path d={`M${W * 0.44},${hz} L${W * 0.56},${hz} L${W * 1.1},${H} L${-W * 0.1},${H} Z`} fill="#2e333b" />
       {Array.from({ length: 7 }, (_, i) => { const a = i / 7, b = (i + 0.45) / 7, y1 = hz + (H - hz) * a * a, y2 = hz + (H - hz) * b * b;
         return <path key={i} d={`M${W * 0.5 - 2 - a * 10},${y1} L${W * 0.5 + 2 + a * 10},${y1} L${W * 0.5 + 2 + b * 10},${y2} L${W * 0.5 - 2 - b * 10},${y2} Z`} fill="#f1f1ea" />; })}
       {Array.from({ length: 10 }, (_, i) => { const a = (i + 1) / 11, y = hz + (H - hz) * a * a, on = Math.floor(f / 10 + i) % 10 === 0;
         return <g key={i}><circle cx={W * 0.44 - a * W * 0.54} cy={y} r={3 + a * 6} fill={on ? "#fff" : "#ffcf6b"} /><circle cx={W * 0.56 + a * W * 0.54} cy={y} r={3 + a * 6} fill={on ? "#fff" : "#ffcf6b"} /></g>; })}
-      <g transform={`translate(${px},${py}) scale(${k}) rotate(${landing ? -4 : 0} 200 60)`}><Airliner flat gear night={time === "night"} f={f} /></g>
+      <g transform={cam(1.2)}><g transform={`translate(${px},${py}) scale(${k}) rotate(${landing ? -4 : 0} 200 60)`}><Airliner flat gear night={time === "night"} f={f} /></g></g>
     </>);
   } else if (g.scene === "city") {
     const base = H * (tall ? 0.78 : 0.82);
     scene = (<>
-      <Sky W={W} H={H} time={time} id={id} />
-      {time === "night" ? <circle cx={W * 0.78} cy={H * 0.16} r={W * 0.06} fill="#f3f0d8" /> : null}
-      <Clouds W={W} H={H} f={f} time={time} seed={seed} band={[0.05, 0.35]} />
-      <Skyline W={W} base={base} f={f} fill={time === "night" ? "#18233b" : "#56607a"} lit="#ffd98a" seed={seed + 11} h={H * 0.34} />
-      <Skyline W={W} base={base + 6} f={f} fill={time === "night" ? "#0a0f1c" : "#2e3446"} lit="#ffe9b8" seed={seed + 23} h={H * 0.24} dome />
+      <g transform={cam(0.1)}><Sky W={W} H={H} time={time} id={id} />
+      {time === "night" ? <circle cx={W * 0.78} cy={H * 0.16} r={W * 0.06} fill="#f3f0d8" /> : null}</g>
+      <g transform={cam(0.3)}><Clouds W={W} H={H} f={f} time={time} seed={seed} band={[0.05, 0.35]} /></g>
+      <g transform={cam(0.6)}><Skyline W={W} base={base} f={f} fill={time === "night" ? "#18233b" : "#56607a"} lit="#ffd98a" seed={seed + 11} h={H * 0.34} /></g>
+      <g transform={cam(1.1)}><Skyline W={W} base={base + 6} f={f} fill={time === "night" ? "#0a0f1c" : "#2e3446"} lit="#ffe9b8" seed={seed + 23} h={H * 0.24} dome /></g>
       <rect y={base} width={W} height={H - base} fill={time === "night" ? "#050811" : "#1d2230"} />
       {Array.from({ length: 18 }, (_, i) => <rect key={i} x={rnd(seed + i) * W} y={base + 20 + rnd(seed + i * 2) * (H - base - 40)} width={40 + rnd(i) * 120} height={3} fill="#ffd98a" opacity={0.25} />)}
     </>);
   } else if (g.scene === "radar") {
     const cx = W / 2, cy = H * 0.48, R = Math.min(W, H) * 0.42, sweep = (t * 70) % 360;
     const blips = Array.from({ length: 6 }, (_, i) => ({ a: rnd(seed + i) * 360, r: R * (0.25 + rnd(seed + i * 3) * 0.7) }));
-    const tr = g.attitude === "down";
+    const tr = g.attitude === "down" || g.attitude === "dive";
     scene = (<>
       <rect width={W} height={H} fill="#03110c" />
       {Array.from({ length: 40 }, (_, i) => <line key={i} x1={0} y1={(i * H) / 40} x2={W} y2={(i * H) / 40} stroke="#0b2a1f" strokeWidth={1} />)}
@@ -182,7 +197,7 @@ export const IllustrationBackdrop: React.FC<{ g: Illustration; dur: number }> = 
     </>);
   } else if (g.scene === "cockpit") {
     const dash = H * (tall ? 0.6 : 0.62);
-    const bank = g.attitude === "down" ? 10 + Math.sin(t * 2) * 4 : Math.sin(t * 0.8) * 2;
+    const bank = g.attitude === "down" || g.attitude === "dive" ? 10 + Math.sin(t * 2) * 4 : Math.sin(t * 0.8) * 2;
     scene = (<>
       <g transform={`rotate(${bank} ${W / 2} ${dash})`}><Sky W={W} H={dash + 40} time={time} id={id} /><Clouds W={W} H={dash} f={f * 2} time={time} seed={seed} band={[0.15, 0.7]} /></g>
       <path d={`M0,0 L${W},0 L${W},${dash} L${W * 0.86},${dash * 0.22} L${W * 0.54},${dash * 0.16} L${W * 0.5},${dash} L${W * 0.46},${dash * 0.16} L${W * 0.14},${dash * 0.22} L0,${dash} Z`} fill="#11151d" />
@@ -199,8 +214,8 @@ export const IllustrationBackdrop: React.FC<{ g: Illustration; dur: number }> = 
   } else {   // sea
     const sea = H * 0.64;
     scene = (<>
-      <Sky W={W} H={sea + 2} time={time} id={id} />
-      <Clouds W={W} H={sea} f={f} time={time} seed={seed} band={[0.08, 0.5]} />
+      <g transform={cam(0.15)}><Sky W={W} H={sea + 2} time={time} id={id} /></g>
+      <g transform={cam(0.4)}><Clouds W={W} H={sea} f={f} time={time} seed={seed} band={[0.08, 0.5]} /></g>
       <rect y={sea} width={W} height={H - sea} fill="#1f4f78" />
       <g transform={`translate(${interpolate(p, [0, 1], [W * 0.18, W * 0.3])},${sea - 70 * u + Math.sin(t * 1.2) * 4}) scale(${1.4 * u})`}>
         <path d="M0,50 L400,50 L360,92 L30,92 Z" fill="#2d3442" /><rect x={110} y={14} width={170} height={36} fill="#e9edf2" />
@@ -221,22 +236,25 @@ export const SilhouetteBackdrop: React.FC<{ g: Silhouette; dur: number }> = ({ g
   const f = useCurrentFrame(); const { fps, width: W, height: H } = useVideoConfig(); const t = f / fps;
   const p = Math.min(1, t / Math.max(dur, 0.1)); const seed = g.seed ?? 5; const time = g.time || "dusk"; const u = Math.min(W, H) / 1080; const tall = H > W;
   const ink = "#0a0d14"; const id = `ssky${seed}`;
-  const zoom = interpolate(p, [0, 1], [1.0, 1.05]); const hz = H * (tall ? 0.8 : 0.84);
-  const att = g.attitude || "level"; const ang = ANGLE[att] ?? 0;
+  const zoom = interpolate(p, [0, 1], [1.09, 1.14]); const hz = H * (tall ? 0.8 : 0.84); const cam = useCam(seed, p, W);
+  const att = g.attitude || "level"; const pose = g.pose || "still";
   let shape: React.ReactNode;
   if (g.shape === "airliner" || g.shape === "jet") {
     const k = (tall ? 2.3 : 2.4) * u, dx = interpolate(p, [0, 1], [-W * 0.06, W * 0.06]);
-    const dy = att === "down" ? interpolate(p, [0, 1], [-H * 0.05, H * 0.06]) : att === "up" ? interpolate(p, [0, 1], [H * 0.05, -H * 0.05]) : Math.sin(t * 1.3) * 6;
-    shape = <g transform={`translate(${W / 2 - 200 * k + dx},${H * 0.42 + dy}) scale(${k}) rotate(${ang} 200 60)`}>{g.shape === "jet" ? <Jet fill={ink} /> : <Airliner fill={ink} gear={att === "landing" || att === "ground"} f={f} />}</g>;
+    const { ang, dy, sy } = airPose(att, p, t, W, H);
+    shape = <g transform={`translate(${W / 2 - 200 * k + dx},${H * 0.42 + dy}) scale(${k}) rotate(${ang} 200 60) translate(0,${60 * (1 - sy)}) scale(1,${sy})`}>{g.shape === "jet" ? <Jet fill={ink} /> : <Airliner fill={ink} gear={att === "landing" || att === "ground"} f={f} />}</g>;
   } else if (g.shape === "person" || g.shape === "people") {
     const n = g.shape === "people" ? 3 : 1;
     shape = <g fill={ink}>{Array.from({ length: n }, (_, i) => { const x = W / 2 + (i - (n - 1) / 2) * W * 0.22, s = (n === 1 ? 1.25 : 0.95 - Math.abs(i - 1) * 0.08) * u;
-      return <g key={i} transform={`translate(${x},${hz}) scale(${s})`}><circle cx={0} cy={-470} r={58} /><path d="M-95,-400 C-95,-420 95,-420 95,-400 L118,-150 L70,-150 L62,-20 L14,-20 L8,-150 L-8,-150 L-14,-20 L-62,-20 L-70,-150 L-118,-150 Z" /></g>; })}</g>;
+      const walk = pose === "moving"; const bob = walk ? Math.abs(Math.sin(t * 5 + i)) * -14 : Math.sin(t * 1.1 + i) * 2;
+      const xx = x + (walk ? interpolate(p, [0, 1], [-W * 0.06, W * 0.06]) : 0);
+      return <g key={i} transform={`translate(${xx},${hz + bob}) scale(${s}) skewX(${walk ? -6 : 0})`}><circle cx={0} cy={-470} r={58} /><path d="M-95,-400 C-95,-420 95,-420 95,-400 L118,-150 L70,-150 L62,-20 L14,-20 L8,-150 L-8,-150 L-14,-20 L-62,-20 L-70,-150 L-118,-150 Z" /></g>; })}</g>;
   } else if (g.shape === "building") {
     shape = <Skyline W={W} base={hz} f={0} fill={ink} lit="rgba(255,210,122,0.0)" seed={seed + 3} h={H * 0.38} dome />;
   } else if (g.shape === "car") {
-    const k = 2.2 * u, x = interpolate(p, [0, 1], [W * 0.1, W * 0.2]);
-    shape = <g transform={`translate(${x},${hz - 120 * k}) scale(${k})`} fill={ink}><path d="M10,90 L20,60 L90,52 L140,20 L250,18 L300,55 L370,62 L385,90 Z" /><circle cx={95} cy={92} r={28} /><circle cx={300} cy={92} r={28} /></g>;
+    const moving = pose === "moving", k = 2.2 * u, x = moving ? interpolate(p, [0, 1], [-W * 0.1, W * 0.45]) : W * 0.12;
+    shape = <g transform={`translate(${x},${hz - 120 * k + (moving ? Math.sin(t * 9) * 1.5 : 0)}) scale(${k})`} fill={ink}><path d="M10,90 L20,60 L90,52 L140,20 L250,18 L300,55 L370,62 L385,90 Z" /><circle cx={95} cy={92} r={28} /><circle cx={300} cy={92} r={28} />
+      {moving ? [0, 1, 2].map((i) => <rect key={i} x={-90 - i * 30} y={40 + i * 18} width={60} height={5} rx={2} opacity={0.5} />) : null}</g>;
   } else {   // ship
     const k = 2.2 * u, x = interpolate(p, [0, 1], [W * 0.05, W * 0.15]);
     shape = <g transform={`translate(${x},${hz - 110 * k + Math.sin(t * 1.2) * 4}) scale(${k})`} fill={ink}><path d="M0,80 L400,80 L360,120 L30,120 Z" /><rect x={120} y={40} width={150} height={40} /><rect x={160} y={10} width={60} height={30} /><rect x={235} y={-10} width={16} height={50} /></g>;
@@ -246,11 +264,11 @@ export const SilhouetteBackdrop: React.FC<{ g: Silhouette; dur: number }> = ({ g
     <AbsoluteFill style={{ overflow: "hidden", background: "#000" }}>
       <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ transform: `scale(${zoom})` }}>
         <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={a} /><stop offset="0.55" stopColor={b} /><stop offset="1" stopColor={c} /></linearGradient></defs>
-        <rect width={W} height={H} fill={`url(#${id})`} />
-        <circle cx={W * 0.5} cy={hz - H * 0.02} r={W * (tall ? 0.36 : 0.2)} fill={time === "night" ? "#e9e6cf" : "#ffd88a"} opacity={time === "night" ? 0.85 : 0.75} />
+        <rect x={-W * 0.1} width={W * 1.2} height={H} fill={`url(#${id})`} />
+        <g transform={cam(0.3)}><circle cx={W * 0.5} cy={hz - H * 0.02} r={W * (tall ? 0.36 : 0.2)} fill={time === "night" ? "#e9e6cf" : "#ffd88a"} opacity={time === "night" ? 0.85 : 0.75} /></g>
         {time === "night" ? Array.from({ length: 60 }, (_, i) => <circle key={i} cx={rnd(i) * W} cy={rnd(i + 31) * hz * 0.7} r={1 + rnd(i + 5) * 1.6} fill="#fff" opacity={0.6} />) : null}
         {g.shape === "ship" ? <rect y={hz} width={W} height={H - hz} fill={ink} opacity={0.85} /> : <path d={`M0,${hz} C${W * 0.3},${hz - 18} ${W * 0.7},${hz + 14} ${W},${hz - 8} L${W},${H} L0,${H} Z`} fill={ink} />}
-        {shape}
+        <g transform={cam(1.2)}>{shape}</g>
       </svg>
       {g.text ? <div style={{ position: "absolute", top: tall ? 340 : 110, left: 60, right: 60, textAlign: "center", fontFamily: HEAD, fontWeight: 900,
         fontSize: tall ? 58 : 44, lineHeight: 1.15, color: "#fff", textShadow: "0 4px 24px rgba(0,0,0,0.45)", opacity: interpolate(t, [0.2, 0.8], [0, 1], { extrapolateRight: "clamp" }) }}>{g.text}</div> : null}
