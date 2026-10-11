@@ -490,3 +490,16 @@ This is the human or AI step the app can't do for itself:
   -> 2 layers: background with the subject painted out + the subject as ONE rigid layer (fixed the tail tearing off in job
   20261009_131330 Beat 1). Everything else (skies, skylines, landscapes) -> the 3 depth layers as before.
 - Six-slot prompt / negative prompt / description-based check: branch wip/six-slot-image-prompts (not live).
+
+## Editor chat (post-render, 2026-10-11)
+The pause chat is wired into the timeline editor of a finished job: opening a beat shows "Chat about this beat" (same UI, same
+DeepSeek routing, same actions: why / Copy for Claude, refine, more_stock, use option N, simulate, skip -> headline card).
+- `debug.chat(..., edit=True)` runs against the editor workspace (`edit.workspace`: the job for Shorts, job/longedit for long
+  videos) from the saved job state on disk - nothing is reloaded into the pipeline. "continue" is replaced by **apply**.
+- Candidates land in the beat's review entry and are selected in the editor (`ent.select` -> `ED.sel`); nothing touches the
+  video until the user approves ("apply it" in the chat, or the Apply to video button).
+- apply = `edit.start_apply`: re-renders only that beat and splices it in (Shorts: stream-copy splice on beat keyframes; long:
+  BeatClip -> that section -> sections joined), with the usual verify record and undo (`output/*.prev`).
+- Endpoints: `POST /api/jobs/<jid>/edit/chat {beat,text}` (409 while any job renders), `GET /api/jobs/<jid>/edit/chat?beat=`.
+- Smoke-tested on 20261011_192216 b1: "simulate the descent... lost about 12,000 feet" -> SIMULATION candidate; "apply it" ->
+  splice verified (decode ok, 982 frames, audio identical); frames before/after checked, other beats unchanged.

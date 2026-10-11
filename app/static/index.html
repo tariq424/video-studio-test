@@ -267,8 +267,8 @@ function edReload(){const v=$('ov');if(v){const t=v.currentTime;v.src=v.src.spli
 const edQ=()=>ED.space=='long'?'?space=long':'';const edBase=()=>`/files/${sel}/${ED.space=='long'?'longedit/':''}short/`;
 async function edOpen(bid){const v=$('ov');if(v)v.pause();$('edp').innerHTML='<p class="mut">Opening the beat…</p>';
  try{const r=await fetch(`/api/jobs/${sel}/edit/open/${bid}`,{method:'POST'});const d=await r.json();if(!r.ok)throw new Error(d.error);
-  ED.open=bid;ED.space=d.space;ED.rv=d.rv;const b=ED.rv.beats[bid];ED.sel=[...(b.current||[])];ED.fit='auto';edDraw()}catch(e){$('edp').innerHTML=`<p style="color:var(--bad)">${esc(e.message)}</p>`}}
-function edDraw(){const bid=ED.open,b=ED.rv.beats[bid],bt=ED.beats.find(x=>x.id==bid)||{};
+  ED.open=bid;ED.space=d.space;ED.rv=d.rv;const b=ED.rv.beats[bid];ED.sel=[...(b.current||[])];ED.fit='auto';ED.draft='';ED.chat=(await j(`/api/jobs/${sel}/edit/chat?beat=${bid}`)).chat;edDraw()}catch(e){$('edp').innerHTML=`<p style="color:var(--bad)">${esc(e.message)}</p>`}}
+function edDraw(){if($('edchat'))ED.draft=$('edchat').value;const bid=ED.open,b=ED.rv.beats[bid],bt=ED.beats.find(x=>x.id==bid)||{};
  let h=`<div class="card" style="margin-top:12px"><div class="row"><h2 style="margin:0">Edit ${esc(bt.label||bid)} <span class="mut" style="font-weight:400;font-size:13px">${fmtT(bt.start||0)}–${fmtT((bt.start||0)+(bt.dur||0))} · ${(bt.dur||0).toFixed(1)}s</span></h2><span style="flex:1"></span><button class="sec" onclick="ED.open=null;$('edp').innerHTML=''">Close</button></div>
  <p style="margin:6px 0">${esc(b.vo)}</p>${b.busy?`<span class="rv-badge" style="color:var(--acc)">${esc(b.busy)}</span>`:''}
  <div class="mut" style="font-size:13px">Tick the treatment(s) to use (they play in the order ticked); click a thumbnail to preview it. Blue outline = in the video now.</div><div class="rv-row">`;
@@ -284,8 +284,16 @@ function edDraw(){const bid=ED.open,b=ED.rv.beats[bid],bt=ED.beats.find(x=>x.id=
  <label>Tell it what to change (e.g. "nose down, storm clouds", or a file path / URL)</label><textarea id="edrf" data-testid="edit-refine-text" rows="2"></textarea><div class="row"><button data-testid="edit-refine" onclick="edRv('refine')" ${b.busy?'disabled':''}>Regenerate</button></div>
  <label>Your own file (path on this PC or a URL) and its on-screen label</label><div class="row"><input type="text" id="edsp" data-testid="edit-supply-path" style="flex:1"><select id="edst" data-testid="edit-supply-label" style="width:auto"><option value="">no label</option><option>FILE</option><option>ILLUSTRATIVE</option><option>GENERATED</option></select><button class="sec" data-testid="edit-supply" onclick="edSupply()">Add</button></div>
  ${(b.notes||[]).map(x=>`<div class="rv-note">${esc(x.t)} you: “${esc(x.you)}” → <b>${esc(x.intent)}</b>: ${esc(x.understood)} <span style="opacity:.7">[handled by ${esc(x.backend)}]</span></div>`).join('')}</details>
- ${b.msg?`<div class="mut" style="font-size:12.5px;margin-top:6px">${esc(b.msg)}</div>`:''}</div>`;
+ ${b.msg?`<div class="mut" style="font-size:12.5px;margin-top:6px">${esc(b.msg)}</div>`:''}
+ <div style="margin-top:10px"><b>Chat about this beat</b> <span class="mut" style="font-size:12.5px">same chat as the pause panel: ask why, refine, more stock, simulate, use option N — then "apply it" to re-render this beat and splice it in</span>
+ <div class="dbg-chat" data-testid="edit-chat-log">${(ED.chat||[]).map(x=>`<div class="you">you: ${esc(x.you)}</div><div class="ai">${esc(x.reply)} <span style="opacity:.7">[${esc(x.backend)}${x.action&&x.action!='none'?' · '+esc(x.action):''}]</span>${x.handoff?` <button class="sec" style="padding:2px 8px;font-size:12px" data-h="${esc(x.handoff)}" onclick="navigator.clipboard.writeText(this.dataset.h);this.textContent='Copied — paste it in the Claude chat'">Copy for Claude</button>`:''}</div>`).join('')}</div>
+ <div class="row"><textarea id="edchat" data-testid="edit-chat-text" rows="2" style="flex:1" placeholder="e.g. simulate the descent with real physics / use option 3 / apply it">${esc(ED.draft||'')}</textarea><button data-testid="edit-chat-send" onclick="edChat()" ${ED.chatBusy?'disabled':''}>${ED.chatBusy?'Thinking…':'Send'}</button></div></div></div>`;
  $('edp').innerHTML=h;clearTimeout(ED.timer);if(b.busy)ED.timer=setTimeout(edRefresh,4000)}
+async function edChat(){const t=$('edchat').value.trim();if(!t||ED.chatBusy)return;ED.chatBusy=1;ED.draft=t;edDraw();const bid=ED.open;
+ try{const x=await rvPost(`/api/jobs/${sel}/edit/chat`,{beat:bid,text:t});ED.draft='';ED.chat=(await j(`/api/jobs/${sel}/edit/chat?beat=${bid}`)).chat;
+  ED.chatBusy=0;if(ED.open!=bid)return;const r=await fetch(`/api/jobs/${sel}/edit/open/${bid}`,{method:'POST'});const d=await r.json();if(r.ok)ED.rv=d.rv;
+  if(x.select)ED.sel=[...x.select];edDraw();if(x.action=='apply'&&!/Couldn't do it/.test(x.reply)){$('edmsg').textContent='Applying…';edWait()}}
+ catch(e){ED.chatBusy=0;edDraw();alert(e.message)}}
 async function edRefresh(){if(!ED.open)return;try{ED.rv=await j(`/api/jobs/${sel}/review${edQ()}`);const r=await fetch(`/api/jobs/${sel}/edit/open/${ED.open}`,{method:'POST'});const d=await r.json();if(r.ok)ED.rv=d.rv;edDraw()}catch(e){}}
 function edTickC(cid,on){const i=ED.sel.indexOf(cid);if(on&&i<0)ED.sel.push(cid);if(!on&&i>=0)ED.sel.splice(i,1);edDraw()}
 async function edCand(cid){const el=$('edpv');el.innerHTML='<span class="mut">Rendering a 2-second preview…</span>';

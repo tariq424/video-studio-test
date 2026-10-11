@@ -171,6 +171,21 @@ def edit_open(jid, bid):
     except Exception as e: return jsonify(error=str(e)[:300]), 400
     return jsonify(space="long" if edit.kind(j.dir) == "long" else "short", rv=rv)
 
+@app.post("/api/jobs/<jid>/edit/chat")
+def edit_chat(jid):
+    """The pause chat, inside the timeline editor of a finished job (same routing and actions + "apply")."""
+    from studio import debug
+    b = request.get_json(silent=True) or {}; text = (b.get("text") or "").strip()
+    if not text or not b.get("beat"): return jsonify(error="type a message (and open a beat)"), 400
+    if studio.current: return jsonify(error="A job is rendering right now; edit when it has finished."), 409
+    try: return jsonify(debug.chat(studio, jid, b["beat"], text, config.load(), edit=True))
+    except Exception as e: return jsonify(error=str(e)[:300]), 500
+
+@app.get("/api/jobs/<jid>/edit/chat")
+def edit_chat_log(jid):
+    j = studio.job(jid); bid = request.args.get("beat")
+    return jsonify(chat=[e for e in (j.state.get("debug") or {}).get("chat", []) if not bid or e.get("beat") == bid])
+
 @app.post("/api/jobs/<jid>/edit/<action>/<bid>")
 def edit_act(jid, action, bid):
     from studio import edit

@@ -215,17 +215,25 @@ def _cands_text(rv, bid):
                    f"{'accepted' if c['ok'] else 'REJECTED'} - {c['why'][:100]}")
     return "\n".join(out) or "(none)", ids
 
-def chat(studio, jid, bid, text, cfg):
-    """-> chat entry {t, you, reply, backend, action, kind}. Executes clear actions through the review machinery."""
+def chat(studio, jid, bid, text, cfg, edit=False):
+    """-> chat entry {t, you, reply, backend, action, kind[, select]}. Executes clear actions through the review machinery.
+    edit=True: post-render (timeline editor) - the same chat, run against the editor's workspace for this beat (Shorts: the job;
+    long videos: job/longedit), from the saved job state; "apply" re-renders just this beat and splices it into the video."""
     from . import review
     from .llm import LLM
     j = studio.job(jid); jd = j.dir; s = j.state
     c = dict(cfg); c["script_provider"] = "deepseek" if cfg.get("deepseek_api_key") else "local"
     ch = chains(jd).get(bid, {})
-    rv = review.load(jd)
+    ws = None
+    if edit:
+        from . import edit as E
+        ws = E.workspace(jd); E.open_beat(jd, bid, cfg, j.log)   # makes sure the beat has its review entry + current visual
+    wsd = ws or jd
+    rv = review.load(wsd)
     ctext, ids = _cands_text(rv, bid)
     p = s.get("pause") or {}
-    label = p.get("label") or ("Paused: uncertain about this beat" if s.get("status") == "awaiting_visuals" else s.get("status", ""))
+    label = "Editing the finished video (post-render): changes are rendered for this beat only and spliced in" if edit else \
+        p.get("label") or ("Paused: uncertain about this beat" if s.get("status") == "awaiting_visuals" else s.get("status", ""))
     logtail = "\n".join((jd / "log.txt").read_text(encoding="utf-8").splitlines()[-30:]) if (jd / "log.txt").exists() else ""
     chain = "\n".join(f"- {x}" for x in ch.get("chain", [])) or "- (no ladder record for this beat)"
     if ch.get("stock_rejected"): chain += "\n" + "\n".join(f"- stock clip rejected: {r.get('why')}" for r in ch["stock_rejected"][:6])
@@ -238,8 +246,10 @@ def chat(studio, jid, bid, text, cfg):
     prompt = CHAT.format(n=int(bid[1:]) + 1 if bid[1:].isdigit() else bid, vo=vo[:400],
                          label=label, chain=chain, cands=ctext, log=logtail[-3000:], text=text.replace('"', "'"), history=history,
                          modules=physics.describe())
+    if edit:   # the finished video: no "continue"; "apply" renders the chosen treatment into the video
+        prompt = prompt.replace('- "continue": resume the pipeline.', '- "apply": put the selected / named option(s) into the finished video now (re-render this beat only and splice it in); "options" = option numbers, or [] for the current selection. Only when the editor approves or asks to apply / use it in the video.')
     def chk(x):
-        if x.get("action") not in ("refine", "more_stock", "use", "thumbnails", "skip", "continue", "simulate", "none"): raise ValueError("unknown action")
+        if x.get("action") not in ("refine", "more_stock", "use", "thumbnails", "skip", "continue", "simulate", "apply", "none"): raise ValueError("unknown action")
     with LLM(c, j.log, lambda: False) as llm:
         backend = llm.name
         try: x = llm.chat_json("You are a precise assistant for a video editor. Reply with JSON only.", prompt, max_tokens=800, check=chk)
@@ -253,32 +263,53 @@ def chat(studio, jid, bid, text, cfg):
     if why or to_claude:   # ready-to-paste context for the Claude chat (no API key needed: you paste it)
         handoff = (f"Video Studio job {jid}, beat {bid} (paused: {label}).\nNarration: \"{vo[:600]}\"\nVisual ladder for this beat:\n{chain}\n"
                    f"Treatments offered:\n{ctext}\nEarlier in the pause chat:\n{history}\nMy request: {text}")
+    select = None
     try:
         if act == "refine":
-            err = review.start(studio, jid, bid, "refine", {"text": x.get("instruction") or text})
+            err = review.start(studio, jid, bid, "refine", {"text": x.get("instruction") or text}, ws=ws)
         elif act == "more_stock":
-            err = review.start(studio, jid, bid, "more_stock", {"queries": x.get("queries") or [], "count": x.get("count") or 2})
+            err = review.start(studio, jid, bid, "more_stock", {"queries": x.get("queries") or [], "count": x.get("count") or 2}, ws=ws)
         elif act == "use":
             cids = [ids[int(k) - 1] for k in (x.get("options") or []) if str(k).isdigit() and 0 < int(k) <= len(ids)]
             if not cids: err = "no matching option number"
-            else: review.decide(jd, bid, "choose", cids, cfg, j.log)
-        elif act == "skip": review.decide(jd, bid, "skip")
-        elif act == "thumbnails": review.thumbs(jd, cfg, j.log, [i for i in ids])
+            else: review.decide(wsd, bid, "choose", cids, cfg, j.log); select = cids
+        elif act == "skip":
+            if edit:   # post-render "skip" = the beat's headline card, when it has one
+                rv2 = review.load(wsd) or {}
+                hd = next((c for c in rv2.get("beats", {}).get(bid, {}).get("cands", []) if rv2["cands"][c].get("rung") == "headline"), None)
+                if hd: review.decide(wsd, bid, "choose", [hd], cfg, j.log); select = [hd]
+                else: err = "no headline card for this beat"
+            else: review.decide(wsd, bid, "skip")
+        elif act == "thumbnails": review.thumbs(wsd, cfg, j.log, [i for i in ids])
         elif act == "simulate":
             g = physics.run(str(x.get("module") or ""), x.get("params") or {})
             if not g: err = f"no simulation for '{x.get('module')}' (not built yet, or the narration gave no usable numbers)"
             else:
-                rv2 = review.load(jd); cid = review._add(rv2, bid, {"type": "graphic", "g": g, "tag": "SIMULATION"}, "simulation", True,
+                rv2 = review.load(wsd); cid = review._add(rv2, bid, {"type": "graphic", "g": g, "tag": "SIMULATION"}, "simulation", True,
                                                            f"{g['module']}: {g.get('label') or g.get('title')}")
-                review.save(jd, rv2); review.decide(jd, bid, "choose", [cid], cfg, j.log)
-                reply += f"\n(Simulation added and selected for this beat: {g.get('label') or g['title']}.)"
+                review.save(wsd, rv2); review.decide(wsd, bid, "choose", [cid], cfg, j.log); select = [cid]
+                if edit: review.thumbs(wsd, cfg, j.log, [cid])
+                reply += f"\n(Simulation added and selected for this beat: {g.get('label') or g['title']}." + (" Say 'apply it' or press Apply to video.)" if edit else ")")
+        elif act == "apply":
+            if not edit: err = "apply is for the finished video (timeline editor)"
+            else:
+                from . import edit as E
+                bb = (review.load(wsd) or {}).get("beats", {}).get(bid, {})
+                cids = [ids[int(k) - 1] for k in (x.get("options") or []) if str(k).isdigit() and 0 < int(k) <= len(ids)] \
+                    or (bb.get("chosen") if bb.get("decision") == "chosen" else []) or []
+                if not cids: err = "nothing selected to apply - pick an option first"
+                else:
+                    err = E.start_apply(jd, bid, cids, "auto", cfg, j.log)
+                    if not err: reply += "\n(Rendering this beat and splicing it into the video...)"; select = cids
         elif act == "continue":
-            if s.get("status") == "paused": studio.resume(jid)
+            if edit: err = "the video is finished - say 'apply it' to put the change in"
+            elif s.get("status") == "paused": studio.resume(jid)
             else: err = "use Continue to render on the review panel"
     except Exception as e: err = str(e)[:200]
     if err: reply += f"\n(Couldn't do it: {err})"
     ent = {"t": time.strftime("%H:%M:%S"), "beat": bid, "you": text[:500], "reply": reply, "backend": "Claude (paste)" if to_claude else backend,
-           "action": act, "kind": "claude" if to_claude else "why" if why else "action", "handoff": handoff}
+           "action": act, "kind": "claude" if to_claude else "why" if why else "action", "handoff": handoff, "mode": "edit" if edit else "pause"}
+    if select: ent["select"] = select
     d = j.state.get("debug") or {}; d.setdefault("chat", []).append(ent); j.save(debug=d)
     trace(jd, {"ev": "chat", **{k: ent[k] for k in ("beat", "you", "reply", "backend", "action")}}, force=True)
     render_md(jd)
