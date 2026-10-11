@@ -14,20 +14,30 @@ Video Studio is a fork of Explainer Studio (`F:\code\explainer-studio`, github `
 - **Project closed 2026-10-09** (no tuning; only blockers get fixed), **reopened once 2026-10-10** for cloud stills (commissioned by Tariq).
 - **The pipeline is a draft generator.** Expect 2-5 beats per video to be wrong. The **timeline editor** (post-render editing, below)
   is the repair path: swap the visual for something about the actual story. Pipeline tuning is stopped.
-- **Visual ladder per beat, in order (cloud stills added 2026-10-10, see "Cloud stills" below):**
+- **Visual ladder per beat, in order (reordered 2026-10-11: illustrations before WanGP):**
   1. Stock footage (generic beats: Pexels / Pixabay / NASA; long videos also Internet Archive films) or real photos (subject beats:
      Openverse, Wikimedia Commons, Internet Archive) - short_stock / photos
-  2. **Cloud still** (providers in `cloud_providers`, none configured as of rev. 2) -> checked against the narration -> Remotion
-     parallax (label GENERATED · CLOUD); held with a slow zoom if depth layers fail
-  3. WanGP AI still (local fallback: only when the cloud gave nothing usable), checked against the narration
-     - directional beats (descend/dive/fell/plummet/climb/bank): the still is **rotated first** by the verb (35 deg nose-down,
-       0 climb, 20 bank), cropped to fill; only "garbled" rejects
-  3. WanGP image-to-video of the still - **only on an explicit click** ("Show all options" / "Add animation"), never automatically
-  4. Parallax of the still (Remotion depth layers)
-  4b. **Flat illustration / silhouette** (Remotion SVG, labels ILLUSTRATION / SILHOUETTE) - when the WanGP still fails or WanGP is down
-  5. Hold with slow zoom (single layer) - a still rejected only for lettering/logo
-  6. 3D reconstruction / claymation (subject beats) or headline card (other beats)
-- **Motion policy (decided 2026-10-09):** rotation applies first (directional beats). Then:
+  2. Cloud still (+ parallax) - `cloud_providers` is empty, so this rung is skipped
+  3. **Flat Remotion illustration** (ILLUSTRATION), then **silhouette** (SILHOUETTE) - `illustrate.options`
+  4. Beat graphics / map (charts, stats, quotes, maps already play over whatever background the beat gets)
+  5. **WanGP still (+ parallax)** - only for atmospheric filler no illustration covers (storm clouds, abstract skies, horizons);
+     **never** for aircraft, vehicles, specific buildings or real people (`illustrate.wangp_lock`). WanGP image-to-video only on
+     an explicit click.
+  6. 3D reconstruction / claymation (subject beats), else headline card
+- **Why (Tariq, 2026-10-11):** WanGP keeps hallucinating aircraft anatomy (four wings, wrong engines, wrong attitude, wrong type /
+  livery) and the vision check doesn't catch it. A plane drawn in code can't grow a fourth wing; flat illustration reads as a
+  design choice, broken photorealism as a mistake.
+- **WanGP lock rule** (`illustrate.wangp_lock`, keyword rules): aircraft = the subject is an aircraft, or the narration or still
+  prompt names a plane / jet / airliner / helicopter / drone / fighter / model (737, A320, F-35 ...) or cockpit, or the beat is in
+  the air / landing / at an airport; vehicles = car, truck, bus, train, ship, boat, tank ...; specific buildings = White House,
+  Kremlin, parliament, embassy, palace, cathedral, mosque, stadium, tower, bridge ...; real people = a person subject or the
+  narration names a person from the story's entity list. Locked beats with no illustration get claymation (subject beats) or
+  the headline card - never WanGP. The chain shows it: `photo -> illustration  (WanGP skipped: aircraft beat)`.
+- **Long videos** (`render.illustration_still`): each AI still / motion visual tries cloud, then a 16:9 illustration rendered by
+  Remotion into `stills/<id>.jpg` (label drawn in; Ken Burns animates it); a locked visual with no illustration gets a headline
+  card still; only the rest go to WanGP. Expect the same few scenes to repeat in a 15-minute video - swap them in the editor.
+- **Motion policy (decided 2026-10-09; since 2026-10-11 aircraft never reach WanGP, so this applies only to real photos and old jobs):**
+  rotation applies first (directional beats). Then:
   - **Aircraft / single compact subjects -> rigid 2-layer parallax** (subject moves as one piece; tested on job 20261009_131330
     Beat 1, tail stayed attached). **Fallback:** if tearing returns on a real job, switch these to hold-with-zoom (one-line change
     in `depth.layers`: return only the full-frame layer when `subject_mask` finds a subject).
@@ -40,6 +50,16 @@ Video Studio is a fork of Explainer Studio (`F:\code\explainer-studio`, github `
 - **Live and ready:** Internet Archive source, cloud-still rung (no provider configured), debugger, timeline editor (post-render editing), `/make` front-end, ui-blackbox tester (MCP in Claude Desktop,
   venv F:\code\ui-blackbox\.venv, reports in F:\code\ui-blackbox\reports), smoke mode.
 - **Deprecated:** `/api/smoke` (old fixed one-beat job). Only the form's smoke mode is supported.
+
+## Make video / Stop video (2026-10-11)
+- **Make video** is disabled while any job is running or queued, with "● Job running: <title>" next to it (the page polls every
+  5 s; the button also locks the moment it's clicked, so a double click can't queue two jobs).
+- **Stop video** appears next to it while a job runs (the job page's Stop does the same). It is a graceful stop: it requests a
+  pause and the job stops at the next safe point - before a stage, between AI stills / checks, after a beat - never inside a
+  render or a generation (so a Short render or a WanGP still in progress finishes first). Everything done so far stays on disk;
+  the job ends as `stopped` with `cancelled: true` (shown as "cancelled" in the job list) and Resume continues from there.
+  A queued / paused / awaiting-visuals job is cancelled at once. The old immediate stop is still the debugger's Abort.
+- API: `POST /api/jobs/<id>/stop` -> `{"state": "stopping" | "stopped"}`; `studio.cancel_job`.
 
 ## Illustrations and silhouettes (2026-10-11) — app/studio/illustrate.py, remotion/src/Illustration.tsx
 - **Where:** the Short ladder rung after the WanGP still (+ parallax) and before claymation (3D reconstruction) / headline card.

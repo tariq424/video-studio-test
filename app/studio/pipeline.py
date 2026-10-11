@@ -112,7 +112,7 @@ class Studio:
     def resume(self, jid):
         j = self.job(jid); self.cancel.discard(jid)
         was = j.state.get("pause") if j.state.get("status") == "paused" else None
-        j.save(status="queued", error="", pause=None, pause_req=False); j.log("Resumed"); self.q.put(jid)
+        j.save(status="queued", error="", pause=None, pause_req=False, cancel_req=False, cancelled=False); j.log("Resumed"); self.q.put(jid)
         if was: debug.trace(j.dir, {"ev": "resume", "from": was.get("label", "")})
 
     def request_pause(self, jid):
@@ -141,7 +141,19 @@ class Studio:
         j = self.job(jid)
         if j.state.get("status") in ("running", "queued"): self.stop(jid); return
         j.save(status="stopped", pause=None, pause_req=False); j.log("Aborted"); debug.trace(j.dir, {"ev": "abort"}); debug.render_md(j.dir)
-    def stop(self, jid): self.cancel.add(jid); self.job(jid).log("Stop requested")
+    def stop(self, jid): self.cancel.add(jid); self.job(jid).log("Stop requested")   # hard stop (Abort): interrupts WanGP / Remotion
+
+    def cancel_job(self, jid):
+        """'Stop video': cancel at the next safe point (before a stage, between AI stills, after a beat - never inside a render or
+        a generation). State stays on disk; the job ends as "stopped" (cancelled) and Resume continues from where it stopped."""
+        j = self.job(jid); st = j.state.get("status")
+        if st == "running":
+            j.save(pause_req=True, cancel_req=True); j.log("Stop video: stopping at the next safe point (never inside a render or a generation)")
+            return "stopping"
+        if st in ("queued", "paused", "awaiting_visuals", "awaiting_review"):
+            j.save(status="stopped", pause=None, pause_req=False, cancel_req=False, cancelled=True); j.log("Cancelled (Stop video). Resume continues from here.")
+            return "stopped"
+        return st or "unknown"
 
     def _worker(self):
         while True:
@@ -151,7 +163,9 @@ class Studio:
                 j = self.job(jid); j.log("ERROR: " + str(e)); j.log(traceback.format_exc()[-1500:])
                 n = int(j.state.get("auto_retries", 0))
                 rendering = j.state.get("stage") in ("charts", "voice", "captions", "presenter", "motion", "stills", "assemble", "broll", "short_stock", "short_voice", "short_fallback", "short_review", "short_render")
-                if rendering and n < 3 and jid not in self.cancel:
+                if jid in self.cancel and "cancelled" in str(e):   # hard stop (Abort) interrupted a step: stopped, not an error
+                    self.cancel.discard(jid); j.save(status="stopped", cancelled=True); j.log("Stopped")
+                elif rendering and n < 3 and jid not in self.cancel:
                     j.save(status="queued", error="", auto_retries=n + 1)
                     j.log(f"Retrying automatically in 60s (attempt {n + 1} of 3); finished work is kept")
                     threading.Timer(60, lambda jid=jid: self.q.put(jid)).start()
@@ -232,7 +246,9 @@ class Studio:
         if j.state.get("status") in ("error", "stopped"): self.resume(jid)
 
     def _run(self, jid):
-        j = self.job(jid); s = j.state; cfg = config.load(); self.current = jid
+        j = self.job(jid); s = j.state; cfg = config.load()
+        if s.get("cancelled") and s.get("status") == "stopped": return   # cancelled while it waited in the queue
+        self.current = jid
         stop = lambda: jid in self.cancel
         wg = WanGP(cfg); log = j.log
         j.save(status="running", error="")
@@ -240,6 +256,11 @@ class Studio:
         try: self._stages(j, s, cfg, wg, log, stop, dbg, jid)
         except debug.Paused as p:
             info = p.info
+            if j.state.get("cancel_req"):   # Stop video reached its safe point
+                where = f"Beat {info['n']}" if info.get("n") else (info.get("where") or j.state.get("stage") or "")
+                j.save(status="stopped", pause=None, pause_req=False, cancel_req=False, cancelled=True)
+                log(f"Cancelled at a safe point ({where}). Finished work is kept; Resume continues from here.")
+                debug.trace(j.dir, {"ev": "cancel", "at": where}); return
             if info.get("stage") is None: info["stage"] = j.state.get("stage")
             sd = j.dir / "short"
             if (sd / "timings.json").exists() and (sd / "stock" / "pick.json").exists() and j.short_plan():

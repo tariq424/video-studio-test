@@ -84,7 +84,7 @@ html.embed main{grid-template-columns:1fr;padding:0;max-width:none}html.embed bo
    <label style="color:var(--fg)"><input type="checkbox" id="dbgon" data-testid="toggle-debug" aria-label="Debug mode"> Debug mode: pause when a breakpoint matches (off = runs as normal)</label>
    <label for="dbgbps">Breakpoints, one per line (checked after each beat's visuals are decided)</label>
    <textarea id="dbgbps" data-testid="debug-breakpoints" aria-label="Breakpoints" rows="3" placeholder="stock_found == 0&#10;beat == 3&#10;treatment == stock|photo|still|animate|parallax|3d|card&#10;escalated_past == stock&#10;narration contains &quot;word&quot;"></textarea></details>
-  <div class="row" style="margin-top:12px"><button data-testid="make-video" onclick="createJob()">Make video</button><span id="cmsg" data-testid="make-message" class="mut"></span></div>
+  <div class="row" style="margin-top:12px"><button data-testid="make-video" id="makebtn" aria-label="Make video" onclick="createJob()">Make video</button><button class="sec" id="stopbtn" data-testid="stop-video" aria-label="Stop video" style="display:none;border-color:var(--bad);color:var(--bad)" onclick="stopVideo()">Stop video</button><span id="jobrun" data-testid="job-running" style="font-weight:600"></span><span id="cmsg" data-testid="make-message" class="mut"></span></div>
  </div>
  <div class="card"><h2>Jobs</h2><div id="jobs" class="mut">No jobs yet.</div></div>
 </section>
@@ -104,13 +104,18 @@ async function saveSettings(){await j('/api/settings',{method:'POST',headers:{'C
 async function status(){try{const s=await j('/api/status');stages=s.stages;$('pw').textContent=s.wangp?'WanGP running':'WanGP not running';$('pw').className='pill '+(s.wangp?'ok':'bad');const pn={deepseek:'DeepSeek',zai:'z.ai',claude:'Claude',local:'Local AI'}[s.provider]||s.provider;const rdy=s.provider=='local'||(s.provider=='zai'?s.zai_key:s.provider=='deepseek'?s.deepseek_key:s.api_key);$('pk').textContent='Script: '+pn+(rdy?'':' (no key)');$('pk').className='pill '+(rdy?'ok':'bad')}catch(e){}}
 function fmt(x){return Math.floor(x/60)+':'+String(x%60).padStart(2,'0')}
 function srcUI(){const k=$('srck').value,m=$('mode').value;$('s_yt').style.display=k=='yt'?'':'none';$('s_file').style.display=k=='file'?'':'none';$('s_text').style.display=k=='text'?'':'none';$('s_meta').style.display=k=='yt'?'none':'';$('m_short').style.display=m=='long'||m=='smoke'?'none':'';$('m_long').style.display=m=='short'||m=='smoke'?'none':'';$('m_vr').style.display=m=='long'?'none':''}
-async function createJob(){$('cmsg').textContent='Starting...';const k=$('srck').value;const fd=new FormData();
+let RUNJOB=null,STARTING=false;
+function runUI(js){const r=(js||[]).find(x=>['running','queued'].includes(x.status));RUNJOB=r?r.id:null;const busy=!!r||STARTING;
+ $('makebtn').disabled=busy;$('makebtn').title=busy?'A job is running: stop it or wait for it to finish':'';$('stopbtn').style.display=r?'':'none';
+ $('jobrun').textContent=r?('● Job running: '+(r.title||r.id).slice(0,60)+(r.cancel_req?' · stopping at the next safe point…':'')):'';$('jobrun').style.color=r?'var(--acc)':''}
+async function stopVideo(){if(!RUNJOB)return;$('stopbtn').disabled=true;try{const d=await j(`/api/jobs/${RUNJOB}/stop`,{method:'POST'});$('cmsg').textContent=d.state=='stopping'?'Stopping at the next safe point (never mid-render)…':'Stopped.'}catch(e){$('cmsg').textContent=e.message}$('stopbtn').disabled=false;loadJobs()}
+async function createJob(){if(RUNJOB||STARTING)return;STARTING=true;$('makebtn').disabled=true;$('cmsg').textContent='Starting...';const k=$('srck').value;const fd=new FormData();
  const f={mode:$('mode').value,short_secs:$('ssec').value,minutes:$('min').value,presenter:$('pres').checked,captions:$('caps').checked,auto_approve:$('auto').checked,provider:$('jp').value,visual_review:$('vrev').value,debug:$('dbgon').checked,breakpoints:$('dbgbps').value,src_title:$('stt').value,src_credit:$('scr').value,
   url:k=='yt'?$('url').value.trim():'',transcript:k=='yt'?$('tx').value:k=='text'?$('ptx').value:''};
  for(const x in f)fd.append(x,f[x]);
- if(k=='file'){if($('upf').files.length)fd.append('file',$('upf').files[0]);else if($('upp').value.trim())fd.append('src_path',$('upp').value.trim());else{$('cmsg').textContent='Choose a file (or type its path) first.';return}}
- try{const r=await fetch('/api/jobs',{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'failed');sel=d.id;if(EMBED)parent.postMessage({vsJob:d.id},'*');$('url').value='';$('upp').value='';$('ptx').value='';$('upf').value='';$('cmsg').textContent='';loadJobs()}catch(e){$('cmsg').textContent=e.message}}
-async function loadJobs(){const js=await j('/api/jobs');$('jobs').innerHTML=js.length?js.map(x=>`<div class="job ${x.id==sel?'sel':''}" onclick="sel='${x.id}';editing=false;planCache=null;loadJobs()"><b>${esc(x.title||x.url||x.id)}</b><div class="mut" style="font-size:12px">${x.id} · ${x.status} · ${x.stage}</div></div>`).join(''):'No jobs yet.';if(sel)loadDetail()}
+ if(k=='file'){if($('upf').files.length)fd.append('file',$('upf').files[0]);else if($('upp').value.trim())fd.append('src_path',$('upp').value.trim());else{$('cmsg').textContent='Choose a file (or type its path) first.';STARTING=false;$('makebtn').disabled=false;return}}
+ try{const r=await fetch('/api/jobs',{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'failed');sel=d.id;if(EMBED)parent.postMessage({vsJob:d.id},'*');$('url').value='';$('upp').value='';$('ptx').value='';$('upf').value='';$('cmsg').textContent='';STARTING=false;loadJobs()}catch(e){$('cmsg').textContent=e.message;STARTING=false;$('makebtn').disabled=false}}
+async function loadJobs(){const js=await j('/api/jobs');runUI(js);$('jobs').innerHTML=js.length?js.map(x=>`<div class="job ${x.id==sel?'sel':''}" onclick="sel='${x.id}';editing=false;planCache=null;loadJobs()"><b>${esc(x.title||x.url||x.id)}</b><div class="mut" style="font-size:12px">${x.id} · ${x.cancelled&&x.status=='stopped'?'cancelled':x.status} · ${x.stage}</div></div>`).join(''):'No jobs yet.';if(sel)loadDetail()}
 function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 let lastKey='';
 async function loadDetail(){if(editing)return;const s=await j('/api/jobs/'+sel);const done=s.done||[];

@@ -65,7 +65,7 @@ def options(sec, ents, moment=None, k=0):
     seed = 3 + int(re.sub(r"\D", "", sec.get("id", "0")) or 0) * 7 + k
     scenes = [name for name, rx in SCENES if re.search(rx, vo, re.I)]
     if (subject or {}).get("interior") and "cockpit" not in scenes: scenes.insert(0, "cockpit")
-    if (subject or {}).get("kind") == "aircraft" or re.search(r"\b(plane|jet|airliner|aircraft|flight)\b", vo, re.I):
+    if (subject or {}).get("kind") == "aircraft" or re.search(r"\b(plane|jet|airliner|aircraft|flight)\b", vo, re.I) or ph == "air":
         if ph in ("ground", "landing"): scenes = ["airport"] + [s for s in scenes if s != "airport"]
         elif "sky" not in scenes: scenes.insert(0 if ph == "air" or not scenes else 1, "sky")
     if ph == "air": scenes = [s for s in scenes if s != "airport"]   # in the air: never on a runway
@@ -88,3 +88,26 @@ def pick(sec, ents, moment=None, k=0):
     """The k-th option for slot k of this beat (cycling), or None when nothing fits."""
     opts = options(sec, ents, moment, k)
     return opts[k % len(opts)] if opts else None
+
+
+AIRCRAFT = (r"\b(planes?|jets?|jetliners?|aircraft|airliners?|airplanes?|aeroplanes?|boeing|airbus|cessna|embraer|bombardier|turboprops?|"
+            r"helicopters?|choppers?|drones?|fighters?|f-?\d{1,3}s?|[ab]3\d\d|7[2-8]7(-\d+)?|mig-?\d+|su-?\d+|airframe|fuselage|cockpit)\b")
+VEHICLE = r"\b(cars?|trucks?|lorr(y|ies)|bus(es)?|vans?|trains?|locomotives?|ships?|boats?|vessels?|tankers?|ferr(y|ies)|tanks?|motorcycles?|vehicles?)\b"
+LANDMARK = (r"\b(white house|kremlin|capitol|parliament|embassy|palace|cathedral|mosque|temple|stadium|headquarters|tower|bridge|"
+            r"pentagon|ministry building|airport terminal)\b")
+
+
+def wangp_lock(sec, ents, moment=None):
+    """Why WanGP must NOT draw this beat ("" = it may): aircraft (narration or still prompt names one, or the beat is in the air /
+    at an airport), vehicles, specific buildings, real people. These are exactly the subjects whose anatomy WanGP hallucinates
+    (four wings, wrong engines, wrong attitude, wrong livery)."""
+    from .cloudgen import has_person
+    vo = sec.get("vo", ""); sp = sec.get("still_prompt") or ""; both = vo + " " + sp
+    kind = (sec.get("subject") or {}).get("kind")
+    ph = coherence.phase(vo) if moment is None else moment
+    if kind == "aircraft" or re.search(AIRCRAFT, both, re.I): return "aircraft beat"
+    if ph in ("air", "landing") or (ph == "ground" and re.search(r"\b(airport|runway|tarmac|apron|gate)\b", both, re.I)): return "aircraft beat (in the air / at an airport)"
+    if kind in ("vehicle", "ship", "train") or re.search(VEHICLE, both, re.I): return "vehicle beat"
+    if kind == "building" or re.search(LANDMARK, both, re.I): return "specific building"
+    if kind == "person" or has_person(vo, ents): return "names a real person"
+    return ""

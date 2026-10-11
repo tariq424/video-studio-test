@@ -132,6 +132,8 @@ def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False, animate=F
         if stop(): raise RuntimeError("cancelled")
         r = st[s["key"]]; img = fd / f"{s['key']}.jpg"
         if r.get("src") == "cloud": continue
+        if s.get("wan") is False:   # illustrations come first; WanGP only for atmospheric filler (see illustrate.wangp_lock)
+            r["still_why"] = f"WanGP skipped: {s.get('wan_why')}"; save(); continue
         pause()
         if "still" in r and (r["still"] is None or img.exists()): continue
         if not s.get("still_prompt"): r["still"] = None; r["still_why"] = "no scene prompt"; save(); continue

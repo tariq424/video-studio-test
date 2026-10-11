@@ -336,10 +336,15 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
             if len(items) < n and pics: why1 = "not enough matching photos"
         pre[s["id"]] = items; step1[s["id"]] = ("photo" if s.get("subject") else "stock", why1); prej[s["id"]] = rej
         rot = coherence.attitude_rotation(s["vo"], phases.get(s["id"])) if s.get("subject") else None
+        # ladder order: illustrations / silhouettes come before WanGP. WanGP only draws atmospheric filler that no illustration
+        # covers, and never aircraft, vehicles, specific buildings or real people (it hallucinates their anatomy)
+        locked = illustrate.wangp_lock(s, ents, phases.get(s["id"]))
+        opts = illustrate.options(s, ents, phases.get(s["id"]))
+        wan_why = locked or ("an illustration fits" if opts else "")
         for k in range(n - len(items)):
             slots.append({"key": f"{s['id']}_{k}", "beat": s["id"], "vo": s["vo"], "still_prompt": s.get("still_prompt", ""),
                           "motion": s.get("motion", ""), "subject": s.get("subject"), "rotate": rot,
-                          "person": cloudgen.has_person(s["vo"], ents)})
+                          "person": cloudgen.has_person(s["vo"], ents), "wan": not wan_why, "wan_why": wan_why})
 
     def finalize(s, st):
         items = pre[s["id"]]; bd = s.get("backdrop") or {}
@@ -351,7 +356,9 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
             cloud = r.get("src") == "cloud"
             if "cloud" in r and not cloud:   # cloud tried (or skipped) and gave nothing usable: WanGP's still is next
                 chain.append("cloud"); why.append(f"cloud: {r.get('cloud_why') or 'failed'}"); failed.append("cloud")
-            chain.append(f"cloud still ({r.get('cloud_provider')})" if cloud else "still")
+            nowan = sl.get("wan") is False and not cloud   # illustrations come before WanGP: WanGP never ran for this slot
+            if nowan: why.append(f"WanGP skipped: {sl.get('wan_why')}")
+            else: chain.append(f"cloud still ({r.get('cloud_provider')})" if cloud else "still")
             gtag = "GENERATED · CLOUD" if cloud else "GENERATED"
             sw = str(r.get("still_why") or "")
             if sl.get("rotate") is not None and r.get("still") and not cloud and not sw.startswith("garbled"):
@@ -386,7 +393,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                 items.append({"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED · CLOUD" if cloud else "GENERATED · PARALLAX",
                               "rung": "parallax", "cloud": cloud})
             else:
-                why.append(f"still: {r.get('still_why') or 'not made'}"); failed.append("still")
+                if not nowan: why.append(f"still: {r.get('still_why') or 'not made'}"); failed.append("still")
                 ill = illustrate.pick(s, ents, phases.get(s["id"], ""), k5 + kill)
                 if ill:   # a flat illustration / silhouette looks like a design choice; claymation only when nothing fits
                     chain.append(ill["rung"]); items.append(ill); kill += 1

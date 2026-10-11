@@ -327,7 +327,8 @@ def debug_action(jid, action):
 
 @app.post("/api/jobs/<jid>/<action>")
 def act(jid, action):
-    {"approve": studio.approve, "resume": studio.resume, "stop": studio.stop}[action](jid); return jsonify(ok=True)
+    if action == "stop": return jsonify(ok=True, state=studio.cancel_job(jid))   # Stop video: next safe point
+    {"approve": studio.approve, "resume": studio.resume}[action](jid); return jsonify(ok=True)
 
 @app.get("/files/<jid>/<path:p>")
 def files(jid, p):
