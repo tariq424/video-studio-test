@@ -616,6 +616,7 @@ def build(job, plan, cfg, log):
                 if c.get("tag"): bg["tag"] = c["tag"]
             else:
                 bg = {"type": "graphic", "g": c["g"], "from": round(t0, 3)}
+                if c.get("tag"): bg["tag"] = c["tag"]   # ILLUSTRATION / SILHOUETTE
             t0 += d * cp / tot if tot >= d else min(cp, d - t0)
             bgs.append(bg)
         # graphics: first at the beat start, the second when its word is spoken

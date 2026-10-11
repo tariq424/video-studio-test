@@ -141,7 +141,9 @@ def to_bg(sd, item, props, start, story_subjects=False, dest=None, used=None):
     elif t == "layers":
         bg = {"type": "layers", "layers": [media_path(x, "fb") for x in item["layers"]]}
         if item.get("tag"): bg["tag"] = item["tag"]
-    else: bg = {"type": "graphic", "g": item["g"]}
+    else:
+        bg = {"type": "graphic", "g": item["g"]}
+        if item.get("tag"): bg["tag"] = item["tag"]   # ILLUSTRATION / SILHOUETTE
     bg.update(props); bg["from"] = round(start, 3)
     return bg
 
@@ -257,7 +259,7 @@ def _bg_item(bg):
     if t == "video": return {"type": "video", "src": "public/" + bg["src"], "tag": bg.get("tag", ""), **({"rate": bg["rate"]} if bg.get("rate") else {})}
     if t == "image": return {"type": "image", "src": "public/" + bg["src"], "fit": bg.get("fit", "frame"), "tag": bg.get("tag", ""), "short_credit": bg.get("credit", "")}
     if t == "layers": return {"type": "layers", "layers": ["public/" + x for x in bg["layers"]], "tag": bg.get("tag", "")}
-    if t == "graphic": return {"type": "graphic", "g": bg["g"]}
+    if t == "graphic": return {"type": "graphic", "g": bg["g"], **({"tag": bg["tag"]} if bg.get("tag") else {})}
     return None
 
 def _item_exists(sd, it):

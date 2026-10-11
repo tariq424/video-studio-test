@@ -77,10 +77,9 @@ def options(sec, ents, moment=None, k=0):
         out.append({"type": "graphic", "g": g, "rung": "illustration", "tag": "ILLUSTRATION"})
     sh = shape_of(subject, vo, ents)
     if sh:
-        bd = sec.get("backdrop") or {}
-        text = (bd.get("text") or "")[:60] if bd.get("kind") == "headline" else ""
-        out.append({"type": "graphic", "g": {"kind": "silhouette", "shape": sh, "time": tod if tod != "day" else "dusk",
-                    "attitude": att if sh in ("airliner", "jet") else "level", "text": text, "seed": seed},
+        # a black shape needs a light sky behind it: night and day become dusk. No text: the beat's own graphics carry the words.
+        out.append({"type": "graphic", "g": {"kind": "silhouette", "shape": sh, "time": "storm" if tod == "storm" else "dusk",
+                    "attitude": att if sh in ("airliner", "jet") else "level", "seed": seed},
                     "rung": "silhouette", "tag": "SILHOUETTE"})
     return out
 
