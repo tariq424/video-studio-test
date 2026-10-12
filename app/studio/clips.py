@@ -188,8 +188,7 @@ def match(job, sections, cfg, log, stop=lambda: False):
                     if b in ids and b not in assign: assign[b] = n; why[b] = str(a.get("why") or "")[:120]
         except Exception as e:
             log(f"  your clips: the AI couldn't place them ({str(e)[:100]}); matching by words instead"); how = "keywords"
-        if how == "keywords" or (not assign and info):
-            how = "keywords"
+        if how == "keywords":   # only when the AI call failed; an AI answer of "nothing fits" stands
             for x in info:   # each clip: its description, file name and its own part of your note ("clip 2 is ...")
                 cw = _words(x.get("desc", "") + " " + re.sub(r"[_\-.]+", " ", Path(x["name"]).stem) + " " + _hint_for(hints, x["n"]))
                 free = [s for s in beats if s["id"] not in assign]

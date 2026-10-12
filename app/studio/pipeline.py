@@ -1,5 +1,5 @@
 """Job queue: one job renders at a time (single GPU). Each stage is resumable."""
-import json, threading, time, traceback, re, shutil, datetime, queue
+import json, os, threading, time, traceback, re, shutil, datetime, queue
 from pathlib import Path
 from . import config, transcript, writer, render, assemble, media, sources, short, debug
 from .wangp import WanGP
@@ -43,15 +43,31 @@ def progress(job, n, of):
         j = Job(Path(job)); p = dict(j.state.get("prog") or {}); p.update(n=int(n), of=int(of)); j.save(prog=p)
     except Exception: pass
 
+_slocks, _slocks_lk = {}, threading.Lock()
+def _state_lock(d):
+    with _slocks_lk: return _slocks.setdefault(str(d), threading.RLock())
+
 class Job:
     def __init__(self, path): self.dir = Path(path)
     @property
     def state(self):
         p = self.dir / "state.json"
-        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+        for i in range(20):   # another thread may be replacing it right now: retry briefly instead of reading half a file
+            if not p.exists(): return {}
+            try: return json.loads(p.read_text(encoding="utf-8"))
+            except (ValueError, OSError):
+                if i == 19: raise
+                time.sleep(0.05)
     def save(self, **kw):
-        s = self.state; s.update(kw); s["updated"] = time.time()
-        (self.dir / "state.json").write_text(json.dumps(s, indent=1), encoding="utf-8")
+        with _state_lock(self.dir):
+            s = self.state; s.update(kw); s["updated"] = time.time()
+            p = self.dir / "state.json"; tmp = p.with_name(f"state.{threading.get_ident()}.tmp")
+            tmp.write_text(json.dumps(s, indent=1), encoding="utf-8")
+            for i in range(20):   # atomic swap (Windows refuses while a reader has the file open: retry)
+                try: os.replace(tmp, p); break
+                except PermissionError:
+                    if i == 19: raise
+                    time.sleep(0.05)
     def log(self, msg):
         line = f"[{datetime.datetime.now():%H:%M:%S}] {msg}"
         with open(self.dir / "log.txt", "a", encoding="utf-8") as f: f.write(line + "\n")
