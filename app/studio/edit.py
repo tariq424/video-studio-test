@@ -535,20 +535,26 @@ def ensure_keyframes(job, log, k="short"):
     be swapped without re-encoding the rest. Done on the first edit of a video (Shorts rendered before this existed, every explainer)."""
     job = Path(job); outp = _tl_out(job, k); kf = job / "edit" / ("keyframes.json" if k == "short" else f"keyframes_{k}.json")
     frames, total = tl_frames(job, k)
-    stamp = {"size": outp.stat().st_size, "mtime": int(outp.stat().st_mtime), "frames": [a for _, a, _ in frames]}
+    stamp = {"size": outp.stat().st_size, "mtime": int(outp.stat().st_mtime), "frames": [a for _, a, _ in frames], "kfv": 2}
     if kf.exists() and json.loads(kf.read_text(encoding="utf-8")) == stamp: return
     log(f"Preparing the {'Short' if k == 'short' else 'explainer'} for editing (keyframes on beat boundaries, one time)...")
     t0 = time.time(); tmp = outp.with_name("_kf_" + outp.name)
-    times = ",".join(f"{a / FPS_S:.6f}" for _, a, _ in frames if a > 0)
+    times = _kf_times(a for _, a, _ in frames)
     media.ff("-i", outp, "-map", "0:v", "-map", "0:a?", *ENC_S, "-force_key_frames", times, "-forced-idr", 1, "-c:a", "copy", "-movflags", "+faststart", tmp, timeout=7200)
     tmp.replace(outp)
     _stamp_keyframes(job, k)
     log(f"  done in {time.time() - t0:.0f}s")
 
+def _kf_times(frames):
+    """-force_key_frames times for these frame numbers: half a frame early, so a time like 29.566667 (frame 887 = 29.5666...)
+    doesn't round past the frame and put the keyframe on the next one (then every splice fell back to a full re-encode)."""
+    return ",".join(f"{(a - 0.5) / FPS_S:.6f}" for a in frames if a > 0)
+
 def _stamp_keyframes(job, k):
     job = Path(job); outp = _tl_out(job, k); kf = job / "edit" / ("keyframes.json" if k == "short" else f"keyframes_{k}.json")
     kf.parent.mkdir(parents=True, exist_ok=True)
-    kf.write_text(json.dumps({"size": outp.stat().st_size, "mtime": int(outp.stat().st_mtime), "frames": [a for _, a, _ in tl_frames(job, k)[0]]}), encoding="utf-8")
+    kf.write_text(json.dumps({"size": outp.stat().st_size, "mtime": int(outp.stat().st_mtime), "frames": [a for _, a, _ in tl_frames(job, k)[0]],
+                              "kfv": 2}), encoding="utf-8")   # kfv 2: keyframes placed half a frame early (exact on the boundary)
 
 def _clear_prev(job):
     for p in list(Path(job).glob("output/*.prev")) + list(Path(job).glob("short/public/*.prev")) + list(Path(job).glob("build/*.prev")):
@@ -666,7 +672,7 @@ def _splice(job, k, outp, a, e, seg, log, keep_old=None):
         ok = _nframes(newv) == total_before
     if not ok:   # keyframes not where expected: re-encode the video track with the segment overlaid (slower, always correct)
         log("  keyframes didn't line up; re-encoding the video track once (slower)")
-        times = ",".join(f"{x / FPS_S:.6f}" for _, x, _ in tl_frames(job, k)[0] if x > 0)
+        times = _kf_times(x for _, x, _ in tl_frames(job, k)[0])
         media.ff("-i", vcopy, "-i", seg, "-filter_complex", f"[1:v]setpts=PTS-STARTPTS+{a / FPS_S:.6f}/TB[s];[0:v][s]overlay=eof_action=pass:enable='between(n,{a},{e - 1})'[v]",
                  "-map", "[v]", *ENC_S, "-force_key_frames", times, "-forced-idr", 1, newv, timeout=7200)
     tmp = outp.with_name("_edit_" + outp.name)
