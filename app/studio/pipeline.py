@@ -97,7 +97,7 @@ class Studio:
             (j.dir / "src" / ("transcript_manual.txt" if url else "pasted.txt")).write_text(transcript_text, encoding="utf-8")
         j.save(url=url, minutes=float(minutes), presenter=bool(presenter), captions=bool(captions), auto_approve=bool(auto_approve), provider=provider or "",
                mode=mode if mode in ("long", "short", "both") else "both", short_secs=SMOKE_SECS if smoke else max(120.0, min(176.0, float(short_secs))), smoke=smoke,
-               upload=up, src_title=src_title, src_credit=src_credit, visual_review=visual_review if visual_review in ("auto", "every") else "auto", status="queued", stage="transcript", done=[], title="", created=time.time(),
+               upload=up, src_title=src_title, src_credit=src_credit, visual_review=visual_review if visual_review in ("auto", "every", "never") else "auto", status="queued", stage="transcript", done=[], title="", created=time.time(),
                debug={"on": bool(dbg_on), "bps": list(bps or []), "bps_off": False, "checked": [], "chat": []}, trace=bool(dbg_on))
         if dbg_on: debug.trace(j.dir, {"ev": "debug on", "at": "job start", "breakpoints": "; ".join(bps or []) or "none"})
         if own_clips:   # your footage + where it goes (clips.py places it after the script is written)

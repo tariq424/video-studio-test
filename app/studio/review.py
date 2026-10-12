@@ -180,6 +180,11 @@ def collect(job, plan, cfg, log, mode="auto", debug_beats=None):
             if not auto: why.append("no visual found")
             b["uncertain"], b["why"] = bool(why), "; ".join(why)
             if mode == "auto" and not why and not b["decision"] and debug_beats is None: b["decision"] = "auto"
+            if mode == "never" and not b["decision"] and debug_beats is None:   # decide on my own, never pause
+                b["decision"] = "auto" if auto else "skip"   # nothing usable at all: the beat's headline card
+                if why:
+                    b["msg"] = f"Decided without pausing: {'used the pipeline pick' if auto else 'used the headline card'} ({'; '.join(why)})."
+                    log(f"  {bid}: unsure ({'; '.join(why)}) - decided on my own: {'pipeline pick' if auto else 'headline card'}")
         pause = any(not b["decision"] for b in rv["beats"].values()) and debug_beats is None
         save(job, rv)
     if pause:

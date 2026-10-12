@@ -641,3 +641,13 @@ Branch changes from the install (committed on feat/kokoro-clips-postedit): the w
 - First call per job loads the model (~9 s) and uses ~0.5-1 GB VRAM alongside WanGP; fine on 16 GB.
 - Benign warnings in the worker output (LSTM dropout, weight_norm deprecation) - ignore.
 - The Pinokio menu entry for the installer only appears once pinokio.js from the branch is copied (step 2).
+
+## Never-pause mode (2026-10-12, branch) - "decide everything myself"
+Visuals mode `never` (job form: "Decide everything: never pause, make the best call when unsure"; selected by default; config
+`visual_review_default: "never"` for jobs that don't say, e.g. API / smoke / /make). At the visual review step, a beat the
+pipeline is unsure about no longer stops the job: it keeps the pipeline's own pick (the ladder's best surviving treatment), or
+the beat's headline card when nothing usable was found, logs "bN: unsure (...) - decided on my own: ...", and leaves the
+reason on the beat (review panel / editor show it) so you can change it afterwards in the timeline editor.
+Still stops (these are your explicit choices or real failures, not uncertainty): "Review every beat" mode, unticked "Skip
+script review", pause_on_questions (off by default), debugger breakpoints / Pause now, and errors (e.g. WanGP not running).
+Back to the old behaviour: pick "Auto" on the form, or `"visual_review_default": "auto"`.

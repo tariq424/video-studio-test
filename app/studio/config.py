@@ -27,6 +27,7 @@ DEFAULTS = {
     "vet_provider": "local",          # stock-clip vetting: local (Ollama vision) | zai | claude | off
     "vet_model": "qwen2.5vl:7b",
     "short_concurrency": "75%",       # 100% measured no faster (Oct 2026)
+    "visual_review_default": "never",  # jobs that don't say: never pause for unsure beats, decide on my own (auto | every | never)
     "pause_on_questions": False,     # skip review by default; True = pause only when the fact-check raised questions
     "long_broll": True,               # long videos: use real stock footage first, AI stills/motion only where nothing fits
     "voice_ref_wav": str(ROOT / "assets" / "voice_ref_baritone.wav"),
