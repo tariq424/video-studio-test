@@ -385,6 +385,13 @@ class Studio:
                 else:
                     meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
                     out = short.do_render(j.dir, sp, cfg, meta, log, stop); j.save(short_output=str(out))
+                    from . import capcut
+                    if capcut.enabled(cfg) and capcut.pending(j.dir):   # ladder v2 rung 7: one CapCut session per video (off by default)
+                        out = capcut.run(cfg, j.dir, out, sp, log)
+                        try:
+                            if json.loads((j.dir / "short" / "capcut" / "capcut.json").read_text(encoding="utf-8")).get("ok"):
+                                from . import edit; edit.ensure_keyframes(j.dir, log)   # the replaced file needs its beat keyframes again
+                        except Exception as e: log(f"  couldn't prepare the CapCut version for editing ({str(e)[:120]})")
                     _length_check(j, out, sp.get("target_secs") or s.get("short_secs"), "Short", log)
                     from . import thumb916, review
                     try: j.save(thumbnail=str(thumb916.make(j.dir, sp, cfg, log)))

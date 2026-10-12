@@ -5,7 +5,8 @@ import { asset } from "./asset";
 import { MapBackdrop, HeadlineBackdrop, LayersBackdrop } from "./Backdrops";
 import { ReconBackdrop } from "./Recon";
 import { IllustrationBackdrop, SilhouetteBackdrop } from "./Illustration";
-import { SimBackdrop } from "./Sim";
+import { SimBackdrop, SimMapBackdrop } from "./Sim";
+import { TemplateBackdrop } from "./Templates";
 
 // Stills are wide (16:9) in a tall frame, so we SCROLL across them to reveal the whole scene.
 // Videos play slightly slowed so a 5 s clip fills ~6 s.
@@ -49,6 +50,8 @@ const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, s
     if (k === "illustration") return <IllustrationBackdrop g={bg.g} dur={dur} />;
     if (k === "silhouette") return <SilhouetteBackdrop g={bg.g} dur={dur} />;
     if (k === "sim") return <SimBackdrop g={bg.g} dur={dur} />;
+    if (k === "simmap") return <SimMapBackdrop g={bg.g} dur={dur} />;
+    if (k === "tpl") return <TemplateBackdrop g={bg.g} dur={dur} />;
     return <HeadlineBackdrop g={bg.g as any} dur={dur} />;
   }
   if (bg.type === "layers") return <LayersBackdrop layers={bg.layers} dur={dur} seed={seed} />;

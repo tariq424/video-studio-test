@@ -66,9 +66,31 @@ DEFAULTS = {
     "kokoro_python": "",              # "" = app/kenv (pinokio/install_kokoro.js)
     "kokoro_device": "",              # "" = cuda when available
     "image_qa": True,
+    # ---- visual ladder v2 (Oct 2026). Everything below is OFF by default: with ladder_v2 False the old ladder runs unchanged.
+    # v2 order: 1 stock -> 2 real photos -> 3 cloud still -> 4 WanGP still (atmospheric only) -> 5 Remotion graphics (GRAPHICS)
+    # -> 6 physics module (SIMULATION) -> 7 CapCut (CAPCUT) -> 8 parallax -> 9 illustration / silhouette -> 10 headline card.
+    # The 3D reconstruction rung (incl. the generic "object" spinning top) is not part of v2.
+    "ladder_v2": False,               # master switch for the v2 order (Shorts: short.do_fallback; explainers: render.do_stills / do_motion)
+    "graphics_secs": 8,               # length of a rendered GRAPHICS clip (6-10 s)
+    "graphics_claude": True,          # v2: when no template fits, Claude writes a Remotion composition for the beat
+    "graphics_claude_model": "",      # "" = script_model with the Anthropic key; falls back to the script provider without one
+    "graphics_claude_max_per_video": 3,   # cost cap: Claude-written compositions per video (one write + one repair each)
+    "graphics_timeout": 300,          # seconds per GRAPHICS render before it counts as a hard failure
+    "physics_auto": True,             # v2: physics modules join the ladder (only when the beat's subject matches a module)
+    "capcut_fallback": False,         # rung 7: CapCut assembles the failed beats (needs VectCutAPI + computer use); separate switch
+    "capcut_api_url": "http://127.0.0.1:9001",   # VectCutAPI server (github.com/sun-guannan/VectCutAPI)
+    "capcut_api_dir": "",             # VectCutAPI's folder (where it writes dfd_<id> draft folders)
+    "capcut_drafts_dir": "",          # CapCut's draft folder; "" = %LOCALAPPDATA%/CapCut/User Data/Projects/com.lveditor.draft
+    "capcut_exe": "",                 # "" = %LOCALAPPDATA%/CapCut/Apps/CapCut.exe
+    "capcut_cu_model": "claude-sonnet-5",   # model that drives the CapCut Export clicks (computer use, Anthropic key)
+    "capcut_cu_tool": "computer_20250124",   # computer-use tool version / beta header for that model
+    "capcut_cu_beta": "computer-use-2025-01-24",
+    "capcut_max_actions": 30,         # computer-use budget per video (screenshots + clicks)
+    "capcut_timeout": 600,            # seconds for the whole CapCut session (draft + export)
+    "aisstream_api_key": "",          # optional (aisstream.io, free): live AIS position for ship_route when the narration gives an MMSI
 }
 
-SECRETS = ("anthropic_api_key", "zai_api_key", "deepseek_api_key")
+SECRETS = ("anthropic_api_key", "zai_api_key", "deepseek_api_key", "aisstream_api_key")
 
 VAULT = "ExplainerStudio"   # shared with Explainer Studio so saved keys carry over
 

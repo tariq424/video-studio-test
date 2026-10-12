@@ -10,6 +10,58 @@ Video Studio is a fork of Explainer Studio (`F:\code\explainer-studio`, github `
 - **Outputs:** `F:\videos\video_studio\jobs\<job id>\`. A job's videos are in its `output\` folder.
 - **UI:** `http://127.0.0.1:42020` (fixed since Oct 4; `start-video-studio.bat` starts it without Pinokio). Start it from Pinokio → **Video Studio** → Start (launcher scripts in `C:\pinokio\api\video-studio`, with copies in `pinokio/` in the repo).
 
+## Visual ladder v2 (2026-10-12, on main, OFF by default) — graphics / physics / CapCut
+**Nothing changes until you set `"ladder_v2": true` in settings.json** (no UI toggle on purpose). `capcut_fallback` is a second,
+separate switch (also off). Not smoke-tested on the PC yet; sandbox-tested only (see below).
+
+v2 order per beat (Shorts: `short.do_fallback` -> `short._v2_rungs`; explainers: `render.do_stills` / `do_motion` -> `render.v2_after_wangp`):
+  1. Stock  2. Real photos  3. Cloud still  4. WanGP still - atmospheric only (`illustrate.wangp_lock`; "an illustration fits" no
+  longer blocks WanGP)  5. **Remotion graphics (GRAPHICS)**  6. **Physics module (SIMULATION)**  7. **CapCut (CAPCUT)**
+  8. Parallax  9. Illustration / silhouette  10. Headline card.
+  - A still that passes its check (3/4) is still shown with parallax motion, as before (rung name "parallax" in the chain).
+    Rung 8 is only a still the check couldn't judge ("check unavailable") - never one rejected for its content.
+  - **No 3D reconstruction in v2** (the generic "object" spinning top included). v1 keeps it. The review menu doesn't offer it under v2.
+  - Graphics and physics run once per beat; a beat's second slot goes on down the ladder.
+- **Rung 5 - `studio/graphics.py`, `remotion/src/Templates.tsx`.** 8 templates: stat, quote, timeline, compare, route (map),
+  chart (bar/line), list (stacked cards), abstract (gradient + particles + text). Router: reuses the script's beat analysis first
+  (backdrop map -> route; on-screen stat / quote / timeline / compare / icons -> that template) - no model call; otherwise ONE
+  small JSON call (script provider, DeepSeek) picks a template + fills its data, or says "none". "none" -> Claude writes a
+  Remotion component (`graphics_claude`, Anthropic key + `script_model`, else the script provider): static checks (imports only
+  react / remotion / ../theme; no fetch/eval/require/URLs/timers/random), rendered from `remotion/src/gen/` (gitignored,
+  deleted after), one repair round. Cap: `graphics_claude_max_per_video` = 3. Output for both: MP4, `graphics_secs` = 8 s,
+  limited colour range, in `<workspace>/graphics/<slot>.mp4`; plays at 1.0x and holds its last frame; treated as a text
+  background (overlay cards that would cover it are dropped). Explainers: label burned in, clip at `motion/<id>.mp4`.
+  **Hard failure** = crash / no output / timeout (`graphics_timeout` 300 s). A classifier "none" with Claude capped is NOT hard.
+- **Rung 6 - `studio/physics.py`.** `route(sec)` picks a module only when the subject matches (keyword rules in `ROUTES`), then
+  `fill()` gets parameters from the narration (one JSON call). New: **weather_event** (NOAA NHC CurrentStorms.json + forecast
+  advisory for active storms -> forecast points + cone; NOAA HURDAT2 best track for past storms by name/year, cached in
+  `<studio>/cache/noaa`; else narration positions; cone radii = approximate NHC average track error, labelled so) and
+  **ship_route** (narration waypoints with coordinates; live AIS position via aisstream.io only with `aisstream_api_key` + an
+  MMSI - needs `websocket-client`; no historical AIS). Drawn by `SimMapBackdrop` (Sim.tsx, kind "simmap"). vehicle_crash,
+  structural_collapse, earthquake stay stubs (those beats fall to graphics / below). The pause/editor chat "simulate" uses the same modules.
+- **Rung 7 - `studio/capcut.py`** (needs `capcut_fallback` too). Trigger: graphics HARD-failed and no physics module fit. The beat
+  still gets a provisional visual (8-10) and is listed in `short/fallback/capcut.json`. After the Short renders, ONE session per
+  video: VectCutAPI (run it yourself: `python capcut_server.py`, port 9001; set `capcut_api_dir` to its folder) writes a draft =
+  the rendered Short + a CapCut text card (beat headline + CAPCUT label) over each failed beat; the draft is copied to CapCut's
+  drafts folder; computer use (Anthropic API `capcut_cu_model`, `pyautogui`) opens it and clicks Export to `short/capcut/`.
+  Success only if an MP4 of the Short's length appears; then it replaces the output (original kept as `*_pre_capcut.mp4`).
+  Stops on sign-in / CAPTCHA / upgrade / consent / anything unexpected, `capcut_max_actions` 30, `capcut_timeout` 600 s.
+  **Any failure -> the provisional visuals stay (falls through to rung 8+).** Shorts only; explainers skip rung 7.
+  Beats the reviewer explicitly chose a visual for are left alone.
+- Labels: GRAPHICS, SIMULATION, CAPCUT (existing labels unchanged). Chains (`short/fallback/chains.json`) show e.g.
+  `stock -> graphics (template:stat (analysis))`, `... -> graphics -> simulation (ship_route)`,
+  `... -> graphics -> capcut (pending: ...) -> headline`; chains carry `"ladder": "v2"` and `"capcut"`. Debugger:
+  `treatment == graphics|simulation|capcut`, `escalated_past == graphics|simulation`. Review RUNG names added.
+- **Sandbox tests done (2026-10-12):** all 8 templates rendered portrait + landscape and inspected; storm (track + cone) and ship
+  maps rendered; template -> MP4 and Claude-component -> MP4 render paths (1080x1920, yuv420p, tv range, 6.0 s); code checker
+  rejects fs imports / fetch; HURDAT2 parser on a sample (Ian 2022: peak 155 mph, landfall labelled); router on sample
+  narrations; rung escalation (graphics hard-fail -> capcut pending -> headline; ship beat -> simulation; capcut off -> headline);
+  CapCut with the API down falls through. **Not tested:** NOAA live fetch (no network here), VectCutAPI draft fields against
+  your installed version, the computer-use Export, any full pipeline run.
+- **Activation checklist:** (1) `"ladder_v2": true` -> run a smoke test. (2) Optional CapCut: `pip install pyautogui` (not in requirements.txt on purpose), start
+  VectCutAPI, set `capcut_api_dir`, `"capcut_fallback": true`; first run with CapCut open and watch it. (3) Optional AIS:
+  `pip install websocket-client`, `aisstream_api_key` (free at aisstream.io; stored in the vault).
+
 ## Status and policy (2026-10-09) — read first
 - **Project closed 2026-10-09** (no tuning; only blockers get fixed), **reopened once 2026-10-10** for cloud stills (commissioned by Tariq).
 - **The pipeline is a draft generator.** Expect 2-5 beats per video to be wrong. The **timeline editor** (post-render editing, below)

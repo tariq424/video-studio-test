@@ -185,6 +185,36 @@ def illustration_still(cfg, job, v, vo, log):
     log(f"  {v['id']}: {item['rung']}" + (f" (WanGP skipped: {lock})" if lock else " (before WanGP)"))
     return item["rung"]
 
+def _ws(job):
+    """The landscape workspace for explainer clips made with Remotion (illustrations, GRAPHICS)."""
+    ws = job / "stills" / "_illus"; ws.mkdir(parents=True, exist_ok=True)
+    (ws / "space.json").write_text(json.dumps({"orient": "landscape", "still_res": "1920x1088", "i2v_res": "1280x720", "w": 1920, "h": 1080}), encoding="utf-8")
+    return ws
+
+def v2_after_wangp(cfg, job, v, vo, log):
+    """Visual ladder v2 for an explainer visual that the cloud and WanGP didn't cover (WanGP draws atmospheric beats only):
+    5 Remotion graphics (motion/<id>.mp4, GRAPHICS burned in) -> 6 physics module (drawn live by the explainer, SIMULATION) ->
+    9 illustration / silhouette -> 10 headline card. CapCut (7) is Shorts-only for now; parallax (8) has no explainer form.
+    -> rung name (always succeeds: the headline card is the floor)."""
+    from . import graphics, physics
+    sec = {"id": v["id"], "vo": vo, "still_prompt": v.get("prompt", ""), "visuals": [x for x in [v.get("chart") and {"chart": v["chart"]}] if x]}
+    md = job / "motion"; md.mkdir(exist_ok=True)
+    try: g5 = graphics.make(cfg, _ws(job), sec, v["id"], log, tag="GRAPHICS")
+    except Exception as e: g5 = {"ok": False, "why": f"crash ({str(e)[:100]})"}
+    if g5.get("ok"):
+        shutil.copy(g5["path"], md / f"{v['id']}.mp4"); v["type"] = "motion"; v["graphics"] = g5.get("how"); v.pop("g", None)
+        log(f"  {v['id']}: graphics ({g5.get('how')})"); return "graphics"
+    log(f"  {v['id']}: graphics failed ({str(g5.get('why'))[:100]})")
+    if cfg.get("physics_auto", True):
+        mod = physics.route(sec)
+        g6 = physics.run(mod, physics.fill(cfg, mod, sec, log), cfg) if mod else None
+        if g6:
+            v["type"] = "motion"; v["g"] = g6; v["tag"] = "SIMULATION"; log(f"  {v['id']}: simulation ({mod})"); return "simulation"
+    rung = illustration_still(cfg, job, v, vo, log)
+    if rung: return rung
+    v["type"] = "motion"; v["g"] = {"kind": "headline", "kicker": "", "text": " ".join(vo.split()[:12]), "sub": ""}
+    log(f"  {v['id']}: headline card"); return "headline"
+
 def do_motion(job, plan, cfg, wg, log, stop):
     d = job / "motion"; d.mkdir(exist_ok=True); seed = 3000
     for s in plan["sections"]:
@@ -194,7 +224,11 @@ def do_motion(job, plan, cfg, wg, log, stop):
             if media.ok(out): continue
             if (job / "stills" / f"{v['id']}.jpg").exists() or cloud_still(cfg, job, v, s.get("vo", ""), log):   # cloud still
                 v["type"] = "still"; log(f"Motion {v['id']}: cloud still instead of WanGP motion"); continue
-            if illustration_still(cfg, job, v, s.get("vo", ""), log): continue   # animated illustration clip (motion/<id>.mp4)
+            if cfg.get("ladder_v2"):   # v2: WanGP motion only for atmospheric beats; everything else goes down the v2 ladder
+                from . import illustrate
+                lock = illustrate.wangp_lock({"id": v["id"], "vo": s.get("vo", ""), "still_prompt": v.get("prompt", "")}, _ents(job))
+                if lock: v2_after_wangp(cfg, job, v, s.get("vo", ""), log); continue
+            elif illustration_still(cfg, job, v, s.get("vo", ""), log): continue   # animated illustration clip (motion/<id>.mp4)
             ok = False
             for t in range(2):
                 r = wg.gen({"model_type": cfg["video_model"], "prompt": v["prompt"] + STYLE, "resolution": "1280x720",
@@ -220,6 +254,12 @@ def do_stills(job, plan, cfg, wg, log, stop):
         if out.exists(): continue
         if stop(): raise RuntimeError("cancelled")
         if cloud_still(cfg, job, v, vo, log): continue   # cloud first
+        if cfg.get("ladder_v2"):   # v2: WanGP still for atmospheric beats, then graphics -> physics -> illustration -> headline
+            from . import illustrate
+            lock = illustrate.wangp_lock({"id": v["id"], "vo": vo, "still_prompt": v.get("prompt", "")}, _ents(job))
+            if lock or not wg.alive() or not _still(cfg, wg, log, v["prompt"], out, seed, stop, f"still {v['id']}"):
+                v2_after_wangp(cfg, job, v, vo, log)
+            n += 1; continue
         if illustration_still(cfg, job, v, vo, log): continue   # then illustration / silhouette; WanGP only for atmospheric filler
         if not _still(cfg, wg, log, v["prompt"], out, seed, stop, f"still {v['id']}"):
             raise RuntimeError(f"still {v['id']} failed")

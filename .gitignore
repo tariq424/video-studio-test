@@ -26,3 +26,6 @@ screenshots/
 # cloud-stills browser profile (logins, cookies)
 cloud_profile/
 app/kenv/
+
+# ladder v2: Claude-written Remotion components (temporary, deleted after each render)
+remotion/src/gen/

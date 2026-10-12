@@ -14,7 +14,8 @@ from . import media
 
 FPS = 30
 RUNG = {"own": "Your footage", "stock": "Stock footage", "photo": "Real photo", "cloud": "Cloud still", "illustration": "Illustration", "silhouette": "Silhouette", "simulation": "Simulation", "still": "AI still", "animate": "AI animation", "parallax": "Parallax",
-        "reconstruction": "3D reconstruction", "headline": "Headline card", "map": "Map", "supplied": "Your file", "parallax (fill)": "Parallax"}
+        "reconstruction": "3D reconstruction", "headline": "Headline card", "map": "Map", "supplied": "Your file", "parallax (fill)": "Parallax",
+        "graphics": "Remotion graphics", "capcut": "CapCut"}
 STATIC = {"still", "headline", "photo"}          # click enlarges instead of playing
 _locks, _gpu = {}, threading.Lock()
 
@@ -93,8 +94,9 @@ def _slot_cands(rv, sec, key, r, sd, full, log):
                  "parallax", r.get("still_ok"),
                  f"depth layers of the {'cloud' if cloud else 'AI'} still" + ("" if r.get("still_ok") else f" (still: {r.get('still_why') or 'not checked'})"))
 
-def _cheap_cands(rv, sec, job, phases):
-    """Treatments that cost nothing to offer: the map (if the script has one) and the reconstruction / headline card."""
+def _cheap_cands(rv, sec, job, phases, cfg=None):
+    """Treatments that cost nothing to offer: the map (if the script has one) and the reconstruction / headline card.
+    Ladder v2 has no reconstruction rung, so it isn't offered there."""
     from . import coherence
     bid = sec["id"]; bd = sec.get("backdrop") or {}
     if bd.get("kind") == "map": _add(rv, bid, {"type": "graphic", "g": bd}, "map", True, "the route / places in this beat")
@@ -103,11 +105,15 @@ def _cheap_cands(rv, sec, job, phases):
     for it in illustrate.options(sec, ents, phases.get(bid)):   # flat illustration / silhouette: free, CPU only
         g = it["g"]; what = f"flat {g['scene']} illustration" if g["kind"] == "illustration" else f"{g['shape']} silhouette against the sky"
         _add(rv, bid, {"type": "graphic", "g": g, "tag": it["tag"]}, it["rung"], True, what)
-    if sec.get("subject"):
+    if sec.get("subject") and not (cfg or {}).get("ladder_v2"):
         cap = bd.get("text", "") if bd.get("kind") == "headline" else bd.get("title", "")
         _add(rv, bid, {"type": "graphic", "g": coherence.recon(sec["subject"], ents, sec["vo"], 0, cap, moment=phases.get(bid, ""))},
              "reconstruction", True, "3D reconstruction from the narration")
     _add(rv, bid, _skip_item(sec), "headline", True, "text card summing up the beat")
+
+def _capcut_pending(job):
+    from . import capcut
+    return capcut.pending(job)
 
 def _stock_cands(rv, sec, picked, rejected, story_subjects, auto=False):
     out = []
@@ -165,7 +171,7 @@ def collect(job, plan, cfg, log, mode="auto", debug_beats=None):
             _stock_cands(rv, sec, [], fst.get("rejected", {}).get(bid, []), story_subjects)
             slots = {k: r for k, r in lad.items() if k.rsplit("_", 1)[0] == bid}
             for k, r in slots.items(): _slot_cands(rv, sec, k, r, sd, full, log)
-            if full or debug_beats is not None: _cheap_cands(rv, sec, job, phases)
+            if full or debug_beats is not None: _cheap_cands(rv, sec, job, phases, cfg)
             for pr in dbg_ch.get(bid, {}).get("photos_rejected", []):   # the debugger shows rejected real photos too
                 if pr.get("path") and Path(pr["path"]).exists():
                     _add(rv, bid, {"type": "image", "src": _rel(pr["path"], sd), "fit": "frame", "tag": "FILE", "photo": pr.get("id")}, "photo", False,
@@ -175,6 +181,7 @@ def collect(job, plan, cfg, log, mode="auto", debug_beats=None):
             why = []
             if any("unavailable" in str(r.get("still_why", "")) + str(r.get("clip_why", "")) for r in slots.values()): why.append("the coherence check couldn't run")
             rungs = [rv["cands"][c]["rung"] for c in auto]
+            if dbg_ch.get(bid, {}).get("capcut") == "pending" or bid in _capcut_pending(job): why.append("graphics hard-failed: CapCut will cover this beat after the render")
             if not covered and any(x in ("reconstruction", "headline") for x in rungs) and any(r.get("still") and not r.get("still_ok") for r in slots.values()):
                 why.append("the AI still failed the check, so it fell back to " + ", ".join(sorted({RUNG.get(x, x).lower() for x in rungs if x in ('reconstruction', 'headline')})))
             if not auto: why.append("no visual found")
@@ -233,7 +240,7 @@ def _bundle(log):
     start-up time, and previews load their media over http from Video Studio itself, so no per-job public dir is needed."""
     from . import short, config
     rdir = short._ensure_remotion(log); out = rdir / "_preview_bundle"; stamp = out / "_src_mtime.txt"
-    newest = str(max(f.stat().st_mtime for f in (rdir / "src").rglob("*") if f.is_file()))
+    newest = str(max(f.stat().st_mtime for f in (rdir / "src").rglob("*") if f.is_file() and "gen" not in f.relative_to(rdir / "src").parts[:1]))   # src/gen: temporary v2 components
     with _bundle_lock:
         if not (stamp.exists() and stamp.read_text() == newest):
             log("  preparing the preview renderer (once after each update)...")
@@ -258,7 +265,7 @@ def _urlify(bg, sd):
     if bg.get("layers"): bg["layers"] = [base + x for x in bg["layers"]]
     return bg
 
-def _remotion(sd, bg, secs, out, cfg, log, frame=None, frames=None, scale=0.25, crf=26):
+def _remotion(sd, bg, secs, out, cfg, log, frame=None, frames=None, scale=0.25, crf=26, timeout=900):
     from . import short
     rdir, bundle = _bundle(log); out = Path(out); out.parent.mkdir(parents=True, exist_ok=True)
     w, h = _fsize(sd)
@@ -267,7 +274,7 @@ def _remotion(sd, bg, secs, out, cfg, log, frame=None, frames=None, scale=0.25, 
            f"--gl={short._gl(cfg)}", f"--scale={scale}", "--log=error"]
     cmd += [f"--frame={frame}"] if frame is not None else [f"--frames={frames[0]}-{frames[1]}", f"--crf={crf}", "--concurrency=2"]
     for attempt in range(2):
-        p = subprocess.run(cmd, cwd=rdir, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900)
+        p = subprocess.run(cmd, cwd=rdir, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
         if p.returncode == 0 and out.exists(): break
         if short.BROWSER_FLAKE not in (p.stdout + p.stderr): break
         time.sleep(5)
@@ -292,7 +299,7 @@ def _thumb(job, c, cfg, log):
             _frame(src, tt, out.with_suffix(".tmp.jpg")); _cover(out.with_suffix(".tmp.jpg"), out, ts); out.with_suffix(".tmp.jpg").unlink()
         elif t == "image": _contain(sd / it["src"], out, ts) if it.get("fit") == "frame" else _cover(sd / it["src"], out, ts)
         elif t == "layers": _cover(sd / it["layers"][0], out, ts)
-        elif t == "graphic" and it["g"].get("kind") in ("recon", "illustration", "silhouette", "sim"):
+        elif t == "graphic" and it["g"].get("kind") in ("recon", "illustration", "silhouette", "sim", "simmap", "tpl"):
             _remotion(sd, it, 6, out, cfg, log, frame=FPS * 3, scale=0.25)
         elif t == "graphic" and it["g"].get("kind") == "map":
             _card(it["g"].get("title") or "Map", "map: " + ", ".join(p["name"] for p in it["g"].get("points", []))[:28], out)

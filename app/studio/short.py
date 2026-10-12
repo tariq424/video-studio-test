@@ -277,6 +277,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
     for the debugger and the trace. dbg (debug.Debugger): safe points for 'Pause now'; with breakpoints on, beats run one at a time
     and each is checked after its visuals are decided (normal runs keep the batched GPU order)."""
     from . import depth, coherence, photos, ladder, cloudgen, illustrate
+    v2 = bool(cfg.get("ladder_v2"))   # visual ladder v2 (graphics / physics / CapCut); off = the ladder below, unchanged
     sd = job / "short"; fd = sd / "fallback"; fd.mkdir(parents=True, exist_ok=True)
     tm = json.loads((sd / "timings.json").read_text(encoding="utf-8"))
     pick = json.loads((sd / "stock" / "pick.json").read_text(encoding="utf-8"))
@@ -301,7 +302,9 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         c = chs.get(sec["id"], {})
         return {"bid": sec["id"], "n": int(sec["id"][1:]) + 1, "vo": sec["vo"], "stock_found": c.get("stock_found", len(pick.get(sec["id"], []))),
                 "uses": c.get("uses", []), "failed": c.get("failed", [])}
-    log("Visual ladder per beat (1 stock/photo -> 2 cloud still -> 3 WanGP still -> 4 parallax -> 5 illustration / silhouette -> 6 reconstruction / headline; animate on click):")
+    if v2: log("Visual ladder v2 per beat (1 stock -> 2 real photos -> 3 cloud still -> 4 WanGP still (atmospheric only) -> 5 Remotion graphics -> "
+               "6 physics module -> 7 CapCut (hard failures, per video) -> 8 parallax -> 9 illustration / silhouette -> 10 headline; animate on click):")
+    else: log("Visual ladder per beat (1 stock/photo -> 2 cloud still -> 3 WanGP still -> 4 parallax -> 5 illustration / silhouette -> 6 reconstruction / headline; animate on click):")
     for s in beats:   # beats step 1 covered on its own
         if s["id"] in base_needs: continue
         log(f"  {s['id']}: " + ("your footage" if any(c.get("own") for c in pick.get(s["id"], [])) else f"stock ({len(pick.get(s['id'], []))} clip(s), coherent)")); stock_beat(s)
@@ -347,7 +350,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         # covers, and never aircraft, vehicles, specific buildings or real people (it hallucinates their anatomy)
         locked = illustrate.wangp_lock(s, ents, phases.get(s["id"]))
         opts = illustrate.options(s, ents, phases.get(s["id"]))
-        wan_why = locked or ("an illustration fits" if opts else "")
+        wan_why = locked or ("an illustration fits" if opts and not v2 else "")   # v2: illustrations are rung 9, WanGP draws atmospheric beats
         for k in range(n - len(items)):
             slots.append({"key": f"{s['id']}_{k}", "beat": s["id"], "vo": s["vo"], "still_prompt": s.get("still_prompt", ""),
                           "motion": s.get("motion", ""), "subject": s.get("subject"), "rotate": rot,
@@ -358,6 +361,10 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         cap = bd.get("text", "") if bd.get("kind") == "headline" else bd.get("title", "")
         rung1, why1 = step1[s["id"]]
         lines, k5, kill, failed = [], 0, 0, ([rung1] if why1 else [])
+        vb = {"g": False, "hard": False, "p": False, "pok": False, "capcut": ""}   # v2, once per beat: graphics tried / hard-failed, physics tried / fitted
+        if v2:
+            from . import capcut
+            capcut.mark(sd, s["id"], None)   # re-deciding this beat: a CapCut mark from an earlier run no longer applies
         for sl in [x for x in slots if x["beat"] == s["id"]]:
             r = st.get(sl["key"], {}); chain = [rung1]; why = [f"{rung1}: {why1}"] if why1 else []
             cloud = r.get("src") == "cloud"
@@ -399,6 +406,11 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                     log(f"  depth layers failed ({str(e)[:80]}); still held with a slow zoom"); lay = depth_free(img, pre_)
                 items.append({"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED · CLOUD" if cloud else "GENERATED · PARALLAX",
                               "rung": "parallax", "cloud": cloud})
+            elif v2:
+                if not nowan: why.append(f"still: {r.get('still_why') or 'not made'}"); failed.append("still")
+                it = _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill, log)
+                if it.get("rung") in ("illustration", "silhouette"): kill += 1
+                items.append(it)
             else:
                 if not nowan: why.append(f"still: {r.get('still_why') or 'not made'}"); failed.append("still")
                 ill = illustrate.pick(s, ents, phases.get(s["id"], ""), k5 + kill)
@@ -426,8 +438,9 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         for j, ln in enumerate(lines): log(f"  {s['id']}{'#' + str(j + 1) if len(lines) > 1 else ''}: {ln}")
         log(f"  {s['id']} uses: {got}")
         chs[s["id"]] = {"n": int(s["id"][1:]) + 1, "vo": s["vo"], "stock_found": len(pick.get(s["id"], [])), "chain": lines,
-                        "uses": [i["rung"] for i in items] + (["cloud"] if any(i.get("cloud") for i in items) else []),
+                        "uses": [i["rung"] for i in items] + (["cloud"] if any(i.get("cloud") for i in items) else []) + (["capcut"] if vb["capcut"] == "pending" else []),
                         "failed": sorted(set(failed)), "stock_rejected": srej(s["id"]), "photos_rejected": prej.get(s["id"], []),
+                        **({"ladder": "v2", "capcut": vb["capcut"]} if v2 else {}),
                         "cloud": [{"slot": x["key"], "provider": st.get(x["key"], {}).get("cloud_provider"), "why": st.get(x["key"], {}).get("cloud_why", ""),
                                    "tries": st.get(x["key"], {}).get("cloud_tries", [])} for x in slots if x["beat"] == s["id"] and "cloud" in st.get(x["key"], {})]}
         save_out()
@@ -458,6 +471,43 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         elif s["id"] not in out: stock_beat(s)
         if dbg: save_out(); dbg.point(info(s))
     save_out()
+
+def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill, log):
+    """Visual ladder v2, rungs 5-10 for one slot whose cloud / WanGP still didn't pass. -> the bg item. Appends to chain / why /
+    failed. vb carries per-beat state: graphics and physics run once per beat (a second slot of the same beat goes on down)."""
+    from . import graphics, physics, capcut, illustrate
+    if not vb["g"]:   # 5. Remotion graphics (template, else Claude-generated)
+        vb["g"] = True
+        try: g5 = graphics.make(cfg, sd, s, sl["key"], log)
+        except Exception as e: g5 = {"ok": False, "why": f"crash ({str(e)[:120]})", "hard": True, "how": "?"}
+        if g5["ok"]:
+            secs = round(media.dur(g5["path"]), 2)
+            chain.append(f"graphics ({g5['how']})")
+            return {"type": "video", "src": _rel_sd(g5["path"], sd), "secs": secs, "rate": 1.0, "freeze": True, "textbg": True,
+                    "tag": "GRAPHICS", "rung": "graphics"}
+        chain.append("graphics"); why.append(f"graphics: {g5['why']}"); failed.append("graphics"); vb["hard"] = bool(g5.get("hard"))
+    if cfg.get("physics_auto", True) and not vb["p"]:   # 6. physics module, only when the subject matches one
+        vb["p"] = True
+        mod = physics.route(s)
+        if mod:
+            g6 = physics.run(mod, physics.fill(cfg, mod, s, log), cfg)
+            chain.append(f"simulation ({mod})")
+            if g6: vb["pok"] = True; return {"type": "graphic", "g": g6, "tag": "SIMULATION", "rung": "simulation"}
+            why.append(f"simulation: {mod} had no usable data"); failed.append("simulation")
+    if vb["hard"] and not vb["pok"] and not vb["capcut"]:   # 7. CapCut: graphics HARD-failed and no physics module fit
+        if capcut.enabled(cfg):
+            vb["capcut"] = "pending"; capcut.mark(sd, s["id"], why[-1] if why else "graphics failed")
+            chain.append("capcut (pending: one CapCut session after the render)")
+        else: vb["capcut"] = "off"
+    # 8-10: the beat's visual for the render (provisional when CapCut is pending)
+    sw = str(r.get("still_why") or "")
+    if r.get("still") and "unavailable" in sw:   # 8. parallax: a still the check couldn't judge (never one rejected for its content)
+        chain.append("parallax"); lay = depth_free(sd / r["still"], sd / "fallback" / f"{sl['key']}_p8")
+        return {"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED · PARALLAX", "rung": "parallax"}
+    ill = illustrate.pick(s, ents, phases.get(s["id"], ""), kill)   # 9. illustration / silhouette
+    if ill: chain.append(ill["rung"]); return ill
+    chain.append("headline")   # 10. headline card
+    return {"type": "graphic", "g": bd if bd.get("kind") == "headline" else {"kind": "headline", "kicker": "", "text": s["vo"][:70], "sub": ""}, "rung": "headline"}
 
 def rotate_still(src, deg, nose, dst):
     """Turn a still `deg` degrees nose-down (nose = the side of the picture the aircraft points to) and crop to fill the frame
@@ -552,7 +602,7 @@ def _clip_len(sd, c):
     if p not in _lens: _lens[p] = media.dur(p) if p.exists() else 0.0
     return _lens[p]
 
-TEXT_BG = ("headline", "sim")   # backgrounds that carry their own text in the middle of the frame (+ a map with a title)
+TEXT_BG = ("headline", "sim", "simmap", "tpl")   # backgrounds that carry their own text in the middle of the frame (+ a map with a title)
 
 def _resolve_overlaps(bid, bgs, gfx, d, log):
     """One text layer per screen zone at a time. A background that carries its own text (headline card, simulation, titled map)
@@ -562,7 +612,7 @@ def _resolve_overlaps(bid, bgs, gfx, d, log):
     wins = []
     for i, bg in enumerate(bgs):
         g = bg.get("g") or {}
-        if bg.get("type") == "graphic" and (g.get("kind") in TEXT_BG or (g.get("kind") == "map" and g.get("title"))):
+        if (bg.get("type") == "graphic" and (g.get("kind") in TEXT_BG or (g.get("kind") == "map" and g.get("title")))) or bg.get("textbg"):
             t1 = bgs[i + 1]["from"] if i + 1 < len(bgs) else d
             wins.append((bg["from"], t1))
     if not wins: return gfx, []
@@ -675,6 +725,9 @@ def build(job, plan, cfg, log):
                 if not dst.exists(): shutil.copy2(sd / c["src"], dst)
                 bg = {"type": "video", "src": f"media/fb/{Path(c['src']).name}", "tag": c.get("tag", "GENERATED"), "from": round(t0, 3)}
                 if not bg["tag"]: del bg["tag"]
+                if c.get("rate"): bg["rate"] = c["rate"]   # v2 GRAPHICS clips play at real speed and hold their last frame
+                if c.get("freeze"): bg["freezeAt"] = max(0.1, round(c.get("secs", FB_SECS) - 0.1, 2))
+                if c.get("textbg"): bg["textbg"] = True
             elif c["type"] == "layers":
                 srcs = []
                 for lp in c["layers"]:

@@ -10,11 +10,12 @@ import { C, HEAD, BODY } from "./theme";
 export type MapPoint = { name: string; lat: number; lon: number; role: "origin" | "planned" | "actual" | "stop" | "place" };
 import type { Recon } from "./Recon";
 import type { Illustration, Silhouette } from "./Illustration";
-import type { Sim } from "./Sim";
+import type { Sim, SimMap } from "./Sim";
+import type { Tpl } from "./Templates";
 export type Backdrop =
   | { kind: "map"; title?: string; points: MapPoint[] }
   | { kind: "headline"; kicker?: string; text: string; sub?: string }
-  | Recon | Illustration | Silhouette | Sim;
+  | Recon | Illustration | Silhouette | Sim | SimMap | Tpl;
 
 const countries = (feature as any)(world as any, (world as any).objects.countries);
 
@@ -28,7 +29,8 @@ export const MapBackdrop: React.FC<{ g: Extract<Backdrop, { kind: "map" }>; dur:
   // square-ish window (the map area is ~1:1) just big enough for all points plus a margin, at least 8 degrees across
   const half = Math.max(4, (Math.max(...lons) - Math.min(...lons)) * 0.75, (Math.max(...lats) - Math.min(...lats)) * 0.9);
   const box = { type: "MultiPoint", coordinates: [[cx - half, cy - half * 0.85], [cx + half, cy + half * 0.85]] } as any;
-  const top = 300, bottom = 1330;
+  const tall = height > width;   // Shorts (portrait) keep the top and the caption zone clear; landscape uses the full frame
+  const top = tall ? 300 : 150, bottom = tall ? 1330 : height - 150;
   const zoom = interpolate(t, [0, dur], [1.0, 1.06]);
   const proj = geoMercator().fitExtent([[60, top], [width - 60, bottom]], box);
   const path = geoPath(proj);
@@ -80,7 +82,7 @@ export const MapBackdrop: React.FC<{ g: Extract<Backdrop, { kind: "map" }>; dur:
         {draw > 0.02 && draw < 0.999 ? <text x={head[0]} y={head[1]} fontSize={58} textAnchor="middle" dominantBaseline="central"
           transform={`rotate(${ang + 45} ${head[0]} ${head[1]})`}>✈️</text> : null}
       </svg>
-      {g.title ? <div style={{ position: "absolute", top: 1250, left: 0, right: 0, textAlign: "center" }}>
+      {g.title ? <div style={{ position: "absolute", top: tall ? 1250 : height - 120, left: 0, right: 0, textAlign: "center" }}>
         <span style={{ fontFamily: HEAD, fontWeight: 900, fontSize: 40, color: "#111", background: C.gold, borderRadius: 999, padding: "10px 30px" }}>{g.title}</span>
       </div> : null}
     </AbsoluteFill>

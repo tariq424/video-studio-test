@@ -1,8 +1,11 @@
 // Data / physics simulation for a beat (app/studio/physics.py): an animated profile (altitude, depth...) drawn over the beat's
 // length, the subject riding the curve, a live readout and event marks. The time series is compressed into the shot.
 import React from "react";
-import { AbsoluteFill, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, interpolate, useCurrentFrame, useVideoConfig, Easing } from "remotion";
 import { C, HEAD, BODY } from "./theme";
+import { geoMercator, geoPath } from "d3-geo";
+import { feature } from "topojson-client";
+import world from "world-atlas/countries-50m.json";
 
 export type Sim = { kind: "sim"; module: string; title: string; unit: string; series: [number, number][]; icon?: string; label?: string;
   notes?: string; marks?: { t: number; text: string }[] };
@@ -42,6 +45,82 @@ export const SimBackdrop: React.FC<{ g: Sim; dur: number }> = ({ g, dur }) => {
       </svg>
       <div style={{ position: "absolute", right: tall ? 90 : 200, top: tall ? 1300 : 52, fontFamily: HEAD, fontWeight: 900, fontSize: tall ? 64 : 52, color: C.gold }}>{fmt(cur[1])}</div>
       {g.notes ? <div style={{ position: "absolute", left: tall ? 90 : 200, top: tall ? 1310 : 180, fontFamily: BODY, fontWeight: 600, fontSize: tall ? 26 : 22, color: C.mut, maxWidth: tall ? 520 : 900 }}>{g.notes}</div> : null}
+    </AbsoluteFill>
+  );
+};
+
+// ---------------------------------------------------------------- map simulations (weather_event, ship_route)
+// A track on a map: the observed path drawn over the beat with the subject (storm / vessel) riding it, and for storms the
+// forecast points with an uncertainty cone (circles of the forecast error radius, joined along the track).
+
+export type SimPt = { lat: number; lon: number; label?: string; v?: string; r_km?: number };
+export type SimMap = { kind: "simmap"; module: string; title: string; label?: string; notes?: string; icon?: "storm" | "ship";
+  track: SimPt[]; forecast?: SimPt[]; places?: { name: string; lat: number; lon: number }[]; source?: string };
+
+const countries2 = (feature as any)(world as any, (world as any).objects.countries);
+
+export const SimMapBackdrop: React.FC<{ g: SimMap; dur: number }> = ({ g, dur }) => {
+  const f = useCurrentFrame(); const { fps, width: W, height: H } = useVideoConfig(); const t = f / fps; const tall = H > W;
+  const track = (g.track || []).filter((p) => isFinite(p.lat) && isFinite(p.lon));
+  const fc = (g.forecast || []).filter((p) => isFinite(p.lat) && isFinite(p.lon));
+  const all = [...track, ...fc, ...(g.places || [])];
+  const lats = all.map((p) => p.lat), lons = all.map((p) => p.lon);
+  const pad = Math.max(3, ...fc.map((p) => (p.r_km || 0) / 111));
+  const box = { type: "MultiPoint", coordinates: [[Math.min(...lons) - pad, Math.min(...lats) - pad], [Math.max(...lons) + pad, Math.max(...lats) + pad]] } as any;
+  const top = tall ? 480 : 150, bottom = tall ? 1300 : H - 120;
+  const proj = geoMercator().fitExtent([[60, top], [W - 60, bottom]], box); const path = geoPath(proj);
+  const P = (p: { lat: number; lon: number }) => proj([p.lon, p.lat]) as [number, number];
+  const draw = interpolate(t, [0.5, Math.max(1.5, dur * (fc.length ? 0.5 : 0.75))], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: Easing.inOut(Easing.cubic) });
+  const coneOn = interpolate(t, [dur * 0.5, dur * 0.75], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const tp = track.map(P);
+  const k = draw * (tp.length - 1); const i0 = Math.floor(k); const fr = k - i0;
+  const a = tp[Math.min(i0, tp.length - 1)] || [W / 2, H / 2], b = tp[Math.min(i0 + 1, tp.length - 1)] || a;
+  const head: [number, number] = [a[0] + (b[0] - a[0]) * fr, a[1] + (b[1] - a[1]) * fr];
+  const ang = (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI;
+  const shown = tp.slice(0, i0 + 1).concat([head]);
+  const rpx = (p: SimPt) => { const c = P(p); const n = P({ lat: p.lat + (p.r_km || 0) / 111, lon: p.lon }); return Math.abs(c[1] - n[1]); };
+  // cone outline: offset each forecast point left/right of the track direction by its radius, then close the shape
+  const fpts = fc.length ? [track[track.length - 1], ...fc].filter(Boolean) as SimPt[] : [];
+  const cone = (() => {
+    if (fpts.length < 2) return "";
+    const L: [number, number][] = [], R: [number, number][] = [];
+    fpts.forEach((p, i) => { const c = P(p); const q = P(fpts[Math.min(i + 1, fpts.length - 1)]); const o = P(fpts[Math.max(i - 1, 0)]);
+      const dx = q[0] - o[0], dy = q[1] - o[1]; const len = Math.hypot(dx, dy) || 1; const r = i === 0 ? 4 : rpx(p);
+      L.push([c[0] - (dy / len) * r, c[1] + (dx / len) * r]); R.push([c[0] + (dy / len) * r, c[1] - (dx / len) * r]); });
+    return "M" + L.map((p) => p.join(",")).join("L") + "L" + R.reverse().map((p) => p.join(",")).join("L") + "Z";
+  })();
+  return (
+    <AbsoluteFill style={{ background: "radial-gradient(ellipse at 50% 45%, #13203a 0%, #070a12 75%)" }}>
+      <svg width={W} height={H} style={{ position: "absolute", inset: 0 }}>
+        <g>{(countries2.features as any[]).map((c, i) => <path key={i} d={path(c) || ""} fill="#1a2740" stroke="#33476b" strokeWidth={1.5} />)}</g>
+        {cone ? <g opacity={coneOn}>
+          {fpts.slice(1).map((p, i) => <circle key={i} cx={P(p)[0]} cy={P(p)[1]} r={rpx(p)} fill="rgba(255,255,255,0.10)" />)}
+          <path d={cone} fill="rgba(255,255,255,0.14)" stroke="rgba(255,255,255,0.7)" strokeWidth={3} strokeDasharray="10 8" />
+          <path d={"M" + fpts.map((p) => P(p).join(",")).join("L")} fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth={4} strokeDasharray="4 10" />
+          {fc.map((p, i) => p.label ? <text key={"fl" + i} x={P(p)[0] + 16} y={P(p)[1] + 8} fill="rgba(255,255,255,0.85)" fontSize={tall ? 24 : 20} fontFamily="Inter" fontWeight={700}>{p.label}</text> : null)}
+        </g> : null}
+        <path d={"M" + shown.map((p) => p.join(",")).join("L")} fill="none" stroke={g.icon === "storm" ? C.red : C.gold} strokeWidth={7} strokeLinejoin="round" strokeLinecap="round" />
+        {track.map((p, i) => (i <= k && p.label) ? <g key={"t" + i}><circle cx={tp[i][0]} cy={tp[i][1]} r={8} fill={C.text} />
+          <text x={tp[i][0] + 14} y={tp[i][1] - 12} fill={C.text} fontSize={tall ? 26 : 22} fontFamily="Inter" fontWeight={800} stroke="#0b0f17" strokeWidth={6} paintOrder="stroke">{p.label}</text></g> : null)}
+        {(g.places || []).map((p, i) => <g key={"p" + i}><circle cx={P(p)[0]} cy={P(p)[1]} r={9} fill={C.teal} stroke="#0b0f17" strokeWidth={3} />
+          <text x={P(p)[0]} y={P(p)[1] - 20} textAnchor="middle" fill={C.teal} fontSize={tall ? 28 : 24} fontFamily={HEAD} fontWeight={900} stroke="#0b0f17" strokeWidth={7} paintOrder="stroke">{p.name}</text></g>)}
+        <g transform={`translate(${head[0]},${head[1]})`}>
+          {g.icon === "storm"
+            ? <g transform={`rotate(${-t * 240})`} fill="none" stroke={C.red} strokeWidth={7} strokeLinecap="round">
+                <circle r={9} fill={C.red} stroke="none" /><path d="M0,-30 A30,30 0 0,1 30,0" /><path d="M0,30 A30,30 0 0,1 -30,0" /></g>
+            : <g transform={`rotate(${ang})`}><path d="M30,0 L-22,-14 L-14,0 L-22,14 Z" fill={C.gold} stroke="#0b0f17" strokeWidth={3} /></g>}
+        </g>
+      </svg>
+      {/* title on a panel above the map (the map is drawn first so it never covers the text) */}
+      <div style={{ position: "absolute", top: tall ? 320 : 24, left: 0, right: 0, textAlign: "center" }}>
+        <div style={{ display: "inline-block", background: "rgba(7,10,18,0.82)", borderRadius: 18, padding: tall ? "14px 34px" : "10px 28px" }}>
+          <div style={{ fontFamily: HEAD, fontWeight: 900, fontSize: tall ? 54 : 44, color: C.text }}>{g.title}</div>
+          {g.label ? <div style={{ fontFamily: BODY, fontWeight: 600, fontSize: tall ? 30 : 26, color: C.mut, marginTop: 4 }}>{g.label}</div> : null}
+        </div>
+      </div>
+      {track[Math.min(Math.round(k), track.length - 1)]?.v ? <div style={{ position: "absolute", right: tall ? 80 : 120, top: tall ? 1330 : H - 110, fontFamily: HEAD, fontWeight: 900,
+        fontSize: tall ? 52 : 44, color: g.icon === "storm" ? C.red : C.gold }}>{track[Math.min(Math.round(k), track.length - 1)].v}</div> : null}
+      {g.notes ? <div style={{ position: "absolute", left: tall ? 80 : 120, top: tall ? 1345 : H - 100, maxWidth: tall ? 560 : 1000, fontFamily: BODY, fontWeight: 600, fontSize: tall ? 24 : 21, color: C.mut }}>{g.notes}</div> : null}
     </AbsoluteFill>
   );
 };

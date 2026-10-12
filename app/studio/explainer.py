@@ -85,7 +85,8 @@ def _bounds(wt, n, D):
 def _visual_bg(job, pub, v, slot, s, log):
     """One visual -> a Teaser background, or the branded card."""
     title = s.get("title") or ""
-    if v.get("g") and not v.get("edit_clip"): return {"type": "graphic", "g": v["g"]}   # illustration / silhouette / card: drawn live
+    if v.get("g") and not v.get("edit_clip"):   # illustration / silhouette / card / simulation: drawn live
+        return {"type": "graphic", "g": v["g"], **({"tag": v["tag"]} if v.get("tag") else {})}
     try:
         if v.get("edit_clip") and (job / v["edit_clip"]).exists(): src = job / v["edit_clip"]; kind = "video"
         elif v.get("stock"):

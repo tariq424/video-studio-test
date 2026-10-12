@@ -9,12 +9,26 @@ Implemented (pure Python, no packages, no network):
   aircraft_flight     altitude profile: cruise -> descent at a computed rate (or the narration's start/end altitudes and duration)
                       -> optional level-off; ft vs s. Real ADS-B (OpenSky) is NOT wired: its history API needs an account.
   submarine_descent   depth vs time at a sink rate, with the hull pressure p = rho*g*h shown (crush depth marked if given)
-Registered but not built yet (return None -> the beat keeps its illustration): vehicle_crash, structural_collapse,
-earthquake, ship_route, weather_event. Adding one = one function here + its name in MODULES.
+  weather_event       hurricane / tropical storm / cyclone track on a map (Sim.tsx SimMapBackdrop, kind "simmap"). Data, in order:
+                      NOAA NHC CurrentStorms.json + that storm's forecast advisory (active storms: forecast points, so a cone),
+                      NOAA HURDAT2 best tracks (past Atlantic / NE Pacific storms, by name + year; cached under <studio>/cache/noaa),
+                      else the points the narration gives. Cone = circles of an approximate NHC average track error per
+                      forecast hour (labelled approximate), joined along the track.
+  ship_route          vessel path through the narration's waypoints (ports / straits with coordinates) with a vessel marker;
+                      AIS: with "aisstream_api_key" and an MMSI, the vessel's live position (aisstream.io, ~20 s) is added as
+                      the last point. Historical AIS tracks are not wired (no free source).
+Stubs (return None -> the beat falls to the next rung): vehicle_crash, structural_collapse, earthquake - deliberately not built.
+Adding one = one function here + its name in MODULES (+ a ROUTES entry so the v2 ladder can pick it).
+route(sec) (visual ladder v2, rung 6) picks a module ONLY when the beat's subject matches one; fill() takes its parameters from the
+narration (one small JSON call; regex defaults without a model).
 Compute strategy: every series is downsampled to <= 240 points and the timeline is compressed into the beat's length."""
-import math
+import json, math, re, time
+from pathlib import Path
 
 G, RHO_SEA = 9.81, 1025.0
+KT_MPH = 1.15078
+CACHE = Path(__file__).resolve().parent.parent.parent / "cache" / "noaa"
+UA = {"User-Agent": "VideoStudio/1.0 (local news-video tool)"}
 
 
 def _down(series, n=240):
@@ -62,6 +76,170 @@ def submarine_descent(p):
             "marks": marks}
 
 
+# ---------------------------------------------------------------- weather_event (NOAA)
+# Approximate NHC cone radii (nautical miles) by forecast hour: the cone is drawn so ~2/3 of historical official-forecast errors
+# fall inside it. NHC updates these every season; these are rounded recent Atlantic values - the graphic says "approximate".
+CONE_NM = [(0, 0), (12, 26), (24, 40), (36, 54), (48, 68), (60, 84), (72, 100), (96, 140), (120, 200)]
+
+
+def _cone_km(h):
+    for (h0, r0), (h1, r1) in zip(CONE_NM, CONE_NM[1:]):
+        if h <= h1: return (r0 + (r1 - r0) * (h - h0) / (h1 - h0 or 1)) * 1.852
+    return CONE_NM[-1][1] * 1.852
+
+
+def _get(url, timeout=25):
+    import requests
+    r = requests.get(url, headers=UA, timeout=timeout); r.raise_for_status(); return r
+
+
+def _ll(lat, lon):
+    """'25.3N', '80.1W' -> (25.3, -80.1)"""
+    a = float(lat[:-1]) * (-1 if lat[-1] in "Ss" else 1); b = float(lon[:-1]) * (-1 if lon[-1] in "Ww" else 1)
+    return a, b
+
+
+def _hurdat_files():
+    """The latest HURDAT2 files (Atlantic, NE + central Pacific), cached for 30 days."""
+    CACHE.mkdir(parents=True, exist_ok=True); out = []
+    for basin, rx in (("atl", r'href="(hurdat2-1851-\d{4}-\d+\.txt)"'), ("pac", r'href="(hurdat2-nepac-1949-\d{4}-\d+\.txt)"')):
+        have = sorted(CACHE.glob(f"hurdat_{basin}_*.txt"))
+        if have and time.time() - have[-1].stat().st_mtime < 30 * 86400: out.append(have[-1]); continue
+        try:
+            names = sorted(re.findall(rx, _get("https://www.nhc.noaa.gov/data/hurdat/").text))
+            if names:
+                f = CACHE / f"hurdat_{basin}_{names[-1]}"; f.write_text(_get("https://www.nhc.noaa.gov/data/hurdat/" + names[-1], 60).text, encoding="utf-8")
+                out.append(f); continue
+        except Exception: pass
+        if have: out.append(have[-1])
+    return out
+
+
+def _hurdat_track(name, year):
+    """Best track of storm `name` in `year` -> [{"lat","lon","label","v","wind_kt"}] (6-hourly), or []."""
+    name = str(name or "").strip().upper(); year = str(year or "").strip()
+    if not name: return []
+    for f in _hurdat_files():
+        lines = f.read_text(encoding="utf-8").splitlines(); i = 0
+        while i < len(lines):
+            h = [x.strip() for x in lines[i].split(",")]
+            if len(h) >= 3 and re.fullmatch(r"[A-Z]{2}\d{6}", h[0] or ""):
+                n = int(h[2] or 0)
+                if h[1] == name and (not year or h[0][-4:] == year):
+                    pts = []
+                    for ln in lines[i + 1:i + 1 + n]:
+                        c = [x.strip() for x in ln.split(",")]
+                        try: la, lo = _ll(c[4], c[5]); kt = int(c[6])
+                        except Exception: continue
+                        pts.append({"lat": la, "lon": lo, "wind_kt": kt, "v": f"{round(kt * KT_MPH / 5) * 5} mph", "date": c[0], "rec": c[2], "status": c[3]})
+                    return pts
+                i += n + 1
+            else: i += 1
+    return []
+
+
+def _active_storm(name):
+    """An active NHC storm by name -> (current track points, forecast points with hours) or None."""
+    try: cs = _get("https://www.nhc.noaa.gov/CurrentStorms.json").json()
+    except Exception: return None
+    st = next((s for s in cs.get("activeStorms", []) if str(s.get("name", "")).upper() == str(name or "").upper()), None)
+    if not st: return None
+    try: cur = {"lat": float(st["latitudeNumeric"]), "lon": float(st["longitudeNumeric"]), "label": "now",
+                "v": f"{round(float(st.get('intensity') or 0) * KT_MPH / 5) * 5} mph"}
+    except Exception: return None
+    fc = []
+    url = ((st.get("forecastAdvisory") or {}).get("url"))
+    if url:
+        try:
+            txt = _get(url).text
+            for m in re.finditer(r"(FORECAST|OUTLOOK) VALID\s+(\d{2})/(\d{4})Z\s+(\d+\.\d+[NS])\s+(\d+\.\d+[EW])(?:.*?MAX WIND\s+(\d+)\s*KT)?", txt, re.S):
+                la, lo = _ll(m.group(4), m.group(5)); fc.append({"lat": la, "lon": lo, "kt": int(m.group(6) or 0)})
+        except Exception: pass
+    hours = [12, 24, 36, 48, 60, 72, 96, 120]
+    for k, p in enumerate(fc[:len(hours)]): p["h"] = hours[k]
+    return [cur], fc[:len(hours)]
+
+
+def weather_event(p):
+    name = str(p.get("storm_name") or p.get("name") or "").strip(); year = p.get("year")
+    track, fc, src = [], [], ""
+    act = _active_storm(name) if name else None
+    if act: track, fc = act; src = "NOAA NHC (active storm, latest advisory)"
+    if not track and name:
+        bt = _hurdat_track(name, year)
+        if bt:
+            track = bt; src = f"NOAA HURDAT2 best track{f' ({year})' if year else ''}"
+            peak = max(bt, key=lambda x: x["wind_kt"])
+            for x in bt:   # label the start, landfalls and the peak (not every 6-hour point)
+                if x is bt[0]: x["label"] = x["date"][4:6] + "/" + x["date"][6:]
+                elif x.get("rec") == "L": x["label"] = "landfall"
+                elif x is peak: x["label"] = f"peak {x['v']}"
+    if not track:   # the narration's own points
+        for q in p.get("points") or []:
+            try: track.append({"lat": float(q["lat"]), "lon": float(q["lon"]), "label": str(q.get("label") or q.get("name") or "")[:18],
+                               "v": f"{q['wind_mph']} mph" if q.get("wind_mph") else ""})
+            except Exception: pass
+        src = "positions from the narration" if track else ""
+        for q in p.get("forecast") or []:
+            try: fc.append({"lat": float(q["lat"]), "lon": float(q["lon"]), "h": float(q.get("hours") or 24 * (len(fc) + 1))})
+            except Exception: pass
+    if len(track) + len(fc) < 2: return None
+    if len(track) > 60: k = len(track) / 60; track = [track[int(i * k)] for i in range(60)] + [track[-1]]
+    fpts = [{"lat": q["lat"], "lon": q["lon"], "r_km": round(_cone_km(q.get("h", 24))), "label": f"+{int(q.get('h', 0))}h" if q.get("h") in (24, 72, 120) else ""} for q in fc]
+    if len(track) < 2 and len(fpts) >= 1: track = track + [{"lat": fpts[0]["lat"], "lon": fpts[0]["lon"], "label": ""}]
+    title = p.get("title") or (f"{p.get('kind_word') or 'Storm'} {name.title()}".strip() if name else "Storm track")
+    return {"kind": "simmap", "module": "weather_event", "title": title, "label": p.get("label") or src, "icon": "storm",
+            "track": [{k: v for k, v in x.items() if k in ("lat", "lon", "label", "v")} for x in track], "forecast": fpts,
+            "notes": ("cone: approximate NHC average track error" if fpts else "") + (f" · {src}" if src and fpts else ""), "source": src}
+
+
+# ---------------------------------------------------------------- ship_route
+def _ais_position(key, mmsi, wait=20):
+    """Live position of one vessel from aisstream.io (free key) -> {"lat","lon","name"} or None. Needs websocket-client."""
+    try: import websocket   # websocket-client
+    except Exception: return None
+    try:
+        ws = websocket.create_connection("wss://stream.aisstream.io/v0/stream", timeout=wait)
+        ws.send(json.dumps({"APIKey": key, "BoundingBoxes": [[[-90, -180], [90, 180]]], "FiltersShipMMSI": [str(mmsi)],
+                            "FilterMessageTypes": ["PositionReport"]}))
+        t0 = time.time()
+        while time.time() - t0 < wait:
+            m = json.loads(ws.recv()); md = m.get("MetaData") or {}
+            if md.get("latitude") is not None:
+                ws.close(); return {"lat": float(md["latitude"]), "lon": float(md["longitude"]), "name": str(md.get("ShipName") or "").strip()}
+        ws.close()
+    except Exception: return None
+    return None
+
+
+def ship_route(p, cfg=None):
+    wps = []
+    for q in p.get("waypoints") or p.get("points") or []:
+        try: wps.append({"lat": float(q["lat"]), "lon": float(q["lon"]), "name": str(q.get("name") or "")[:22]})
+        except Exception: pass
+    src = "route from the narration"
+    key = (cfg or {}).get("aisstream_api_key"); mmsi = re.sub(r"\D", "", str(p.get("mmsi") or ""))
+    if key and len(mmsi) == 9:
+        pos = _ais_position(key, mmsi)
+        if pos: wps.append({"lat": pos["lat"], "lon": pos["lon"], "name": "AIS: now"}); src = "route from the narration + live AIS position (aisstream.io)"
+    if len(wps) < 2: return None
+    track = []   # densify each leg so the vessel glides (straight in Mercator: the waypoints carry the real path round land)
+    for a, b in zip(wps, wps[1:]):
+        for i in range(12): k = i / 12; track.append({"lat": a["lat"] + (b["lat"] - a["lat"]) * k, "lon": a["lon"] + (b["lon"] - a["lon"]) * k})
+    track.append({"lat": wps[-1]["lat"], "lon": wps[-1]["lon"]})
+    km = sum(_hav(a, b) for a, b in zip(wps, wps[1:]))
+    vessel = str(p.get("vessel") or "").strip()
+    return {"kind": "simmap", "module": "ship_route", "title": p.get("title") or (vessel or "Vessel route"), "icon": "ship",
+            "label": p.get("label") or f"{km:,.0f} km · {km / 1.852:,.0f} nautical miles", "track": track,
+            "places": [w for w in wps if w["name"]], "notes": src, "source": src}
+
+
+def _hav(a, b):
+    r = 6371.0; la1, la2 = math.radians(a["lat"]), math.radians(b["lat"]); dl = math.radians(b["lon"] - a["lon"])
+    h = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(h))
+
+
 def _not_built(name):
     return lambda p: None
 
@@ -72,19 +250,71 @@ MODULES = {
     "vehicle_crash": (_not_built("vehicle_crash"), "car crash (not built yet)"),
     "structural_collapse": (_not_built("structural_collapse"), "building collapse (not built yet)"),
     "earthquake": (_not_built("earthquake"), "seismic event (not built yet)"),
-    "ship_route": (_not_built("ship_route"), "vessel path (not built yet)"),
-    "weather_event": (_not_built("weather_event"), "storm / hurricane (not built yet)"),
+    "ship_route": (ship_route, "vessel path on a map. params: waypoints [{name, lat, lon}] (ports / straits in order, real coordinates in decimal degrees; add waypoints so the path stays at sea), vessel (name), mmsi (9 digits, only if the narration gives it), title, label"),
+    "weather_event": (weather_event, "hurricane / tropical storm / cyclone track with an uncertainty cone (NOAA data). params: storm_name, year, kind_word (Hurricane / Typhoon / Cyclone / Tropical Storm), points [{lat, lon, label, wind_mph}] and forecast [{lat, lon, hours}] only when the narration gives positions, title, label"),
 }
+
+# v2 ladder (rung 6): a module only when the beat's subject matches it - never speculatively
+ROUTES = [
+    ("weather_event", r"\b(hurricanes?|typhoons?|cyclones?|tropical (storm|depression)s?|storm surge|landfall|eye ?wall)\b", None),
+    ("submarine_descent", r"\b(submarines?|submersibles?|sub)\b", r"\b(depth|deep|feet|metres?|meters?|dive|dived|descen\w*|sank|sinking|implo\w*|crush\w*)\b"),
+    ("aircraft_flight", None, r"\b(feet|altitude|descen\w*|dropp?\w*|plung\w*|dive|diving|climb\w*|lost height|nosedive\w*)\b"),
+    ("ship_route", r"\b(ships?|vessels?|tankers?|freighters?|cargo ship|container ship|bulk carrier|ferr(y|ies)|warships?|frigates?|destroyers?|"
+                   r"aircraft carriers?|cruise ships?|supertankers?|LNG carrier)\b", r"\b(sail\w*|route|voyage|strait|canal|port|harbou?r|bound for|"
+                   r"heading|en route|diverted|transit\w*|crossed|shipping lane|seized|hijack\w*|anchored|docked)\b"),
+]
+
+
+def route(sec):
+    """-> module name for this beat, or None. aircraft_flight only for an aircraft subject (or aircraft words) with altitude talk."""
+    vo = sec.get("vo", ""); subj = sec.get("subject") or {}
+    for mod, subject_rx, action_rx in ROUTES:
+        if mod == "aircraft_flight":
+            aero = subj.get("kind") == "aircraft" or re.search(r"\b(planes?|jets?|aircraft|airliners?|flights?)\b", vo, re.I)
+            if aero and re.search(action_rx, vo, re.I): return mod
+            continue
+        if subject_rx and not re.search(subject_rx, vo + " " + str(subj.get("name", "")), re.I): continue
+        if action_rx and not re.search(action_rx, vo, re.I): continue
+        return mod
+    return None
+
+
+FILL = """A news video shows a data simulation for this beat. Narration: "{vo}"
+Module: {mod} - {desc}
+Fill its parameters ONLY from facts in the narration (or well-known facts it names, like a storm's name and year, a port's coordinates).
+Leave out anything not given. Numbers as plain numbers. Reply with ONLY JSON: {{"params": {{...}}}}"""
+
+
+def fill(cfg, mod, sec, log):
+    """Parameters for module `mod` from the narration: one small JSON call (script provider); regex defaults without a model."""
+    from .llm import LLM
+    c = dict(cfg)
+    if c.get("script_provider") == "claude" and not c.get("anthropic_api_key"): c["script_provider"] = "deepseek" if c.get("deepseek_api_key") else "local"
+    try:
+        with LLM(c, log, lambda: False) as llm:
+            j = llm.chat_json("You extract numbers and places for simulations. Reply with JSON only.",
+                              FILL.format(vo=sec.get("vo", "")[:700].replace('"', "'"), mod=mod, desc=MODULES[mod][1]), max_tokens=700)
+        return j.get("params") or {}
+    except Exception as e:
+        log(f"  physics: parameter model unavailable ({str(e)[:80]}); defaults from the narration")
+    vo = sec.get("vo", "")
+    if mod == "weather_event":
+        m = re.search(r"\b(?:hurricane|typhoon|cyclone|tropical storm)\s+([A-Z][a-z]+)", vo); y = re.search(r"\b(19|20)\d{2}\b", vo)
+        return {"storm_name": m.group(1) if m else "", "year": y.group(0) if y else ""}
+    return {}
 
 
 def describe():
     return "\n".join(f"- {k}: {v[1]}" for k, v in MODULES.items())
 
 
-def run(module, params):
-    """-> a `sim` graphic spec for Remotion, or None (unknown / not built / bad parameters)."""
+def run(module, params, cfg=None):
+    """-> a `sim` (time series) or `simmap` (track on a map) graphic spec for Remotion, or None (unknown / stub / bad parameters)."""
     if module not in MODULES: return None
-    try: r = MODULES[module][0](params or {})
+    fn = MODULES[module][0]
+    try: r = fn(params or {}, cfg) if module == "ship_route" else fn(params or {})
     except Exception: return None
-    if not r or len(r.get("series") or []) < 2: return None
+    if not r: return None
+    if r.get("kind") == "simmap": return r if len(r.get("track") or []) >= 2 else None
+    if len(r.get("series") or []) < 2: return None
     return {"kind": "sim", "module": module, **r}
