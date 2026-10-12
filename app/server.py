@@ -104,7 +104,8 @@ def create():
         jid = studio.create(b.get("url", "").strip(), mins, b.get("presenter", False), b.get("auto_approve", True), b.get("transcript", ""),
                             b.get("provider", ""), b.get("captions", True), b.get("mode", "both"), ssec,
                             f if (f and f.filename) else None, f.filename if f else "", b.get("src_title", ""), b.get("src_credit", ""),
-                            b.get("visual_review") or config.load().get("visual_review_default", "never"), dbg_on=dbg_on, bps=bps, own_clips=own)
+                            b.get("visual_review") or config.load().get("visual_review_default", "never"), dbg_on=dbg_on, bps=bps, own_clips=own,
+                            tts_engine=b.get("tts_engine", ""))
     except ValueError as e: return jsonify(error=str(e)[:300]), 400
     return jsonify(id=jid)
 

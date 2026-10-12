@@ -501,7 +501,8 @@ def do_voice(job, plan, cfg, wg, log, stop):
     seed = 9100
     from .pipeline import progress
     if groups and tts.engine(cfg) == "kokoro":   # every batch in one Kokoro run (seconds); the split / timings below are unchanged
-        tts.kokoro_batch(cfg, [(" ".join(s["vo"] for s in grp), vd / f"batch_{grp[0]['id']}.wav") for grp in groups], log, "Short narration", stop)
+        if not tts.try_kokoro(cfg, [(" ".join(s["vo"] for s in grp), vd / f"batch_{grp[0]['id']}.wav") for grp in groups], log, "Short narration", stop):
+            if not wg.alive(): raise RuntimeError("Kokoro narration failed and WanGP (the fallback) is not running. Start Wan2GP in Pinokio, then press Resume.")
     for gi, grp in enumerate(groups):
         progress(job, sum(len(g) for g in groups[:gi]) + len(grp), len(todo))
         if stop(): raise RuntimeError("cancelled")

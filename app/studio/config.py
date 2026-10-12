@@ -54,7 +54,8 @@ DEFAULTS = {
     "short_i2v_steps": 8,
     "short_i2v_frames": 169,          # ~7 s at 24 fps
     "tts_model": "qwen3_tts_base",
-    "tts_engine": "wanGP",            # narration: wanGP (cloned voice, ~10-15 min per job) | kokoro (preset voice, seconds; studio/tts.py)
+    "tts_engine": "kokoro",           # narration: kokoro (preset voice, seconds; studio/tts.py) | wanGP (cloned voice, ~10-15 min per job)
+    "tts_fallback": True,             # Kokoro unavailable or failing -> narrate with WanGP instead of stopping the job
     "kokoro_voice": "am_michael",     # Kokoro preset voice (only used when tts_engine is kokoro)
     "own_clips": False,
     "post_edit_v2": False,            # timeline editor: Remotion explainers editable slot by slot, Short/Explainer switch, open a job by ID,

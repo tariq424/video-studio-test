@@ -42,7 +42,8 @@ def do_voice(job, plan, cfg, wg, log, stop):
         import unicodedata
         items = [(text, d / f"{s['id']}_{ci}.wav") for s in plan["sections"] if not media.ok(d / f"{s['id']}.wav")
                  for ci, text in enumerate(chunks(unicodedata.normalize("NFKD", s["vo"]).encode("ascii", "ignore").decode()))]
-        tts.kokoro_batch(cfg, items, log, "Narration", stop)
+        if not tts.try_kokoro(cfg, items, log, "Narration", stop) and not wg.alive():
+            raise RuntimeError("Kokoro narration failed and WanGP (the fallback) is not running. Start Wan2GP in Pinokio, then press Resume.")
     for si, s in enumerate(plan["sections"]):
         progress(job, si + 1, len(plan["sections"]))
         out = d / f"{s['id']}.wav"

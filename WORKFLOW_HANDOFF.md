@@ -510,7 +510,8 @@ defaults this branch behaves exactly like main (checked: the pause-chat prompt i
 
 | Flag (settings.json)  | Default  | Turns on |
 |-----------------------|----------|----------|
-| `tts_engine`          | `wanGP`  | `kokoro` = Kokoro narration instead of WanGP TTS |
+| `tts_engine`          | `kokoro` | narration engine (kokoro | wanGP); per job: the form's Narration choice |
+| `tts_fallback`        | true     | Kokoro unavailable or failing -> WanGP narrates that job instead of stopping |
 | `kokoro_voice`        | `am_michael` | any Kokoro preset voice (af_heart, am_fenrir, bm_george, ...) |
 | `kokoro_speed` / `kokoro_wpm` | 1.0 / 140 | Kokoro pace; `kokoro_wpm` sizes Shorts (140 = am_michael measured 2026-10-12) |
 | `kokoro_online` | false | false = the worker runs offline (HF_HUB_OFFLINE=1; the model is cached) |
@@ -651,3 +652,11 @@ reason on the beat (review panel / editor show it) so you can change it afterwar
 Still stops (these are your explicit choices or real failures, not uncertainty): "Review every beat" mode, unticked "Skip
 script review", pause_on_questions (off by default), debugger breakpoints / Pause now, and errors (e.g. WanGP not running).
 Back to the old behaviour: pick "Auto" on the form, or `"visual_review_default": "auto"`.
+
+## Merged to main + Kokoro default (2026-10-12)
+- feat/kokoro-clips-postedit merged into main (fast-forward). F:\code\video-studio synced; settings.json: tts_engine kokoro,
+  own_clips true, post_edit_v2 true (backup of the old settings: _to_delete\settings_before_merge_20261012.json).
+- Kokoro is the default narration (config default tts_engine = "kokoro"). Fallback: tts_fallback (default true) - if the
+  Kokoro env is missing or the worker fails, that job narrates with WanGP instead (logged "falling back to WanGP"); if WanGP
+  isn't running either, the job stops with a clear message. Per job, the form's "Narration" select picks Kokoro or the WanGP
+  cloned voice (state tts_engine). Whole app back to WanGP: "tts_engine": "wanGP" in settings.json.

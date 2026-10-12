@@ -28,7 +28,18 @@ DEFAULT_VOICE = "am_michael"
 
 
 def engine(cfg):
-    return "kokoro" if str(cfg.get("tts_engine", "wanGP")).strip().lower() == "kokoro" else "wanGP"
+    return "kokoro" if str(cfg.get("tts_engine", "kokoro")).strip().lower() == "kokoro" else "wanGP"
+
+
+def try_kokoro(cfg, items, log, tag, stop):
+    """Kokoro for these items. -> True when done; False when it failed and tts_fallback lets WanGP take over (logged).
+    Raises when it failed and fallback is off (or the job was cancelled)."""
+    try:
+        kokoro_batch(cfg, items, log, tag, stop); return True
+    except Exception as e:
+        if str(e) == "cancelled" or not cfg.get("tts_fallback", True): raise
+        log(f"  {tag}: Kokoro failed ({str(e)[:200]}); falling back to WanGP narration (tts_fallback)")
+        return False
 
 
 def wpm(cfg):
