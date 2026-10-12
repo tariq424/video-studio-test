@@ -512,7 +512,8 @@ defaults this branch behaves exactly like main (checked: the pause-chat prompt i
 |-----------------------|----------|----------|
 | `tts_engine`          | `wanGP`  | `kokoro` = Kokoro narration instead of WanGP TTS |
 | `kokoro_voice`        | `am_michael` | any Kokoro preset voice (af_heart, am_fenrir, bm_george, ...) |
-| `kokoro_speed` / `kokoro_wpm` | 1.0 / 160 | Kokoro pace; `kokoro_wpm` sizes Shorts (an estimate until measured, like voice_wpm) |
+| `kokoro_speed` / `kokoro_wpm` | 1.0 / 140 | Kokoro pace; `kokoro_wpm` sizes Shorts (140 = am_michael measured 2026-10-12) |
+| `kokoro_online` | false | false = the worker runs offline (HF_HUB_OFFLINE=1; the model is cached) |
 | `kokoro_python` / `kokoro_device` | "" | Kokoro env python (default app/kenv) / cuda or cpu (default: cuda when available) |
 | `own_clips`           | false    | "Provide clips" on the job form + the clip-to-beat matcher |
 | `post_edit_v2`        | false    | explainer slot editing, Short/Explainer switch, open job by ID, multi-step undo, chat context + supply/card actions |
@@ -578,3 +579,61 @@ main. This branch adds, behind `post_edit_v2`:
 3. Clips: `"own_clips": true` (form section appears). 4. Editor v2: `"post_edit_v2": true`.
 Always on in this branch (not behind a flag): if no chat model is reachable, the chat replies with that instead of a
 server error.
+
+
+## Kokoro install completed — ready to activate (2026-10-12, overnight)
+Installed on the PC; nothing activated. Video Studio was not restarted, its env (app/env) was not touched, no job was running
+(the Blyb1D927pM job, 20261011_200632, had already finished at ~22:34). Flags unchanged: tts_engine=wanGP, own_clips=false,
+post_edit_v2=false. main unchanged; F:\code\video-studio still has main's code (F: is a plain copy, not a git checkout).
+
+What is installed (F:\code\video-studio\app\kenv, Python 3.10.20 from Pinokio's miniforge):
+- torch 2.11.0+cu128 (CUDA 12.8; arch list includes sm_120, the RTX 5060 Ti is detected, capability 12.0)
+- kokoro 0.9.4, misaki 0.9.4, soundfile 0.14.0, spaCy + en_core_web_sm 3.8.0, transformers 5.19.0
+- espeak-ng: bundled by espeakng-loader 0.2.4 (kenv\lib\site-packages\espeakng_loader\espeak-ng.dll). No OS install was
+  needed and none was done.
+- Kokoro-82M model + am_michael voice cached in the Hugging Face cache (downloaded by the warm-up, "kokoro ok").
+- Installed by C:\pinokio\api\video-studio\install_kokoro.js (same as the branch's pinokio/install_kokoro.js). Also
+  left there: kokoro_smoke.js/.py, kokoro_bench.js/.py, kokoro_worker_branch.py (test helpers; safe to move to _to_delete).
+
+Smoke test (the branch's kokoro_worker.py in kenv; report + audio in F:\videos\video_studio\kokoro_smoke\):
+- CPU and GPU both: return code 0, 24 kHz, 10.75 s for a 25-word sentence, RMS 0.039, peak 0.43, no NaN.
+  Per call ~11-13 s wall time, almost all of it start-up (model load ~9 s + a Hugging Face check).
+- Steady state on the GPU (bench_report.json): 72 s of narration in 1.1-3.0 s (24-65x real time), offline.
+  So a Short's narration is ~10-15 s per job, an explainer's ~15-40 s (one worker call per job, model loads once).
+- Pace: am_michael at speed 1.0 = 139.5-139.7 wpm (the cloned WanGP voice is ~155). kokoro_wpm default set to 140.
+- Not checked by ear: listen to smoke_cuda.wav / bench_cuda.wav before switching.
+
+Branch changes from the install (committed on feat/kokoro-clips-postedit): the worker runs offline by default
+(HF_HUB_OFFLINE=1, kokoro_online=false) and names repo_id; kokoro_wpm default 140 (measured).
+
+### Activation (your step)
+1. Wait until no job is running (status "current": null).
+2. Put the branch's code on F: (F: is not a git checkout, so copy; your settings.json, .env, env/ and kenv/ stay):
+   ```
+   git clone -b feat/kokoro-clips-postedit https://github.com/tariq424/video-studio F:\code\vs-branch
+   robocopy F:\code\vs-branch\app F:\code\video-studio\app /E /XD env kenv __pycache__
+   robocopy F:\code\vs-branch\pinokio C:\pinokio\api\video-studio pinokio.js install_kokoro.js
+   copy /Y F:\code\vs-branch\WORKFLOW_HANDOFF.md F:\code\video-studio\
+   ```
+   (or ask Claude: "activate the Kokoro branch" - same copy, with the usual md5 check against main first)
+3. In F:\code\video-studio\settings.json add:  `"tts_engine": "kokoro"`
+   (optional later: `"own_clips": true`, `"post_edit_v2": true`; leave `kokoro_voice` = am_michael unless you prefer another)
+4. Restart Video Studio from Pinokio (Stop / Start). 5. Smoke test (30-second Short).
+
+### Morning checklist
+- [ ] Listen to F:\videos\video_studio\kokoro_smoke\bench_cuda.wav (am_michael). Other voices: af_heart (best-rated,
+      female), am_fenrir, am_puck (US male), bm_george, bm_fable (UK male); set kokoro_voice.
+- [ ] No job running -> copy the branch to F: (step 2) -> set tts_engine -> restart.
+- [ ] Smoke test: log should show "Kokoro (am_michael) rendered ...s of narration in ...s"; narration stage ~15 s.
+- [ ] Check the Short's length lands near target (sized with kokoro_wpm 140); adjust kokoro_wpm if it's off.
+- [ ] Back out any time: "tts_engine": "wanGP" and restart.
+
+### Warnings / gotchas
+- Kokoro is a preset voice, not your cloned narrator: Shorts and explainers will sound different from earlier videos.
+- Slower than the cloned voice (140 vs ~155 wpm): same script = longer video; Short sizing accounts for it via kokoro_wpm.
+  kokoro_speed 1.1 would bring it close to 155 if you prefer the old pace (then set kokoro_wpm ~154).
+- Offline by default: if the Hugging Face cache (C:\Users\Tarri\.cache\huggingface) is ever cleared, the worker fails with
+  a "couldn't find model" error -> set "kokoro_online": true for one run (or re-run install_kokoro.js).
+- First call per job loads the model (~9 s) and uses ~0.5-1 GB VRAM alongside WanGP; fine on 16 GB.
+- Benign warnings in the worker output (LSTM dropout, weight_norm deprecation) - ignore.
+- The Pinokio menu entry for the installer only appears once pinokio.js from the branch is copied (step 2).

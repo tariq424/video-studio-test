@@ -13,7 +13,8 @@ Config:
   tts_engine      "wanGP" | "kokoro"   (default "wanGP")
   kokoro_voice    preset voice id      (default "am_michael"; any of Kokoro's voices, e.g. af_heart, am_fenrir, bm_george)
   kokoro_speed    0.5 - 2.0            (default 1.0)
-  kokoro_wpm      words per minute used to size Shorts (default 160, an estimate until measured)
+  kokoro_wpm      words per minute used to size Shorts (default 140: am_michael at speed 1.0, measured 2026-10-12)
+  kokoro_online   false = HF_HUB_OFFLINE for the worker (the model is cached at install); true if the cache is ever cleared
   kokoro_python   path to the Kokoro env's python ("" = app/kenv/Scripts/python.exe on Windows, app/kenv/bin/python elsewhere)
   kokoro_device   "cuda" | "cpu" | ""  ("" = cuda when available)
 """
@@ -32,7 +33,7 @@ def engine(cfg):
 
 def wpm(cfg):
     """Speaking pace used to size a Short's script: the cloned narrator's measured voice_wpm, or kokoro_wpm for Kokoro."""
-    return float(cfg.get("kokoro_wpm", 160) if engine(cfg) == "kokoro" else cfg.get("voice_wpm", 155))
+    return float(cfg.get("kokoro_wpm", 140) if engine(cfg) == "kokoro" else cfg.get("voice_wpm", 155))
 
 
 def kokoro_python(cfg):
@@ -70,8 +71,10 @@ def kokoro_batch(cfg, items, log, tag="voice", stop=lambda: False):
         json.dump(req, f); jf = f.name
     t0 = time.time()
     try:
+        env = dict(os.environ)
+        if not cfg.get("kokoro_online", False): env["HF_HUB_OFFLINE"] = "1"   # model cached by the install: no Hugging Face check per job
         r = subprocess.run([str(kokoro_python(cfg)), str(WORKER), jf], capture_output=True, text=True, timeout=1800,
-                           encoding="utf-8", errors="replace")
+                           encoding="utf-8", errors="replace", env=env)
     finally:
         try: os.unlink(jf)
         except OSError: pass

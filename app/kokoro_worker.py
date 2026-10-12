@@ -17,7 +17,7 @@ def main(path):
         try:
             import torch; dev = "cuda" if torch.cuda.is_available() else "cpu"
         except Exception: dev = "cpu"
-    pipe = KPipeline(lang_code=req.get("lang", "a"), device=dev)
+    pipe = KPipeline(lang_code=req.get("lang", "a"), repo_id="hexgrad/Kokoro-82M", device=dev)
     voice, speed = req.get("voice", "am_michael"), float(req.get("speed", 1.0))
     for it in req["items"]:
         parts = []
