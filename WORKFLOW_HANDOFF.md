@@ -636,6 +636,8 @@ Branch changes from the install (committed on feat/kokoro-clips-postedit): the w
   (HF_HOME=./cache/HF_HOME in the app's ENVIRONMENT; Video Studio started from Pinokio passes it to the worker). If that
   cache is cleared, or Video Studio is started outside Pinokio (start-video-studio.bat, HF_HOME not set), the worker can't
   find the model offline -> set "kokoro_online": true (downloads ~330 MB once) or re-run install_kokoro.js.
+- Only the am_michael voice file is cached. Another kokoro_voice needs one online run: set "kokoro_online": true for that
+  job (the voice, ~0.5 MB, downloads), then back to false.
 - First call per job loads the model (~9 s) and uses ~0.5-1 GB VRAM alongside WanGP; fine on 16 GB.
 - Benign warnings in the worker output (LSTM dropout, weight_norm deprecation) - ignore.
 - The Pinokio menu entry for the installer only appears once pinokio.js from the branch is copied (step 2).
