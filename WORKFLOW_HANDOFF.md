@@ -660,3 +660,16 @@ Back to the old behaviour: pick "Auto" on the form, or `"visual_review_default":
   Kokoro env is missing or the worker fails, that job narrates with WanGP instead (logged "falling back to WanGP"); if WanGP
   isn't running either, the job stops with a clear message. Per job, the form's "Narration" select picks Kokoro or the WanGP
   cloned voice (state tts_engine). Whole app back to WanGP: "tts_engine": "wanGP" in settings.json.
+- Smoke tests on the PC after the merge (2026-10-12, all passed):
+  1. 20261012_010803 standard smoke Short, Kokoro + never-pause: narration 30 s in 14 s, Short 33 s (+8%), no pause.
+  2. 20261012_011640 / 20261012_011745 pasted text + your clips: vision descriptions; unrelated clips correctly left out;
+     wing + cockpit clips placed by DeepSeek (beat 1 cockpit, beat 2 wing), "Your footage" flags in the editor. Note: the
+     pasted-text Short came out 42 s for a 30 s smoke target (script writer overshoot, not Kokoro).
+  3. Short editor chat: "put a card ..." -> "apply it" -> splice verified -> Undo restored the original clip.
+  4. 20261012_020000 (copy of the Blyb1D927pM explainer, test only): 102 slots editable; chat card + apply on slot s0_4,
+     neighbours and captions untouched; undo exact (23,700 frames, audio same).
+- Fixes found by the smoke tests: job state.json written atomically + reads retry (an editor thread read a half-written
+  file); forced keyframes now half a frame early (times like 29.566667 rounded past the boundary frame, so every explainer
+  splice fell back to a full re-encode: 9.7 min -> 2.5 min per edit; keyframe stamp v2 redoes old ones once); the clip
+  matcher keeps DeepSeek's "nothing fits" instead of falling back to word matching.
+- Seen, not fixed: in the Blyb1D927pM explainer a branded text card (slot s0_4) carries a SILHOUETTE label.
