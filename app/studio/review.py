@@ -13,7 +13,7 @@ from pathlib import Path
 from . import media
 
 FPS = 30
-RUNG = {"stock": "Stock footage", "photo": "Real photo", "cloud": "Cloud still", "illustration": "Illustration", "silhouette": "Silhouette", "simulation": "Simulation", "still": "AI still", "animate": "AI animation", "parallax": "Parallax",
+RUNG = {"own": "Your footage", "stock": "Stock footage", "photo": "Real photo", "cloud": "Cloud still", "illustration": "Illustration", "silhouette": "Silhouette", "simulation": "Simulation", "still": "AI still", "animate": "AI animation", "parallax": "Parallax",
         "reconstruction": "3D reconstruction", "headline": "Headline card", "map": "Map", "supplied": "Your file", "parallax (fill)": "Parallax"}
 STATIC = {"still", "headline", "photo"}          # click enlarges instead of playing
 _locks, _gpu = {}, threading.Lock()
@@ -112,6 +112,8 @@ def _cheap_cands(rv, sec, job, phases):
 def _stock_cands(rv, sec, picked, rejected, story_subjects, auto=False):
     out = []
     for c in picked:
+        if c.get("own"):   # your own footage, placed by the clip matcher (clips.py)
+            out.append(_add(rv, sec["id"], {"type": "stock", "clip": c, "tag": ""}, "own", True, str(c.get("seen") or "your clip")[:100], auto=auto)); continue
         out.append(_add(rv, sec["id"], {"type": "stock", "clip": c, "tag": "ILLUSTRATIVE" if story_subjects else ""}, "stock", True,
                         "matches the narration: " + str(c.get("seen") or c.get("desc") or "")[:80], auto=auto))
     for r in rejected:

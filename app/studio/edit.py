@@ -2,8 +2,14 @@
 
 Shorts (Remotion): the beat's frame range of the Teaser composition is rendered again (same captions, graphics, narration) and
 spliced into the MP4 between keyframes that sit exactly on the beat boundaries (added once per video, after the render or on the
-first edit), so only that range is encoded. Long videos / explainers (FFmpeg): the visual slot clip is rendered again, its
-section is rebuilt (captions/presenter are drawn over it) and the sections are joined again without re-encoding.
+first edit), so only that range is encoded. Explainers rendered with Remotion (the default since Oct 2026) work the same way: each
+visual slot of the explainer's Teaser timeline (build/public/teaser.json) is a beat, its frame range is rendered again and spliced
+in between keyframes on the slot boundaries. Older long videos (FFmpeg stitcher, presenter on): the visual slot clip is rendered
+again, its section is rebuilt (captions/presenter are drawn over it) and the sections are joined again without re-encoding.
+
+A job with both a Short and an explainer edits one at a time (state "edit_target": short | long; set from the job page).
+Undo is a stack (edit/history/NNN): every applied edit keeps what it replaced (the old frames of that range, the timeline JSON,
+the beat's review state), so edits can be undone one by one, newest first.
 
 The new visual is fitted to the beat's slot automatically (or with the fit you pick):
   direct  - lengths match (or pictures/cards, which stretch to any length)
@@ -14,7 +20,7 @@ The new visual is fitted to the beat's slot automatically (or with the fit you p
   loop    - shorter footage: plays again from the start
   still   - shorter footage: plays, then the beat's AI still / card fills the rest
 Auto: trim when longer; when shorter, 'still' for beats that carry information, 'slow' for atmospheric beats."""
-import json, re, shutil, subprocess, threading, time
+import json, math, re, shutil, subprocess, threading, time
 from pathlib import Path
 from . import media
 
@@ -152,12 +158,82 @@ def _tall(sd):
     sp = space(sd); return sp["h"] > sp["w"]
 
 # ---------------------------------------------------------------- job kinds and timelines
-def kind(job):
+def outputs(job):
+    """Finished outputs the editor can open: ["short", "long"] (either or both)."""
     from .pipeline import Job
-    s = Job(job).state
-    if s.get("short_output") and (Path(job) / "short" / "public" / "teaser.json").exists(): return "short"
-    if s.get("output"): return "long"
+    s = Job(job).state; out = []
+    if s.get("short_output") and (Path(job) / "short" / "public" / "teaser.json").exists(): out.append("short")
+    if s.get("output") and Path(s["output"]).exists() and _long_kind(job): out.append("long")
+    return out
+
+def v2():
+    """config post_edit_v2: explainer slot editing, the Short/Explainer switch and the extra chat actions (off = editor as before)."""
+    from . import config
+    return bool(config.load().get("post_edit_v2", False))
+
+def _long_kind(job):
+    """'explainer' (Remotion timeline: build/public/teaser.json newer than any FFmpeg section) | 'long' (FFmpeg sections) | None."""
+    b = Path(job) / "build"; tj = b / "public" / "teaser.json"; secs = list(b.glob("sec_*.mp4"))
+    if not v2(): return "long" if secs else None   # as before: only FFmpeg-stitched long videos have editable slots
+    if tj.exists() and (not secs or tj.stat().st_mtime >= max(p.stat().st_mtime for p in secs)): return "explainer"
+    return "long" if secs else None
+
+def kind(job):
+    """short | explainer | long | None. A job with both outputs edits the one in state 'edit_target' (default: the Short)."""
+    from .pipeline import Job
+    s = Job(job).state; outs = outputs(job)
+    if "short" in outs and (s.get("edit_target") != "long" or "long" not in outs or not v2()): return "short"
+    if "long" in outs: return _long_kind(job)
     return None
+
+def set_target(job, target):
+    from .pipeline import Job
+    if not v2(): raise ValueError("switching between the Short and the explainer is off (setting post_edit_v2)")
+    if target not in ("short", "long"): raise ValueError("target must be short or long")
+    if target not in outputs(job): raise ValueError(f"this job has no finished {'Short' if target == 'short' else 'long video'}")
+    Job(job).save(edit_target=target)
+
+TL = {"short": ("short/public", "short_output"), "explainer": ("build/public", "output")}   # Remotion timelines: public dir, state key
+
+def _tl_pub(job, k): return Path(job) / TL[k][0]
+def _tl_out(job, k):
+    from .pipeline import Job
+    return Path(Job(job).state[TL[k][1]])
+def _tl_json(job, k): return json.loads((_tl_pub(job, k) / "teaser.json").read_text(encoding="utf-8"))
+
+def _fr(x): return max(1, math.floor(x * FPS_S + 0.5))   # Math.round in the Teaser composition (halves round up)
+
+def _slots(beat):
+    """[(slot, [bg indexes])] of a Teaser beat: bgs that replaced one visual slot carry its number ("slot"); untouched bgs are their own slot."""
+    out = []
+    for i, bg in enumerate(beat["bgs"]):
+        sl = bg.get("slot", i)
+        if out and out[-1][0] == sl: out[-1][1].append(i)
+        else: out.append((sl, [i]))
+    return out
+
+def explainer_layout(job):
+    """Visual slots of a Remotion explainer: [{id, sid, si, vi, start, dur, label, vo, editable, visual, beat}] (seconds of the output)."""
+    from .pipeline import Job
+    tz = _tl_json(job, "explainer"); plan = Job(job).plan(); secs = plan["sections"]; out = []
+    beats = [b for b in tz["beats"] if b["id"] != "end"]
+    for si, b in enumerate(beats):
+        if si >= len(secs): break
+        sec = secs[si]; vis = ([{"id": "_title", "type": "chart"}] if si == 0 else []) + list(sec["visuals"])
+        gs = _slots(b)
+        for gi, (slot, idx) in enumerate(gs):
+            f0 = b["bgs"][idx[0]]["from"]; f1 = b["bgs"][gs[gi + 1][1][0]]["from"] if gi + 1 < len(gs) else b["dur"]
+            v = vis[slot] if slot < len(vis) else {}
+            vo = " ".join(w[0] for w in b["words"] if f0 <= w[1] < f1)
+            out.append({"id": f"{sec['id']}_{slot}", "sid": sec["id"], "si": si, "vi": slot, "start": round(b["start"] + f0, 3), "dur": round(f1 - f0, 3),
+                        "label": sec["title"], "vo": (vo or sec["vo"])[:600], "editable": not str(v.get("id", "")).startswith("_"), "visual": v,
+                        "beat": b["id"], "f0": f0, "f1": f1})
+    return out
+
+def tl_frames(job, k):
+    """Frame ranges [a, e) of every editable unit of a Remotion timeline (Short beats; explainer slots + end card), and the total."""
+    tz = _tl_json(job, k)
+    return short_frames(tz) if k == "short" else _frames_of(tz)
 
 def _teaser(job):
     return json.loads((Path(job) / "short" / "public" / "teaser.json").read_text(encoding="utf-8"))
@@ -176,6 +252,7 @@ def short_frames(tz):
 
 def long_layout(job):
     """Sections and visual slots of a long video: [{id, sid, vi, start, dur, label, vo}] (start/dur in seconds of the output)."""
+    if _long_kind(job) == "explainer": return explainer_layout(job)
     from .pipeline import Job
     from . import assemble
     j = Job(job); plan = j.plan(); s = j.state
@@ -192,6 +269,10 @@ def long_layout(job):
         t += media.dur(p)
     return out
 
+def _is_own(bg):
+    """A timeline background that is your own footage (clips.py): media/stock/own<N>_<beat>.mp4, own/own<N>.mp4, broll/own/..."""
+    return bool(re.search(r"(^|/)own\d+(_|\.)|/own/", str(bg.get("src") or "")))
+
 def beats(job):
     """The timeline for the job page: {kind, beats: [{id, start, dur, label, editable}]}."""
     k = kind(job)
@@ -201,9 +282,16 @@ def beats(job):
         plan = Job(job).short_plan() or {"sections": []}
         vo = {s["id"]: s["vo"] for s in plan["sections"]}; cta = {s["id"] for s in plan["sections"] if s.get("cta")}
         return {"kind": "short", "beats": [{"id": b["id"], "start": b["start"], "dur": b["dur"], "label": f"Beat {i + 1}", "vo": vo.get(b["id"], ""),
-                                             "editable": b["id"] not in cta} for i, b in enumerate(tz["beats"])]}
-    if k == "long":
-        return {"kind": "long", "beats": [{k2: b[k2] for k2 in ("id", "start", "dur", "label", "vo", "editable")} for b in long_layout(job)]}
+                                             "editable": b["id"] not in cta, "own": any(_is_own(g) for g in b["bgs"])} for i, b in enumerate(tz["beats"])]}
+    if k in ("long", "explainer"):
+        tz = _tl_json(job, "explainer") if k == "explainer" else None
+        def own(b):
+            if b["visual"].get("own"): return True
+            if not tz: return False
+            tb = next((x for x in tz["beats"] if x["id"] == b.get("beat")), None)
+            idx = next((ix for sl, ix in _slots(tb) if sl == b["vi"]), []) if tb else []
+            return any(_is_own(tb["bgs"][i]) for i in idx)
+        return {"kind": k, "beats": [dict({k2: b[k2] for k2 in ("id", "start", "dur", "label", "vo", "editable")}, own=own(b)) for b in long_layout(job)]}
     return {"kind": None, "beats": []}
 
 # ---------------------------------------------------------------- workspaces (where a beat's candidates live)
@@ -241,17 +329,50 @@ def open_beat(job, bid, cfg, log):
             b = rv["beats"].setdefault(bid, {"vo": lb["vo"], "secs": lb["dur"], "auto": [], "cands": [], "decision": "auto", "chosen": [],
                                              "uncertain": False, "why": "", "history": [], "busy": "", "msg": "", "notes": []})
             b["skip_item"] = review._skip_item(sec); b["secs"] = lb["dur"]
+            if not b.get("current") and k == "explainer":   # what the video shows now: the slot's backgrounds from the timeline
+                tz = _tl_json(job, "explainer"); tb = next(x for x in tz["beats"] if x["id"] == lb["beat"])
+                idx = next(ix for sl, ix in _slots(tb) if sl == lb["vi"])
+                cur = [review._add(rv, bid, it, "current", True, "in the video now")
+                       for it in (_bg_item_from(tb["bgs"][i], _tl_pub(job, "explainer"), sd, f"{bid}_{n}") for n, i in enumerate(idx)) if it]
+                b["current"] = cur; b["auto"] = cur
+                review._add(rv, bid, b["skip_item"], "headline", True, "text card summing up the beat")
             if not b.get("current"):
                 src = job / "build" / f"v_{lb['sid']}_{lb['vi']}.mp4"; dst = sd / "current" / f"{bid}.mp4"; dst.parent.mkdir(parents=True, exist_ok=True)
                 if src.exists() and not dst.exists(): shutil.copy2(src, dst)
                 cur = [review._add(rv, bid, {"type": "video", "src": f"current/{bid}.mp4", "tag": "", "rate": 1.0}, "current", True, "in the video now")] if dst.exists() else []
                 b["current"] = cur; b["auto"] = cur
                 review._add(rv, bid, b["skip_item"], "headline", True, "text card summing up the beat")
+        try:   # your own clips (own_clips) as one-click candidates on every beat
+            from . import clips as _clips
+            _clips.offer(job, sd, rv, bid, cfg, log)
+        except Exception as e: log(f"  your clips not offered for {bid} ({str(e)[:80]})")
         for cid in b["cands"]:   # files of unused treatments may have been cleaned up
             rv["cands"][cid]["missing"] = not _item_exists(sd, rv["cands"][cid]["item"])
         review.save(ws, rv)
     review.thumbs(ws, cfg, log, [c for c in rv["beats"][bid]["cands"] if not rv["cands"][c].get("missing")])
     return review.load(ws)
+
+def _bg_item_from(bg, pub, sd, name):
+    """An explainer timeline background -> a candidate item in the edit workspace (media copied to <sd>/current/)."""
+    t = bg.get("type"); cur = Path(sd) / "current"; cur.mkdir(parents=True, exist_ok=True)
+    def take(rel):
+        src = Path(pub) / rel; dst = cur / f"{name}{src.suffix.lower()}"
+        if src.exists() and not dst.exists(): shutil.copy2(src, dst)
+        return f"current/{dst.name}" if dst.exists() else None
+    if t == "video":
+        p = take(bg["src"]); return p and {"type": "video", "src": p, "tag": bg.get("tag", ""), "rate": bg.get("rate", 1.0)}
+    if t == "image":
+        p = take(bg["src"]); return p and {"type": "image", "src": p, "fit": bg.get("fit", "frame"), "tag": bg.get("tag", ""), "short_credit": bg.get("credit", "")}
+    if t == "graphic": return {"type": "graphic", "g": bg["g"], **({"tag": bg["tag"]} if bg.get("tag") else {})}
+    if t == "layers":
+        ls = []
+        for i, x in enumerate(bg["layers"]):
+            src = Path(pub) / x; dst = cur / f"{name}_L{i}{src.suffix.lower()}"
+            if src.exists() and not dst.exists(): shutil.copy2(src, dst)
+            if not dst.exists(): return None
+            ls.append(f"current/{dst.name}")
+        return {"type": "layers", "layers": ls, **({"tag": bg["tag"]} if bg.get("tag") else {})}
+    return None
 
 def _bg_item(bg):
     """A timeline background back to a candidate item (paths relative to the short folder)."""
@@ -317,8 +438,8 @@ def preview(job, bid, cids, fit, cfg, log):
     k, ws, sd, rv, d, lay, mode, why = _plan_beat(job, bid, cids, fit, cfg)
     pd = Path(job) / "edit" / "previews"; pd.mkdir(parents=True, exist_ok=True)
     out = pd / f"{bid}_{int(time.time())}.mp4"
-    if k == "short":
-        tz, (a, e) = _short_props(job, sd, bid, lay, dest=None)
+    if k in TL:
+        tz, (a, e) = _tl_props(job, k, sd, bid, lay, dest=None)
         _render(job, "Teaser", tz, out, cfg, log, frames=(a, e - 1), scale=0.5, audio=True)
     else:
         lb = next(x for x in long_layout(job) if x["id"] == bid)
@@ -333,17 +454,32 @@ def preview(job, bid, cids, fit, cfg, log):
     return {"video": rel, "fit": mode, "why": why}
 
 def _short_props(job, sd, bid, lay, dest):
-    """Teaser props with this beat's backgrounds replaced (media as http URLs for the preview renderer). -> (props, (a, e))"""
+    return _tl_props(job, "short", sd, bid, lay, dest)
+
+def _tl_props(job, k, sd, bid, lay, dest):
+    """Teaser props with this beat's (Short) / visual slot's (explainer) backgrounds replaced (media as http URLs for the preview
+    renderer). -> (props, (a, e)), or with dest (the real splice) (props, (a, e), timeline to save)"""
     from . import review
-    tz = _teaser(job); pub = Path(job) / "short" / "public"
+    tz = _tl_json(job, k); pub = _tl_pub(job, k)
     story = _story(job)
     bgs = [to_bg(sd, it, p, s0, story, dest=dest) for it, p, s0, _ in lay]
-    for b in tz["beats"]:
-        if b["id"] == bid: b["bgs"] = bgs
-    frames, total = short_frames(tz)
+    if k == "short":
+        for b in tz["beats"]:
+            if b["id"] == bid: b["bgs"] = bgs
+        changed = bid
+    else:   # explainer: replace one slot inside its section beat; the new bgs keep the slot number so the layout stays stable
+        lb = next(x for x in explainer_layout(job) if x["id"] == bid); b = next(x for x in tz["beats"] if x["id"] == lb["beat"])
+        for i, bg in enumerate(b["bgs"]): bg.setdefault("slot", i)
+        idx = next(ix for sl, ix in _slots(b) if sl == lb["vi"])
+        for bg in bgs: bg["from"] = round(lb["f0"] + bg["from"], 3); bg["slot"] = lb["vi"]
+        b["bgs"] = b["bgs"][:idx[0]] + bgs + b["bgs"][idx[-1] + 1:]
+        changed = lb["beat"]
+    frames = short_frames(tz)[0] if k == "short" else _frames_of(tz)[0]
     a, e = next((x[1], x[2]) for x in frames if x[0] == bid)
+    bid = changed
     props = json.loads(json.dumps(tz))
     base = review.files_url(pub) + "/"; sdbase = review.files_url(sd) + "/"
+    if k == "explainer": props["progress"] = False
     props["audio"] = base + props["audio"]
     for b in props["beats"]:
         for g in b["bgs"]:
@@ -354,6 +490,19 @@ def _short_props(job, sd, bid, lay, dest):
             th = gr.get("g", {}).get("thumb")
             if th and not str(th).startswith("http"): gr["g"]["thumb"] = base + th
     return (props, (a, e)) if dest is None else (props, (a, e), tz)
+
+def _frames_of(tz):
+    """tl_frames for an explainer timeline already in memory."""
+    total = int(-(-tz["total"] * FPS_S // 1)); out = []
+    for i, b in enumerate(tz["beats"]):
+        gs = _slots(b) if b["id"] != "end" else [(0, list(range(len(b["bgs"]))))]
+        nxt = _fr(tz["beats"][i + 1]["start"]) if i + 1 < len(tz["beats"]) else total
+        for gi, (slot, idx) in enumerate(gs):
+            st = b["start"] + b["bgs"][idx[0]]["from"] if b["bgs"] else b["start"]
+            a = _fr(st) if st > 0 else 0
+            e = _fr(b["start"] + b["bgs"][gs[gi + 1][1][0]]["from"]) if gi + 1 < len(gs) else nxt
+            out.append((b["id"] if b["id"] == "end" else f"{b['id']}_{slot}", a, e))
+    return out, total
 
 def _render(job, comp, props, out, cfg, log, frames=None, scale=1.0, audio=True):
     from . import review, short
@@ -381,22 +530,25 @@ def _nframes(p):
     m = re.search(r"\d+", o or "")   # some ffprobe builds print "412," here
     return int(m.group()) if m else 0
 
-def ensure_keyframes(job, log):
-    """Shorts: one re-encode that puts a keyframe exactly on every beat boundary, so a beat can be swapped without re-encoding the
-    rest. Done after each render, and on the first edit of a Short rendered before this existed."""
-    from .pipeline import Job
-    job = Path(job); j = Job(job); outp = Path(j.state["short_output"]); kf = job / "edit" / "keyframes.json"
-    frames, total = short_frames(_teaser(job))
+def ensure_keyframes(job, log, k="short"):
+    """Remotion timelines (Short, explainer): one re-encode that puts a keyframe exactly on every beat / slot boundary, so a beat can
+    be swapped without re-encoding the rest. Done on the first edit of a video (Shorts rendered before this existed, every explainer)."""
+    job = Path(job); outp = _tl_out(job, k); kf = job / "edit" / ("keyframes.json" if k == "short" else f"keyframes_{k}.json")
+    frames, total = tl_frames(job, k)
     stamp = {"size": outp.stat().st_size, "mtime": int(outp.stat().st_mtime), "frames": [a for _, a, _ in frames]}
     if kf.exists() and json.loads(kf.read_text(encoding="utf-8")) == stamp: return
-    log("Preparing the Short for editing (keyframes on beat boundaries, one time)...")
+    log(f"Preparing the {'Short' if k == 'short' else 'explainer'} for editing (keyframes on beat boundaries, one time)...")
     t0 = time.time(); tmp = outp.with_name("_kf_" + outp.name)
     times = ",".join(f"{a / FPS_S:.6f}" for _, a, _ in frames if a > 0)
-    media.ff("-i", outp, "-map", "0:v", "-map", "0:a?", *ENC_S, "-force_key_frames", times, "-forced-idr", 1, "-c:a", "copy", "-movflags", "+faststart", tmp, timeout=3600)
+    media.ff("-i", outp, "-map", "0:v", "-map", "0:a?", *ENC_S, "-force_key_frames", times, "-forced-idr", 1, "-c:a", "copy", "-movflags", "+faststart", tmp, timeout=7200)
     tmp.replace(outp)
-    kf.parent.mkdir(parents=True, exist_ok=True)
-    kf.write_text(json.dumps({"size": outp.stat().st_size, "mtime": int(outp.stat().st_mtime), "frames": [a for _, a, _ in frames]}), encoding="utf-8")
+    _stamp_keyframes(job, k)
     log(f"  done in {time.time() - t0:.0f}s")
+
+def _stamp_keyframes(job, k):
+    job = Path(job); outp = _tl_out(job, k); kf = job / "edit" / ("keyframes.json" if k == "short" else f"keyframes_{k}.json")
+    kf.parent.mkdir(parents=True, exist_ok=True)
+    kf.write_text(json.dumps({"size": outp.stat().st_size, "mtime": int(outp.stat().st_mtime), "frames": [a for _, a, _ in tl_frames(job, k)[0]]}), encoding="utf-8")
 
 def _clear_prev(job):
     for p in list(Path(job).glob("output/*.prev")) + list(Path(job).glob("short/public/*.prev")) + list(Path(job).glob("build/*.prev")):
@@ -412,10 +564,25 @@ def _vstats(p):
     errs = subprocess.run([media._bin("ffmpeg"), "-v", "error", "-i", str(p), "-f", "null", "-"], capture_output=True, text=True).stderr.strip()
     return {"frames": _nframes(p), "audio_md5": hashlib.md5(a).hexdigest(), "audio_dur": ad, "decode_errors": len([l for l in errs.splitlines() if l.strip()])}
 
-def _backup(paths):
-    for p in paths:
-        p = Path(p)
-        if p.exists(): shutil.copy2(p, p.with_name(p.name + ".prev"))
+def _ostamp(p): p = Path(p); return {"size": p.stat().st_size, "mtime": int(p.stat().st_mtime)}
+
+# ---------------------------------------------------------------- undo stack (edit/history/NNN)
+def _hroot(job): return Path(job) / "edit" / "history"
+
+def history(job):
+    """Applied edits that can be undone, oldest first: [{n, beat, kind, t, label}]."""
+    r = _hroot(job); out = []
+    for d in sorted(r.glob("[0-9][0-9][0-9]")) if r.exists() else []:
+        try: m = json.loads((d / "meta.json").read_text(encoding="utf-8")); out.append({"n": int(d.name), **{x: m.get(x) for x in ("beat", "kind", "t", "label")}})
+        except Exception: pass
+    return out
+
+def _hnew(job):
+    r = _hroot(job); r.mkdir(parents=True, exist_ok=True)
+    n = max([int(d.name) for d in r.glob("[0-9][0-9][0-9]")] or [0]) + 1
+    d = r / f"{n:03d}"; d.mkdir(); return d
+
+def can_undo(job): return bool(history(job)) or any(Path(job).glob("output/*.prev"))
 
 def status(job): return _busy.get(str(Path(job)), "")
 
@@ -435,82 +602,118 @@ def start_apply(job, bid, cids, fit, cfg, log):
     threading.Thread(target=run, daemon=True).start(); return ""
 
 def apply(job, bid, cids, fit, cfg, log):
-    """Render the beat with its new visual and splice it into the output MP4 in place (no re-render of other beats)."""
+    """Render the beat with its new visual and splice it into the output MP4 in place (no re-render of other beats).
+    What it replaces goes on the undo stack."""
     from . import review
     from .pipeline import Job
     job = Path(job); t0 = time.time()
     k, ws, sd, rv, d, lay, mode, why = _plan_beat(job, bid, cids, fit, cfg)
     log(f"Edit {bid}: {', '.join(RUNG(rv, c) for c in cids)} -> {FIT_NAME.get(mode, mode)} ({why})")
-    _clear_prev(job)
-    outp = Path(Job(job).state["short_output" if k == "short" else "output"])
+    _clear_prev(job)   # older single-step undo files: the stack replaces them
+    outp = _tl_out(job, k) if k in TL else Path(Job(job).state["output"])
     pre = _vstats(outp)
-    if k == "short": _apply_short(job, bid, sd, lay, cfg, log)
-    else: _apply_long(job, bid, sd, lay, d, cfg, log)
+    if not v2():   # as before: only the last edit can be undone (post_edit_v2 keeps every step)
+        for h in history(job): shutil.rmtree(_hroot(job) / f"{h['n']:03d}", ignore_errors=True)
+    hd = _hnew(job)
+    try:
+        b0 = (rv.get("beats", {}).get(bid) or {})
+        meta = {"beat": bid, "kind": k, "t": time.strftime("%Y-%m-%d %H:%M"), "label": f"{bid}: {', '.join(RUNG(rv, c) for c in cids)}",
+                "rv_state": {k2: b0.get(k2) for k2 in ("edit", "decision", "chosen", "current", "msg")}}
+        if k in TL: meta.update(_apply_timeline(job, k, bid, sd, lay, cfg, log, hd))
+        else: meta.update(_apply_long(job, bid, sd, lay, d, cfg, log, hd))
+        meta["after"] = _ostamp(outp); meta["out"] = str(outp)
+        (hd / "meta.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
+    except Exception:
+        shutil.rmtree(hd, ignore_errors=True); raise
     with review._lock(ws):
         rv = review.load(ws); b = rv["beats"][bid]
-        rv["undo"] = {"beat": bid, "state": {k2: b.get(k2) for k2 in ("edit", "decision", "chosen", "current")}}   # for Undo
         b["edit"] = {"cands": list(cids), "fit": mode, "why": why, "t": time.strftime("%H:%M")}
         b["decision"], b["chosen"] = "chosen", list(cids); b["current"] = list(cids)
         b["msg"] = f"Applied ({FIT_NAME.get(mode, mode)})."
         review.save(ws, rv)
     post = _vstats(outp)
     ver = {"frames_same": pre["frames"] == post["frames"], "decode_ok": post["decode_errors"] == 0,
-           "audio_same": (pre["audio_md5"] == post["audio_md5"]) if k == "short" else abs(pre["audio_dur"] - post["audio_dur"]) < 0.05,
+           "audio_same": (pre["audio_md5"] == post["audio_md5"]) if k in TL else abs(pre["audio_dur"] - post["audio_dur"]) < 0.05,
            "frames": post["frames"]}
-    j = Job(job); edits = j.state.get("edits", []); edits.append({"beat": bid, "fit": mode, "t": time.time(), "verify": ver}); j.save(edits=edits)
+    j = Job(job); edits = j.state.get("edits", []); edits.append({"beat": bid, "fit": mode, "t": time.time(), "verify": ver, "kind": k, "h": int(hd.name)}); j.save(edits=edits)
     log(f"Edit {bid}: spliced into the video in {time.time() - t0:.0f}s; check: frames {'same' if ver['frames_same'] else 'CHANGED'}, "
-        f"audio {'unchanged' if ver['audio_same'] else 'CHANGED'}, decoding {'clean' if ver['decode_ok'] else 'ERRORS'}")
+        f"audio {'unchanged' if ver['audio_same'] else 'CHANGED'}, decoding {'clean' if ver['decode_ok'] else 'ERRORS'} (undo step {int(hd.name)})")
 
 def RUNG(rv, cid):
     from .review import RUNG as R
     return R.get(rv["cands"][cid]["rung"], rv["cands"][cid]["rung"])
 
-def _apply_short(job, bid, sd, lay, cfg, log):
-    from .pipeline import Job
-    j = Job(job); outp = Path(j.state["short_output"]); ed = job / "edit"; ed.mkdir(exist_ok=True)
-    ensure_keyframes(job, log)
-    pub = job / "short" / "public"; used = []
-    props, (a, e), tz = _short_props(job, sd, bid, lay, dest=pub)
-    n = e - a
-    # 1. the beat's frames, full resolution (no audio: the narration track is kept as it is)
-    raw = ed / "seg_raw.mp4"; seg = ed / "seg.mp4"
-    _render(job, "Teaser", props, raw, cfg, log, frames=(a, e - 1), scale=1.0, audio=False)
-    media.ff("-i", raw, "-an", *ENC_S, "-frames:v", n, "-force_key_frames", "0", "-forced-idr", 1, seg)
-    if _nframes(seg) != n: raise RuntimeError(f"rendered {_nframes(seg)} frames for the beat, expected {n}")
-    # 2. cut the video at the beat's keyframes (no re-encoding), swap the middle, join
+def _splice(job, k, outp, a, e, seg, log, keep_old=None):
+    """Swap frames [a, e) of the output's video track for seg (exactly e - a frames, keyframe first) without re-encoding the rest;
+    the narration track is kept as it is. keep_old: where to save the frames that were there (for undo). Replaces outp."""
+    ed = Path(job) / "edit"; ed.mkdir(exist_ok=True)
+    n = e - a; total = tl_frames(job, k)[1]
     parts = ed / "parts"; shutil.rmtree(parts, ignore_errors=True); parts.mkdir()
-    cuts = [x / FPS_S - 0.001 for x in (a, e) if 0 < x < short_frames(tz)[1]]
+    cuts = [x / FPS_S - 0.001 for x in (a, e) if 0 < x < total]
     vcopy = ed / "video_only.mp4"; media.ff("-i", outp, "-map", "0:v", "-c", "copy", vcopy)
     if cuts: media.ff("-i", vcopy, "-c", "copy", "-f", "segment", "-segment_times", ",".join(f"{c:.6f}" for c in cuts), "-reset_timestamps", 1, parts / "p%03d.mp4")
     else: shutil.copy2(vcopy, parts / "p000.mp4")
     ps = sorted(parts.glob("p*.mp4")); mid = 1 if a > 0 else 0
     total_before = _nframes(vcopy)
     ok = len(ps) == len(cuts) + 1 and _nframes(ps[mid]) == n
+    if keep_old is not None:
+        if ok: shutil.copy2(ps[mid], keep_old)   # bit-exact old frames
+        else: media.ff("-ss", f"{a / FPS_S:.6f}", "-i", vcopy, "-an", *ENC_S, "-frames:v", n, "-force_key_frames", "0", "-forced-idr", 1, keep_old)
     newv = ed / "video_new.mp4"
     if ok:
-        lst = ed / "join.txt"; lst.write_text("".join(f"file '{(seg if i == mid else p).resolve().as_posix()}'\n" for i, p in enumerate(ps)), encoding="utf-8")
+        lst = ed / "join.txt"; lst.write_text("".join(f"file '{(Path(seg) if i == mid else p).resolve().as_posix()}'\n" for i, p in enumerate(ps)), encoding="utf-8")
         media.ff("-f", "concat", "-safe", 0, "-i", lst, "-c", "copy", newv)
         ok = _nframes(newv) == total_before
-    if not ok:   # keyframes not where expected: re-encode the video track with the beat overlaid (slower, always correct)
+    if not ok:   # keyframes not where expected: re-encode the video track with the segment overlaid (slower, always correct)
         log("  keyframes didn't line up; re-encoding the video track once (slower)")
-        times = ",".join(f"{x / FPS_S:.6f}" for _, x, _ in short_frames(tz)[0] if x > 0)
+        times = ",".join(f"{x / FPS_S:.6f}" for _, x, _ in tl_frames(job, k)[0] if x > 0)
         media.ff("-i", vcopy, "-i", seg, "-filter_complex", f"[1:v]setpts=PTS-STARTPTS+{a / FPS_S:.6f}/TB[s];[0:v][s]overlay=eof_action=pass:enable='between(n,{a},{e - 1})'[v]",
-                 "-map", "[v]", *ENC_S, "-force_key_frames", times, "-forced-idr", 1, newv, timeout=3600)
-    # 3. put the original narration back, replace the output (previous version kept as .prev for Undo)
+                 "-map", "[v]", *ENC_S, "-force_key_frames", times, "-forced-idr", 1, newv, timeout=7200)
     tmp = outp.with_name("_edit_" + outp.name)
     media.ff("-i", newv, "-i", outp, "-map", "0:v", "-map", "1:a?", "-c", "copy", "-movflags", "+faststart", tmp)
-    if abs(_nframes(tmp) - total_before) > 0: raise RuntimeError("the edited video has a different length; the original is unchanged")
-    _backup([outp, pub / "teaser.json"])
+    if abs(_nframes(tmp) - total_before) > 0: tmp.unlink(missing_ok=True); raise RuntimeError("the edited video has a different length; the original is unchanged")
     tmp.replace(outp)
-    (pub / "teaser.json").write_text(json.dumps(tz, indent=1, ensure_ascii=False), encoding="utf-8")
-    uf = job / "short" / "used.json"; u = set(json.loads(uf.read_text(encoding="utf-8"))) if uf.exists() else set()
-    uf.write_text(json.dumps(sorted(u | set(used)), indent=1), encoding="utf-8")
-    kf = ed / "keyframes.json"; st = json.loads(kf.read_text(encoding="utf-8")); st.update(size=outp.stat().st_size, mtime=int(outp.stat().st_mtime))
-    kf.write_text(json.dumps(st), encoding="utf-8")
-    for p in (raw, seg, vcopy, newv): Path(p).unlink(missing_ok=True)
+    for p in (vcopy, newv): Path(p).unlink(missing_ok=True)
     shutil.rmtree(parts, ignore_errors=True)
 
-def _apply_long(job, bid, sd, lay, d, cfg, log):
+def _apply_short(job, bid, sd, lay, cfg, log, hd=None):
+    return _apply_timeline(job, "short", bid, sd, lay, cfg, log, hd)
+
+def _apply_timeline(job, k, bid, sd, lay, cfg, log, hd):
+    """Short beat / explainer slot: render its frames with the new backgrounds, splice them in, save the timeline. -> undo meta"""
+    from .pipeline import Job
+    job = Path(job); outp = _tl_out(job, k); ed = job / "edit"; ed.mkdir(exist_ok=True)
+    ensure_keyframes(job, log, k)
+    pub = _tl_pub(job, k); used = []
+    props, (a, e), tz = _tl_props(job, k, sd, bid, lay, dest=pub)
+    n = e - a
+    raw = ed / "seg_raw.mp4"; seg = ed / "seg.mp4"
+    _render(job, "Teaser", props, raw, cfg, log, frames=(a, e - 1), scale=1.0, audio=False)
+    media.ff("-i", raw, "-an", *ENC_S, "-frames:v", n, "-force_key_frames", "0", "-forced-idr", 1, seg)
+    if _nframes(seg) != n: raise RuntimeError(f"rendered {_nframes(seg)} frames for the beat, expected {n}")
+    shutil.copy2(pub / "teaser.json", hd / "teaser.json")
+    _splice(job, k, outp, a, e, seg, log, keep_old=hd / "old.mp4")
+    (pub / "teaser.json").write_text(json.dumps(tz, indent=1, ensure_ascii=False), encoding="utf-8")
+    meta = {"a": a, "e": e}
+    if k == "short":
+        uf = job / "short" / "used.json"; u = set(json.loads(uf.read_text(encoding="utf-8"))) if uf.exists() else set()
+        uf.write_text(json.dumps(sorted(u | set(used)), indent=1), encoding="utf-8")
+    else:   # remembered in the plan, so a full re-render of the explainer keeps the edit (explainer.build reads edit_bgs)
+        j = Job(job); plan = j.plan(); lb = next(x for x in explainer_layout(job) if x["id"] == bid)
+        tb = next(x for x in tz["beats"] if x["id"] == lb["beat"])
+        idx = next(ix for sl, ix in _slots(tb) if sl == lb["vi"])
+        vi = lb["vi"] - (1 if lb["si"] == 0 else 0)
+        if 0 <= vi < len(plan["sections"][lb["si"]]["visuals"]):
+            v = plan["sections"][lb["si"]]["visuals"][vi]
+            meta["plan_prev"] = {"si": lb["si"], "vi": vi, "edit_bgs": v.get("edit_bgs"), "edit_slot": v.get("edit_slot")}
+            v["edit_bgs"] = [dict({x: y for x, y in tb["bgs"][i].items() if x != "slot"}, **{"from": round(tb["bgs"][i]["from"] - lb["f0"], 3)}) for i in idx]
+            v["edit_slot"] = round(lb["f1"] - lb["f0"], 3)
+            j.save_plan(plan)
+    _stamp_keyframes(job, k)
+    for p in (raw, seg): Path(p).unlink(missing_ok=True)
+    return meta
+
+def _apply_long(job, bid, sd, lay, d, cfg, log, hd=None):
     from . import review, assemble
     from .pipeline import Job
     j = Job(job); outp = Path(j.state["output"]); plan = j.plan()
@@ -521,48 +724,102 @@ def _apply_long(job, bid, sd, lay, d, cfg, log):
     _render(job, "BeatClip", {"bgs": bgs, "dur": d, "w": assemble.W, "h": assemble.H}, raw, cfg, log, audio=False)
     nfr = int(round(lb["dur"] * assemble.FPS))
     vclip = b / f"v_{lb['sid']}_{lb['vi']}.mp4"; secf = b / f"sec_{lb['sid']}.mp4"
-    _backup([outp, vclip, secf])
-    keep = ed / "clips" / vclip.name; keep.parent.mkdir(exist_ok=True)
+    meta = {"vclip": vclip.name, "secf": secf.name, "si": lb["si"], "vid": lb["visual"].get("id")}
+    if hd is not None:
+        for p in (vclip, secf):
+            if p.exists(): shutil.copy2(p, hd / p.name)
+    keep = ed / "clips" / f"{vclip.stem}_{int(time.time())}.mp4"; keep.parent.mkdir(exist_ok=True)
     media.ff("-i", raw, "-an", "-vf", f"fps={assemble.FPS},scale={assemble.W}:{assemble.H},setsar=1,tpad=stop_mode=clone:stop_duration=1,trim=duration={lb['dur']:.3f}",
              "-frames:v", nfr, *assemble.ENC, keep)
     shutil.copy2(keep, vclip)
     # remembered in the plan, so a full rebuild keeps the edit
     for v in plan["sections"][lb["si"]]["visuals"]:
-        if v is not None and v.get("id") == lb["visual"].get("id"): v["edit_clip"] = keep.relative_to(job).as_posix()
+        if v is not None and v.get("id") == lb["visual"].get("id"): meta["edit_clip_prev"] = v.get("edit_clip"); v["edit_clip"] = keep.relative_to(job).as_posix()
     j.save_plan(plan)
     secf.unlink(missing_ok=True)
     s = j.state
     segs = json.loads((job / "presenter" / "segments.json").read_text()) if s.get("presenter") and (job / "presenter" / "segments.json").exists() else []
     assemble.section(job, lb["si"], plan["sections"][lb["si"]], plan["sections"], segs, s.get("captions", True), log)
+    _rejoin_long(job, plan, outp)
+    raw.unlink(missing_ok=True)
+    return meta
+
+def _rejoin_long(job, plan, outp):
+    b = Path(job) / "build"
     parts = [b / f"sec_{x['id']}.mp4" for x in plan["sections"]]
     lst = b / "final.txt"; lst.write_text("".join(f"file '{p.as_posix()}'\n" for p in parts), encoding="utf-8")
     media.ff("-f", "concat", "-safe", 0, "-i", lst, "-an", "-c:v", "copy", b / "final_video.mp4")
     tmp = outp.with_name("_edit_" + outp.name)
     media.ff("-i", b / "final_video.mp4", "-i", b / "final_audio.wav", "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
              "-shortest", "-movflags", "+faststart", tmp)
-    tmp.replace(outp); raw.unlink(missing_ok=True)
+    tmp.replace(outp)
 
 def undo(job, log):
-    """Put back the version before the last edit."""
-    job = Path(job); k = kind(job)
+    """Undo the newest edit still on the stack (repeat to go further back); older jobs fall back to their single .prev copy."""
+    job = Path(job)
+    from .pipeline import Job
+    from . import review
+    j = Job(job); hs = history(job)
+    if not hs: return _undo_prev(job, log)
+    hd = _hroot(job) / f"{hs[-1]['n']:03d}"; m = json.loads((hd / "meta.json").read_text(encoding="utf-8")); k = m["kind"]
+    outp = _tl_out(job, k) if k in TL else Path(j.state["output"])
+    if _ostamp(outp) != m.get("after"):
+        raise ValueError("the video changed since that edit (a full re-render, or a file was replaced), so it can't be undone step by step")
+    if k in TL:
+        ensure_keyframes(job, log, k)   # no-op: the boundaries are still keyframes
+        _splice(job, k, outp, m["a"], m["e"], hd / "old.mp4", log)
+        shutil.copy2(hd / "teaser.json", _tl_pub(job, k) / "teaser.json")
+        pp = m.get("plan_prev")
+        if pp:
+            plan = j.plan(); v = plan["sections"][pp["si"]]["visuals"][pp["vi"]]
+            for key in ("edit_bgs", "edit_slot"):
+                if pp.get(key) is None: v.pop(key, None)
+                else: v[key] = pp[key]
+            j.save_plan(plan)
+        _stamp_keyframes(job, k)
+    else:
+        b = job / "build"; plan = j.plan()
+        for nm in (m["vclip"], m["secf"]):
+            if (hd / nm).exists(): shutil.copy2(hd / nm, b / nm)
+        for v in plan["sections"][m["si"]]["visuals"]:
+            if v is not None and v.get("id") == m.get("vid"):
+                if m.get("edit_clip_prev"): v["edit_clip"] = m["edit_clip_prev"]
+                else: v.pop("edit_clip", None)
+        j.save_plan(plan); _rejoin_long(job, plan, outp)
+    ws = workspace(job, k if k in ("short",) else "long")
+    with review._lock(ws):   # the beat's record goes back too, so a full re-render doesn't bring the undone edit back
+        rv = review.load(ws); b = (rv or {}).get("beats", {}).get(m["beat"])
+        if b:
+            for k2, v in (m.get("rv_state") or {}).items():
+                if v is None: b.pop(k2, None)
+                else: b[k2] = v
+            b["msg"] = "Edit undone."
+            review.save(ws, rv)
+    edits = j.state.get("edits", [])
+    if edits: edits.pop(); j.save(edits=edits)
+    shutil.rmtree(hd, ignore_errors=True)
+    for h in reversed(history(job)):   # the next step down on the same video: its content is back, under a new file stamp
+        mf = _hroot(job) / f"{h['n']:03d}" / "meta.json"; m2 = json.loads(mf.read_text(encoding="utf-8"))
+        if m2.get("out", str(outp)) == str(outp):
+            m2["after"] = _ostamp(outp); mf.write_text(json.dumps(m2, indent=1), encoding="utf-8"); break
+    log(f"Edit undone ({m.get('label', m['beat'])}); {len(hs) - 1} earlier edit(s) can still be undone")
+
+def _undo_prev(job, log):
+    """Edits made before the undo stack existed: one step back from the .prev copies."""
+    k = kind(job)
     from .pipeline import Job
     j = Job(job)
     if k == "short": files = [Path(j.state["short_output"]), job / "short" / "public" / "teaser.json"]
-    else:
-        files = [Path(j.state["output"])] + list((job / "build").glob("v_*.mp4")) + list((job / "build").glob("sec_*.mp4"))
+    else: files = [Path(j.state["output"])] + list((job / "build").glob("v_*.mp4")) + list((job / "build").glob("sec_*.mp4"))
     done = 0
     for p in files:
         pv = p.with_name(p.name + ".prev")
         if pv.exists(): shutil.copy2(pv, p); pv.unlink(); done += 1
     if not done: raise ValueError("nothing to undo")
-    if k == "short":   # keyframes are still on the boundaries; refresh the stamp
-        kf = job / "edit" / "keyframes.json"
-        if kf.exists():
-            st = json.loads(kf.read_text(encoding="utf-8")); outp = Path(j.state["short_output"])
-            st.update(size=outp.stat().st_size, mtime=int(outp.stat().st_mtime)); kf.write_text(json.dumps(st), encoding="utf-8")
+    if k == "short" and (job / "edit" / "keyframes.json").exists(): _stamp_keyframes(job, "short")
     edits = j.state.get("edits", [])
     if edits: edits.pop(); j.save(edits=edits)
-    from . import review   # the beat's record goes back too, so a full re-render doesn't bring the undone edit back
+    from . import review
     ws = workspace(job, k)
     with review._lock(ws):
         rv = review.load(ws)

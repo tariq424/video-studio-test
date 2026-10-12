@@ -134,6 +134,11 @@ def build(job, plan, cfg, log, stop=lambda: False):
         bgs = []
         for vi, v in enumerate(vis):
             slot = bnd[vi + 1] - bnd[vi]
+            if v.get("edit_bgs"):   # replaced in the post-render editor (edit.py): the same backgrounds, in the same slot
+                k = slot / max(0.1, float(v.get("edit_slot") or slot))   # offsets scale if the slot's length changed
+                for eb in v["edit_bgs"]:
+                    bg = dict(eb); bg["from"] = round(bnd[vi] + min(slot - 0.05, eb.get("from", 0) * k), 3); bg["slot"] = vi; bgs.append(bg)
+                continue
             bg = _visual_bg(job, pub, v, slot, s, log); bg["from"] = round(bnd[vi], 3)
             if v.get("illustration"): bg["tag"] = "ILLUSTRATION" if v["illustration"] == "illustration" else "SILHOUETTE"
             bgs.append(bg)

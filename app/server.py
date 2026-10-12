@@ -89,10 +89,23 @@ def create():
     dbg_on = str(b.get("debug", "")).lower() in ("true", "1", "on")
     try: bps = _dbg.parse_all(b.get("breakpoints") or "")
     except ValueError as e: return jsonify(error=f"Breakpoint: {e}"), 400
-    jid = studio.create(b.get("url", "").strip(), mins, b.get("presenter", False), b.get("auto_approve", True), b.get("transcript", ""),
-                        b.get("provider", ""), b.get("captions", True), b.get("mode", "both"), ssec,
-                        f if (f and f.filename) else None, f.filename if f else "", b.get("src_title", ""), b.get("src_credit", ""),
-                        b.get("visual_review", "auto"), dbg_on=dbg_on, bps=bps)
+    # your own clips (clips.py): uploads in "clips", paths on this PC in "clip_paths" (one per line), placement note in "clip_hints"
+    cups = [x for x in (request.files.getlist("clips") if request.files else []) if x and x.filename]
+    cpaths = b.get("clip_paths") or []
+    if isinstance(cpaths, str): cpaths = [x for x in cpaths.splitlines() if x.strip()]
+    own = None
+    if cups or cpaths:
+        from studio import config as _cfg
+        if not _cfg.load().get("own_clips", False): return jsonify(error="Providing your own clips is switched off (setting own_clips)."), 400
+        for p in cpaths:
+            if not Path(p.strip().strip('"')).is_file(): return jsonify(error=f"Clip not found on this PC: {p.strip()}"), 400
+        own = {"uploads": [(x.filename, x.save) for x in cups], "paths": cpaths, "hints": b.get("clip_hints", "")}
+    try:
+        jid = studio.create(b.get("url", "").strip(), mins, b.get("presenter", False), b.get("auto_approve", True), b.get("transcript", ""),
+                            b.get("provider", ""), b.get("captions", True), b.get("mode", "both"), ssec,
+                            f if (f and f.filename) else None, f.filename if f else "", b.get("src_title", ""), b.get("src_credit", ""),
+                            b.get("visual_review", "auto"), dbg_on=dbg_on, bps=bps, own_clips=own)
+    except ValueError as e: return jsonify(error=str(e)[:300]), 400
     return jsonify(id=jid)
 
 @app.post("/api/smoke")
@@ -160,8 +173,18 @@ def edit_beats(jid):
     try: out = edit.beats(j.dir)
     except Exception as e: return jsonify(error=str(e)[:300], kind=None, beats=[])
     k = str(j.dir); out.update(busy=edit.status(j.dir), error=edit._busy.get(k + ":err", ""), edits=j.state.get("edits", []),
-                                 undo=any(j.dir.glob("output/*.prev")))
+                                 undo=edit.can_undo(j.dir), history=edit.history(j.dir) if edit.v2() else [], outputs=edit.outputs(j.dir),
+                                 target=edit.kind(j.dir))
     return jsonify(out)
+
+@app.post("/api/jobs/<jid>/edit/target")
+def edit_target(jid):
+    """A job with a Short and an explainer: which one the timeline editor works on (short | long)."""
+    from studio import edit
+    j = studio.job(jid); b = request.get_json(silent=True) or {}
+    try: edit.set_target(j.dir, b.get("target", ""))
+    except Exception as e: return jsonify(error=str(e)[:300]), 400
+    return jsonify(ok=True, target=edit.kind(j.dir))
 
 @app.post("/api/jobs/<jid>/edit/open/<bid>")
 def edit_open(jid, bid):
@@ -169,7 +192,7 @@ def edit_open(jid, bid):
     j = studio.job(jid)
     try: rv = edit.open_beat(j.dir, bid, config.load(), j.log)
     except Exception as e: return jsonify(error=str(e)[:300]), 400
-    return jsonify(space="long" if edit.kind(j.dir) == "long" else "short", rv=rv)
+    return jsonify(space="short" if edit.kind(j.dir) == "short" else "long", rv=rv)
 
 @app.post("/api/jobs/<jid>/edit/chat")
 def edit_chat(jid):

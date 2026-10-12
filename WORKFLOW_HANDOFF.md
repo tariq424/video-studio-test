@@ -503,3 +503,78 @@ DeepSeek routing, same actions: why / Copy for Claude, refine, more_stock, use o
 - Endpoints: `POST /api/jobs/<jid>/edit/chat {beat,text}` (409 while any job renders), `GET /api/jobs/<jid>/edit/chat?beat=`.
 - Smoke-tested on 20261011_192216 b1: "simulate the descent... lost about 12,000 feet" -> SIMULATION candidate; "apply it" ->
   splice verified (decode ok, 982 frames, audio identical); frames before/after checked, other beats unchanged.
+
+## Branch feat/kokoro-clips-postedit (2026-10-11): Kokoro narration, your own clips, post-render editing v2
+Not merged to main and not active. Every feature sits behind a config flag whose default is the old behaviour; with the
+defaults this branch behaves exactly like main (checked: the pause-chat prompt is byte-identical, Short edit + undo unchanged).
+
+| Flag (settings.json)  | Default  | Turns on |
+|-----------------------|----------|----------|
+| `tts_engine`          | `wanGP`  | `kokoro` = Kokoro narration instead of WanGP TTS |
+| `kokoro_voice`        | `am_michael` | any Kokoro preset voice (af_heart, am_fenrir, bm_george, ...) |
+| `kokoro_speed` / `kokoro_wpm` | 1.0 / 160 | Kokoro pace; `kokoro_wpm` sizes Shorts (an estimate until measured, like voice_wpm) |
+| `kokoro_python` / `kokoro_device` | "" | Kokoro env python (default app/kenv) / cuda or cpu (default: cuda when available) |
+| `own_clips`           | false    | "Provide clips" on the job form + the clip-to-beat matcher |
+| `post_edit_v2`        | false    | explainer slot editing, Short/Explainer switch, open job by ID, multi-step undo, chat context + supply/card actions |
+
+### 1. Kokoro TTS (studio/tts.py, app/kokoro_worker.py, pinokio/install_kokoro.js)
+- Runs in its own env (app/kenv): Kokoro needs PyTorch, which Video Studio's env doesn't have; installing it there could shift
+  numpy etc. under the running app. Video Studio calls `kenv python kokoro_worker.py request.json` once per job (model loads
+  once) and converts each 24 kHz WAV to 48 kHz stereo, the same format WanGP narration is normalised to, so word timings,
+  batch splitting, captions and mixing are untouched. Short: every narration batch in one call. Explainer: every chunk.
+- With Kokoro, narration doesn't need WanGP (`_need_tts`), and on Shorts it still runs beside the footage search.
+- No voice cloning (preset voices only). WanGP stays the default and is still there for the cloned voice.
+- Activate: (1) copy pinokio/install_kokoro.js and pinokio/pinokio.js into C:\pinokio\api\video-studio (the menu gets
+  "Install Kokoro narration (optional)"), run it: creates app/kenv, installs torch (CUDA 12.8 build, ~3 GB), kokoro>=0.9.2,
+  soundfile, and warms the model with one sentence. espeak-ng comes with Kokoro's English front end (espeakng-loader ships
+  the library), so no separate OS install is expected; if the warm-up complains about espeak, install espeak-ng for Windows.
+  (2) set `"tts_engine": "kokoro"`. (3) smoke-test, then measure the real pace and set `kokoro_wpm`.
+- Tested here with a stand-in model only (sandbox has no GPU / Hugging Face access): worker contract, 48 kHz stereo output,
+  caching, missing-env error. The kokoro 0.9.4 API (KPipeline(lang_code, device), results yielding audio) was checked
+  against its source.
+
+### 2. Clip-to-beat matcher (studio/clips.py)
+- Job form (when `own_clips` is on): "Provide clips" = upload video files and/or paths on this PC, plus an optional note.
+  Clips are numbered in the order given (uploads, then paths); stored in src/clips/, listed in state `my_clips`.
+- The script is written from the text source as before. Then: each clip is probed and described once by the vet vision
+  model (4 frames -> one sentence; cached in src/clips/clips.json).
+- Matching (src/clips/match.json): a structured note ("clip1=beat3, clip2=beat5,6", "clip 2 -> 4-5", "section" works for
+  explainers) is taken literally; a free-text note or none goes to the script AI (DeepSeek, local model without a key) with
+  the beats, the clip descriptions and the note; with no AI reachable, word overlap between each clip's description / file
+  name / its own part of the note and the narration. A clip can cover several beats in a row (successive parts).
+- Shorts: covered beats get their part cut to 1080x1920 as short/stock/clips/own<N>_<beat>.mp4 and go into pick.json like
+  vetted stock (own=True): stock search skips them, the ladder fills only what the clip doesn't cover, no ILLUSTRATIVE
+  label, review rung "Your footage", the review panel lists "Your footage: beats ... · Generated visuals: beats ...".
+- Explainers: before the B-roll search, the covered section's AI still/motion slots get successive parts (1920x1080,
+  broll/own/, stock_src "yours"), so they are never searched or generated.
+- Timeline editor: every clip of the job is a one-click "Your footage" candidate on every beat (cut once into <ws>/own/);
+  the jump list and the bar show which beats use your footage. The assembler / splice needed no change: your clips are
+  ordinary footage files to them.
+- Tested here on synthetic clips: note parsing, AI-unavailable fallback, Short cuts (sizes/lengths), explainer slot
+  placement, editor candidates.
+
+### 3. Post-render editing chat on any finished job (studio/edit.py, debug.py, server.py, index.html)
+The editor chat itself (pause chat in the timeline editor, "apply it" = re-render that beat and splice) is already on
+main. This branch adds, behind `post_edit_v2`:
+- Remotion explainers are editable. They have no build/sec_*.mp4, so on main the editor finds no beats for them. Each visual
+  slot of build/public/teaser.json is a beat (id <section>_<slot>); apply renders that slot's frame range of the Teaser
+  composition and splices it in between keyframes on the slot boundaries (first edit of an explainer: one keyframe
+  re-encode of the whole file, then only the slot is encoded). The edit is kept for a full re-render (plan visual
+  `edit_bgs`/`edit_slot`, read by explainer.build). Old FFmpeg-stitched explainers keep the old section-rebuild path.
+- Jobs with a Short AND an explainer: "Editing: Short | Explainer" switch on the editor bar (state `edit_target`).
+- "Open a job by ID" box on the job list.
+- Undo is a stack (edit/history/NNN: the old frames of the range, the timeline JSON, the beat's review state, the plan
+  entry). Each Undo restores the newest edit exactly (checked frame-by-frame); repeat to go back further. Without the flag
+  the stack keeps only the last edit (one-step undo, as before). A full re-render clears the stack.
+- Chat: full context for the beat (Short: previous/next beat; explainer: section title and narration), plus "supply" (your
+  file path or URL -> candidate, selected) and "card" (a headline card with your words). Rewriting the narration itself
+  isn't offered post-render (it shifts every later beat; needs a new render); the chat says so and offers a card.
+- Tested here on a rendered test explainer (slot edit: only that slot's 72 frames changed, audio identical; second edit
+  with your clip; undo twice restored each step exactly) and a rendered test Short (unchanged behaviour, undo exact).
+
+### Activation checklist (when you decide)
+1. Merge the branch (or check it out on F:), restart Video Studio when no job is running.
+2. Kokoro: run install_kokoro.js, then `"tts_engine": "kokoro"`. Smoke test. Measure and set `kokoro_wpm`.
+3. Clips: `"own_clips": true` (form section appears). 4. Editor v2: `"post_edit_v2": true`.
+Always on in this branch (not behind a flag): if no chat model is reachable, the chat replies with that instead of a
+server error.

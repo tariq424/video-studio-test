@@ -73,6 +73,11 @@ html.embed main{grid-template-columns:1fr;padding:0;max-width:none}html.embed bo
   <div id="s_meta" style="display:none"><label>Title of the source (shown in credits)</label><input id="stt" data-testid="source-title" aria-label="Source title" type="text" placeholder="e.g. The economics of AI agents">
    <label>Credit (who made it)</label><input id="scr" data-testid="source-credit" aria-label="Source credit" type="text" placeholder="e.g. NotebookLM, or the author's name"></div>
   <label>Make</label><select id="mode" data-testid="output-mode" aria-label="Make" onchange="srcUI()"><option value="both">Long explainer + Short</option><option value="short">Short only</option><option value="long">Long explainer only</option><option value="smoke">Smoke test (30-second Short, pipeline check)</option></select>
+  <div id="s_clips" style="display:none"><details data-testid="provide-clips"><summary>Provide clips (your own footage, mixed with generated visuals)</summary>
+   <label>Video clips (one or more)</label><input id="clipf" data-testid="clip-upload" type="file" multiple accept=".mp4,.mov,.m4v,.mkv,.webm,.avi,.mts">
+   <label>…or clip paths on this PC (one per line)</label><textarea id="clipp" data-testid="clip-paths" rows="2" placeholder="F:\footage\church_outside.mp4"></textarea>
+   <label>Which clip goes where (optional)</label><textarea id="cliph" data-testid="clip-hints" rows="2" placeholder="clip 1 is the church exterior, clip 2 is the interior through bars   — or —   clip1=beat3, clip2=beat5,6"></textarea>
+   <div class="mut" style="font-size:12.5px">Clips are numbered in the order chosen (uploads first, then paths). Beats your footage doesn't cover get the usual generated visuals; you can move clips in the timeline editor.</div></details></div>
   <div id="m_short"><label>Short length: <b id="sv">2:45</b> (YouTube Shorts max is 3:00)</label><input id="ssec" data-testid="short-length" aria-label="Short length" type="range" min="120" max="176" step="5" value="165" oninput="sv.textContent=fmt(+this.value)" onchange="sv.textContent=fmt(+this.value)" style="width:100%"></div>
   <div id="m_long"><label>Long video length: <b id="mv">15</b> minutes</label><input id="min" data-testid="long-length" aria-label="Long video length" type="range" min="3" max="20" value="15" oninput="mv.textContent=this.value" onchange="mv.textContent=this.value" style="width:100%">
    <label><input id="caps" data-testid="toggle-captions" type="checkbox" checked> Animated captions with icons</label>
@@ -86,7 +91,7 @@ html.embed main{grid-template-columns:1fr;padding:0;max-width:none}html.embed bo
    <textarea id="dbgbps" data-testid="debug-breakpoints" aria-label="Breakpoints" rows="3" placeholder="stock_found == 0&#10;beat == 3&#10;treatment == stock|photo|still|animate|parallax|3d|card&#10;escalated_past == stock&#10;narration contains &quot;word&quot;"></textarea></details>
   <div class="row" style="margin-top:12px"><button data-testid="make-video" id="makebtn" aria-label="Make video" onclick="createJob()">Make video</button><button class="sec" id="stopbtn" data-testid="stop-video" aria-label="Stop video" style="display:none;border-color:var(--bad);color:var(--bad)" onclick="stopVideo()">Stop video</button><span id="jobrun" data-testid="job-running" style="font-weight:600"></span><span id="cmsg" data-testid="make-message" class="mut"></span></div>
  </div>
- <div class="card"><h2>Jobs</h2><div id="jobs" class="mut">No jobs yet.</div></div>
+ <div class="card"><h2>Jobs</h2><div class="row" id="openrow" style="margin-bottom:6px;display:none"><input type="text" id="openid" data-testid="open-job-id" placeholder="Open a job by ID (e.g. 20261011_192216)" style="flex:1" onkeydown="if(event.key=='Enter')openJob()"><button class="sec" data-testid="open-job" onclick="openJob()">Open</button></div><div id="jobs" class="mut">No jobs yet.</div></div>
 </section>
 <section><div class="card" id="detail"><span class="mut">Select a job to see progress.</span></div></section>
 </main>
@@ -98,7 +103,8 @@ if(EMBED)document.documentElement.classList.add('embed');
 const $=id=>document.getElementById(id);
 async function j(u,o){const r=await fetch(u,o);if(!r.ok)throw new Error(await r.text());return r.json()}
 function toggleSettings(){const s=$('settings');s.style.display=s.style.display=='none'?'block':'none';loadSettings()}
-async function loadSettings(){const s=await j('/api/settings');$('k').value=s.anthropic_api_key;$('sm').value=s.script_model;$('qm').value=s.qa_model;$('wpm').value=s.wpm;$('ms').value=s.motion_share;$('iqa').checked=s.image_qa;$('sp').value=s.script_provider;$('qp').value=s.qa_provider;$('zk').value=s.zai_api_key;$('zm').value=s.zai_model;$('zv').value=s.zai_vision_model;$('zu').value=s.zai_base_url;$('zo').value=s.zai_openai_url;$('dk').value=s.deepseek_api_key;$('dm').value=s.deepseek_model;$('vp').value=s.vet_provider;$('vm').value=s.vet_model;$('poq').checked=!!s.pause_on_questions;$('wu').value=s.wangp_mcp||'';$('chn').value=s.channel_name||''}
+async function flagsUI(){try{const s=await j('/api/settings');if($('s_clips'))$('s_clips').style.display=s.own_clips?'':'none';if($('openrow'))$('openrow').style.display=s.post_edit_v2?'':'none'}catch(e){}}
+async function loadSettings(){const s=await j('/api/settings');$('k').value=s.anthropic_api_key;$('sm').value=s.script_model;$('qm').value=s.qa_model;$('wpm').value=s.wpm;$('ms').value=s.motion_share;$('iqa').checked=s.image_qa;$('sp').value=s.script_provider;$('qp').value=s.qa_provider;$('zk').value=s.zai_api_key;$('zm').value=s.zai_model;$('zv').value=s.zai_vision_model;$('zu').value=s.zai_base_url;$('zo').value=s.zai_openai_url;$('dk').value=s.deepseek_api_key;$('dm').value=s.deepseek_model;$('vp').value=s.vet_provider;$('vm').value=s.vet_model;$('poq').checked=!!s.pause_on_questions;$('wu').value=s.wangp_mcp||'';$('chn').value=s.channel_name||'';if($('s_clips'))$('s_clips').style.display=s.own_clips?'':'none';if($('openrow'))$('openrow').style.display=s.post_edit_v2?'':'none'}
 async function testKey(){$('ssaved').textContent='Testing...';const st=await j('/api/status');const ps=[['zai',st.zai_key],['deepseek',st.deepseek_key],['claude',st.api_key]].filter(x=>x[1]).map(x=>x[0]);if(!ps.length){$('ssaved').textContent='No keys saved yet';return}let out=[];for(const p of ps){const r=await j('/api/test_key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:p})});out.push((r.ok?'✓ ':'✗ ')+r.msg)}$('ssaved').innerHTML=out.map(esc).join('<br>')}
 async function saveSettings(){await j('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({anthropic_api_key:$('k').value,script_model:$('sm').value,qa_model:$('qm').value,wpm:+$('wpm').value,motion_share:+$('ms').value,image_qa:$('iqa').checked,script_provider:$('sp').value,qa_provider:$('qp').value,zai_api_key:$('zk').value,zai_model:$('zm').value,zai_vision_model:$('zv').value,zai_base_url:$('zu').value,zai_openai_url:$('zo').value,deepseek_api_key:$('dk').value,deepseek_model:$('dm').value,vet_provider:$('vp').value,vet_model:$('vm').value,pause_on_questions:$('poq').checked,wangp_mcp:$('wu').value.trim(),channel_name:$('chn').value.trim()})});$('ssaved').textContent='Saved';status()}
 async function status(){try{const s=await j('/api/status');stages=s.stages;$('pw').textContent=s.wangp?'WanGP running':'WanGP not running';$('pw').className='pill '+(s.wangp?'ok':'bad');const pn={deepseek:'DeepSeek',zai:'z.ai',claude:'Claude',local:'Local AI'}[s.provider]||s.provider;const rdy=s.provider=='local'||(s.provider=='zai'?s.zai_key:s.provider=='deepseek'?s.deepseek_key:s.api_key);$('pk').textContent='Script: '+pn+(rdy?'':' (no key)');$('pk').className='pill '+(rdy?'ok':'bad')}catch(e){}}
@@ -114,8 +120,10 @@ async function createJob(){if(RUNJOB||STARTING)return;STARTING=true;$('makebtn')
  const f={mode:$('mode').value,short_secs:$('ssec').value,minutes:$('min').value,presenter:$('pres').checked,captions:$('caps').checked,auto_approve:$('auto').checked,provider:$('jp').value,visual_review:$('vrev').value,debug:$('dbgon').checked,breakpoints:$('dbgbps').value,src_title:$('stt').value,src_credit:$('scr').value,
   url:k=='yt'?$('url').value.trim():'',transcript:k=='yt'?$('tx').value:k=='text'?$('ptx').value:''};
  for(const x in f)fd.append(x,f[x]);
+ if($('s_clips')&&$('s_clips').style.display!='none'){for(const cf of $('clipf').files)fd.append('clips',cf);fd.append('clip_paths',$('clipp').value);fd.append('clip_hints',$('cliph').value)}
  if(k=='file'){if($('upf').files.length)fd.append('file',$('upf').files[0]);else if($('upp').value.trim())fd.append('src_path',$('upp').value.trim());else{$('cmsg').textContent='Choose a file (or type its path) first.';STARTING=false;$('makebtn').disabled=false;return}}
- try{const r=await fetch('/api/jobs',{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'failed');sel=d.id;if(EMBED)parent.postMessage({vsJob:d.id},'*');$('url').value='';$('upp').value='';$('ptx').value='';$('upf').value='';$('cmsg').textContent='';STARTING=false;loadJobs()}catch(e){$('cmsg').textContent=e.message;STARTING=false;$('makebtn').disabled=false}}
+ try{const r=await fetch('/api/jobs',{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'failed');sel=d.id;if(EMBED)parent.postMessage({vsJob:d.id},'*');$('url').value='';$('upp').value='';$('ptx').value='';$('upf').value='';if($('clipf')){$('clipf').value='';$('clipp').value='';$('cliph').value=''}$('cmsg').textContent='';STARTING=false;loadJobs()}catch(e){$('cmsg').textContent=e.message;STARTING=false;$('makebtn').disabled=false}}
+async function openJob(){const id=($('openid').value||'').trim();if(!id)return;try{await j(`/api/jobs/${id}`)}catch(e){alert('No job '+id);return}sel=id;editing=false;planCache=null;lastKey='';loadJobs()}
 async function loadJobs(){const js=await j('/api/jobs');runUI(js);$('jobs').innerHTML=js.length?js.map(x=>`<div class="job ${x.id==sel?'sel':''}" onclick="sel='${x.id}';editing=false;planCache=null;loadJobs()"><b>${esc(x.title||x.url||x.id)}</b><div class="mut" style="font-size:12px">${x.id} · ${x.cancelled&&x.status=='stopped'?'cancelled':x.status} · ${x.stage}</div></div>`).join(''):'No jobs yet.';if(sel)loadDetail()}
 function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 let lastKey='';
@@ -147,8 +155,8 @@ async function loadDetail(){if(editing)return;const s=await j('/api/jobs/'+sel);
  if(['error','stopped'].includes(s.status))h+=`<button onclick="act('resume')">Resume</button>`;
  h+=`</div>`;
  if(s.status=='error'&&s.stage=='transcript')h+=`<details open style="margin-top:12px"><summary>Paste transcript (continues without YouTube)</summary><textarea id="jptx" rows="8" style="width:100%" placeholder="Paste the video's transcript here"></textarea><button onclick="pasteTx()">Use this transcript and continue</button> <span id="jptxm" class="mut"></span></details>`;
- if(s.short_output){const rel=s.short_output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished Short: <code>${esc(s.short_output)}</code><br><span class="mut">YouTube description with credits: output/youtube_short_description.txt</span></p><div class="row" style="align-items:flex-start"><div><video id="ov" controls style="max-width:360px" src="/files/${sel}/${rel}?t=${Date.now()}" ontimeupdate="edTick()"></video><div id="edbar"></div></div><div id="thumbp" style="flex:1;min-width:260px"></div></div><div id="edp"></div>`}
- if(s.output&&!s.short_output){const rel=s.output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished video: <code>${esc(s.output)}</code></p><video id="ov" controls src="/files/${sel}/${rel}?t=${Date.now()}" ontimeupdate="edTick()"></video><div id="edbar"></div><div id="edp"></div>`}
+ if(s.short_output&&!(s.output&&s.edit_target=='long')){const rel=s.short_output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished Short: <code>${esc(s.short_output)}</code><br><span class="mut">YouTube description with credits: output/youtube_short_description.txt</span></p><div class="row" style="align-items:flex-start"><div><video id="ov" controls style="max-width:360px" src="/files/${sel}/${rel}?t=${Date.now()}" ontimeupdate="edTick()"></video><div id="edbar"></div></div><div id="thumbp" style="flex:1;min-width:260px"></div></div><div id="edp"></div>`}
+ if(s.output&&(!s.short_output||s.edit_target=='long')){const rel=s.output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished video: <code>${esc(s.output)}</code></p><video id="ov" controls src="/files/${sel}/${rel}?t=${Date.now()}" ontimeupdate="edTick()"></video><div id="edbar"></div><div id="edp"></div>`}
  if(s.trace)h+=`<p class="mut" style="font-size:13px">Debug trace: <a data-testid="debug-trace" href="/files/${sel}/trace.md?t=${Date.now()}" target="_blank">trace.md</a> (in the job folder)</p>`;
  h+=`<div id="dbp"></div><div id="rvp"></div><div id="sdoc"></div><div id="doc"></div><div id="ed"></div>`;
  h+=`<details ${s.status=='error'?'open':''} style="margin-top:18px"><summary class="mut">Technical log</summary><pre id="log">${esc((s.log||[]).join('\n'))}</pre></details>`;
@@ -188,14 +196,20 @@ async function savePlan(ap){planCache.title=$('pt').value;planCache.subtitle=$('
  await j(`/api/jobs/${sel}/plan`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(planCache)});if(ap)await act('approve');else{editing=false;lastKey='';loadDetail()}}
 
 // ---------------- visual review
-const RUNG={stock:'Stock footage',photo:'Real photo',cloud:'Cloud still',illustration:'Illustration',silhouette:'Silhouette',simulation:'Simulation',still:'AI still',animate:'AI animation',parallax:'Parallax',reconstruction:'3D reconstruction',headline:'Headline card',map:'Map',supplied:'Your file'};
+const RUNG={own:'Your footage',stock:'Stock footage',photo:'Real photo',cloud:'Cloud still',illustration:'Illustration',silhouette:'Silhouette',simulation:'Simulation',still:'AI still',animate:'AI animation',parallax:'Parallax',reconstruction:'3D reconstruction',headline:'Headline card',map:'Map',supplied:'Your file'};
 let RV=null,rvSel={},rvTimer=null,rvOpen={};
 async function showReview(){try{RV=await j(`/api/jobs/${sel}/review`)}catch(e){if(!DBG_PAUSED)$('rvp').innerHTML='<p class="mut">Review data not ready yet.</p>';return}drawReview();
  clearTimeout(rvTimer);if(Object.values(RV.beats).some(b=>b.busy))rvTimer=setTimeout(()=>{if($('rvp'))showReview()},4000)}
+function rvOwnLine(){const bs=Object.entries(RV.beats);if(!Object.values(RV.cands).some(c=>c.rung=='own'))return'';
+ const pick=b=>b.decision=='chosen'?b.chosen:b.auto;const n=k=>'Beat '+(+k.slice(1)+1);
+ const mine=bs.filter(([k,b])=>(pick(b)||[]).some(c=>RV.cands[c]&&RV.cands[c].rung=='own')).map(([k])=>k).sort((a,b)=>+a.slice(1)-+b.slice(1));
+ const gen=bs.map(([k])=>k).filter(k=>!mine.includes(k)).sort((a,b)=>+a.slice(1)-+b.slice(1));
+ return `<div data-testid="review-own-coverage" style="font-size:13px;margin-top:6px"><b>Your footage:</b> ${mine.map(n).join(', ')||'none'} · <b>Generated visuals:</b> ${gen.map(n).join(', ')||'none'}</div>`}
 function drawReview(){if(DBG_PAUSED){drawDebug();return}const bs=Object.entries(RV.beats);const left=bs.filter(([k,b])=>!b.decision).length;
  const order=bs.sort((a,b)=>(b[1].uncertain&&!b[1].decision)-(a[1].uncertain&&!a[1].decision)||(+a[0].slice(1))-(+b[0].slice(1)));
  let h=`<div class="card" style="margin-top:14px"><h2>Visual review · ${RV.mode=='every'?'every beat':'auto (uncertain beats first)'}</h2>
  <div class="mut" style="font-size:13px">Available treatments for each beat. The blue outline is the pipeline's pick; click a thumbnail to preview it, tick <b>Use</b> on one or more (they play in the order you tick them).</div>
+${rvOwnLine()}
  <div class="row" style="margin-top:10px"><button data-testid="review-approve-all" onclick="rvAll('approve_all')">Approve all remaining (${left})</button><button class="sec" data-testid="review-continue" ${left?'disabled':''} onclick="rvAll('continue')">Continue to render</button><span id="rvmsg" class="mut"></span></div>`;
  for(const [bid,b] of order)h+=beatHTML(bid,b);
  h+=`</div>`;$('rvp').innerHTML=h}
@@ -253,15 +267,18 @@ function edTick(){const v=$('ov');if(!v||!ED.beats.length)return;const b=edAt(v.
 function edBar(d){const el=$('edbar');if(!el)return;const v=$('ov');const b=v?edAt(v.currentTime):null;d=d||ED.last||{};ED.last=d;
  let h=`<div class="ed-bar">`;
  if(d.busy)h+=`<span class="rv-badge" style="color:var(--acc)">${esc(d.busy)}</span>`;
- else if(b&&b.editable)h+=`<button data-testid="edit-at" data-beat="${b.id}" onclick="edOpen('${b.id}')">Edit at ${fmtT(v.currentTime)} (${esc(b.label)}${ED.kind=='long'?' · '+b.id:''})</button>`;
+ else if(b&&b.editable)h+=`<button data-testid="edit-at" data-beat="${b.id}" onclick="edOpen('${b.id}')">Edit at ${fmtT(v.currentTime)} (${esc(b.label)}${ED.kind!='short'?' · '+b.id:''})</button>`;
  else if(b)h+=`<span class="mut" style="font-size:13px">${esc(b.label)}: not editable (title/end card)</span>`;
  else h+=`<span class="mut" style="font-size:13px">Play or scrub to a beat to edit it</span>`;
- if(!d.busy&&ED.beats.some(x=>x.editable))h+=`<select data-testid="edit-jump" aria-label="Jump to beat" style="width:auto" onchange="edJump(this.value)"><option value="">Jump to beat…</option>${ED.beats.filter(x=>x.editable).map(x=>`<option value="${x.id}" ${b&&b.id==x.id?'selected':''}>${esc(x.label)}${ED.kind=='long'?' · '+x.id:''} (${fmtT(x.start)})</option>`).join('')}</select>`;
- if(d.undo&&!d.busy)h+=`<button class="sec" data-testid="edit-undo" onclick="edAll('undo')">Undo last edit</button>`;
+ if(!d.busy&&ED.beats.some(x=>x.editable))h+=`<select data-testid="edit-jump" aria-label="Jump to beat" style="width:auto" onchange="edJump(this.value)"><option value="">Jump to beat…</option>${ED.beats.filter(x=>x.editable).map(x=>`<option value="${x.id}" ${b&&b.id==x.id?'selected':''}>${esc(x.label)}${ED.kind!='short'?' · '+x.id:''} (${fmtT(x.start)})${x.own?' · your footage':''}</option>`).join('')}</select>`;
+ if(d.undo&&!d.busy){const hs=d.history||[];const last=hs.length?hs[hs.length-1]:null;h+=`<button class="sec" data-testid="edit-undo" title="${hs.length?esc(hs.length+' edit(s) can be undone, newest first'):''}" onclick="edAll('undo')">Undo ${last?esc(last.label||last.beat):'last edit'}${hs.length>1?' ('+hs.length+')':''}</button>`}
+ if(!d.busy&&(d.outputs||[]).length>1)h+=`<span class="mut" style="font-size:13px">Editing:</span><button class="sec ${d.target=='short'?'on':''}" data-testid="edit-target-short" onclick="edTarget('short')">Short</button><button class="sec ${d.target!='short'?'on':''}" data-testid="edit-target-long" onclick="edTarget('long')">Explainer</button>`;
  h+=`<button class="sec" onclick="if(confirm('Re-render the whole video? Your edits are kept.'))edAll('rerender')">Full re-render</button><button class="sec" onclick="edAll('cleanup')" title="Deletes previews and unused treatment files; thumbnails stay">Done editing (clean up)</button>`;
+ if(ED.beats.some(x=>x.own))h+=`<span class="mut" data-testid="edit-own-coverage" style="font-size:12.5px">Your footage: ${ED.beats.filter(x=>x.own).map(x=>esc(x.label)+(ED.kind!='short'?' · '+x.id:'')).join(', ')}</span>`;
  if(d.error)h+=`<span style="color:var(--bad);font-size:13px">Last edit failed: ${esc(d.error)}</span>`;
  if(d.edits&&d.edits.length)h+=`<span class="mut" style="font-size:12px">${d.edits.length} edit(s) applied</span>`;
  el.innerHTML=h+`</div>`}
+async function edTarget(t){try{await rvPost(`/api/jobs/${sel}/edit/target`,{target:t});ED.open=null;lastKey='';loadJobs()}catch(e){alert(e.message)}}
 async function edAll(a){try{await rvPost(`/api/jobs/${sel}/edit_all/${a}`);if(a=='undo'){edReload()}else{lastKey='';loadJobs()}}catch(e){alert(e.message)}}
 function edReload(){const v=$('ov');if(v){const t=v.currentTime;v.src=v.src.split('?')[0]+'?t='+Date.now();v.currentTime=t}edInit()}
 const edQ=()=>ED.space=='long'?'?space=long':'';const edBase=()=>`/files/${sel}/${ED.space=='long'?'longedit/':''}short/`;
@@ -348,5 +365,5 @@ async function dbgChat(){const t=$('dbgmsg').value.trim();if(!t)return;dbgBusy='
  try{await rvPost(`/api/jobs/${sel}/debug/chat`,{beat:dbgBeat,text:t})}catch(e){alert(e.message)}dbgBusy='';
  D=await j(`/api/jobs/${sel}/debug`);try{await showReview()}catch(e){}drawDebug()}
 
-srcUI();status();loadJobs();setInterval(()=>{status();loadJobs()},5000);
+srcUI();status();loadJobs();flagsUI();setInterval(()=>{status();loadJobs()},5000);
 </script></body></html>

@@ -445,6 +445,8 @@ Reply with ONLY JSON: {{"shot_id": {{"q": ["phrase", "phrase"]}}, ...}}
 
 def long_broll(job, plan, cfg, log, stop):
     """Give every AI still/motion visual a stock clip where a good one exists (v['stock'] = clip path); the rest stay AI-rendered."""
+    from . import clips
+    if clips.enabled(cfg): clips.for_long(job, plan, cfg, log, stop)   # your own footage first: those slots are never searched
     vis = [(s, v) for s in plan["sections"] for v in s["visuals"] if v["type"] in ("still", "motion") and not v.get("stock") and not v.get("no_stock")]
     if not vis: log("B-roll: nothing to do"); return
     d = job / "broll"; d.mkdir(exist_ok=True)

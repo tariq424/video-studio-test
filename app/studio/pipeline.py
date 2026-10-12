@@ -84,7 +84,8 @@ class Studio:
         return out
 
     def create(self, url, minutes, presenter=False, auto_approve=False, transcript_text="", provider="", captions=True,
-               mode="both", short_secs=165, upload=None, upload_name="", src_title="", src_credit="", visual_review="auto", dbg_on=False, bps=None):
+               mode="both", short_secs=165, upload=None, upload_name="", src_title="", src_credit="", visual_review="auto", dbg_on=False, bps=None,
+               own_clips=None):
         smoke = mode == "smoke"   # pipeline check: a ~30-second Short (about 75 words); real Shorts keep the 2:00 minimum
         if smoke: mode, short_secs = "short", SMOKE_SECS
         jid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -99,6 +100,12 @@ class Studio:
                upload=up, src_title=src_title, src_credit=src_credit, visual_review=visual_review if visual_review in ("auto", "every") else "auto", status="queued", stage="transcript", done=[], title="", created=time.time(),
                debug={"on": bool(dbg_on), "bps": list(bps or []), "bps_off": False, "checked": [], "chat": []}, trace=bool(dbg_on))
         if dbg_on: debug.trace(j.dir, {"ev": "debug on", "at": "job start", "breakpoints": "; ".join(bps or []) or "none"})
+        if own_clips:   # your footage + where it goes (clips.py places it after the script is written)
+            from . import clips
+            try: mc = clips.save(j.dir, own_clips.get("uploads") or [], own_clips.get("paths") or [], own_clips.get("hints", ""), j.log)
+            except Exception:
+                shutil.rmtree(j.dir, ignore_errors=True); raise
+            j.save(my_clips=mc); j.log(f"Your clips: {len(mc)} file(s)" + (" with a placement note" if (own_clips.get("hints") or "").strip() else ""))
         what = url or (f"file {up}" if up else "pasted text")
         j.log(f"Job created for {what} (output: {'SMOKE TEST, ' if smoke else ''}{mode}; long {minutes} min, short {short_secs:.0f}s)"); self.q.put(jid); return jid
 
@@ -120,6 +127,7 @@ class Studio:
         if st == "assemble":
             for p in (j.dir / "build").glob("sec_*.mp4"): p.unlink(missing_ok=True)
         d = [x for x in j.state.get("done", []) if x != st]
+        shutil.rmtree(j.dir / "edit" / "history", ignore_errors=True)   # step-by-step undo can't cross a full re-render
         j.save(done=d, status="queued"); j.log("Full re-render requested"); self.q.put(jid)
 
     def resume(self, jid):
@@ -337,7 +345,9 @@ class Studio:
             elif st in ("short_stock", "short_voice", "short_fallback", "short_render"):
                 sp = j.short_plan()
                 if st == "short_stock":
-                    if "short_voice" not in j.state.get("done", []) and wg.alive():
+                    from . import tts
+                    kok = tts.engine(cfg) == "kokoro"
+                    if "short_voice" not in j.state.get("done", []) and (kok or wg.alive()):
                         # footage (network + DeepSeek + a little GPU) and narration (GPU) run side by side
                         errs = []
                         def _stock():
@@ -350,7 +360,7 @@ class Studio:
                         d = j.state.get("done", []); d.append("short_voice"); j.save(done=d)
                         if errs: raise errs[0]
                     else: short.do_stock(j.dir, sp, cfg, log, stop)
-                elif st == "short_voice": _need_wangp(wg); short.do_voice(j.dir, sp, cfg, wg, log, stop)
+                elif st == "short_voice": _need_tts(wg, cfg); short.do_voice(j.dir, sp, cfg, wg, log, stop)
                 elif st == "short_fallback":
                     if not wg.alive(): log("WanGP is not running: fallback beats get map/headline graphics instead of AI stills")
                     short.do_fallback(j.dir, sp, cfg, wg, log, stop, full=s.get("visual_review") == "every", dbg=dbg)
@@ -374,7 +384,7 @@ class Studio:
             else:
                 plan = j.plan()
                 if st == "charts": render.do_charts(j.dir, plan, cfg, log)
-                elif st == "voice": _need_wangp(wg); render.do_voice(j.dir, plan, cfg, wg, log, stop)
+                elif st == "voice": _need_tts(wg, cfg); render.do_voice(j.dir, plan, cfg, wg, log, stop)
                 elif st == "captions":
                     if s.get("captions", True):
                         from . import captions as C
@@ -408,6 +418,15 @@ class Studio:
         if j.state.get("trace"):
             debug.trace(j.dir, {"ev": "finished"}); p = debug.render_md(j.dir)
             if p: log(f"Debug trace: {p}")
+
+def _need_tts(wg, cfg):
+    """Narration needs WanGP only when the engine is WanGP (tts_engine, the default); Kokoro runs on its own."""
+    from . import tts
+    if tts.engine(cfg) == "kokoro":
+        why = tts.available(cfg)
+        if why: raise RuntimeError(f"Narration engine is Kokoro but {why}. Install it, or set tts_engine back to wanGP.")
+        return
+    _need_wangp(wg)
 
 def _need_wangp(wg):
     if not wg.alive(): raise RuntimeError("WanGP is not running. Start Wan2GP in Pinokio, then press Resume.")

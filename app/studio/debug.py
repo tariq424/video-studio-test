@@ -170,7 +170,7 @@ CHAT = """You are the assistant inside a video pipeline's pause panel. The edito
 vertical news Short. Pick the action that does what they ask, or answer their question from the facts below.
 
 Beat {n} narration: "{vo}"
-Why the pipeline paused: {label}
+{ctx}Why the pipeline paused: {label}
 What the pipeline tried for this beat (the visual ladder, with reasons):
 {chain}
 Treatments currently offered for this beat (option number. type, accepted or rejected, reason):
@@ -196,7 +196,7 @@ Actions:
 Simulation modules:
 {modules}
 Reply with ONLY JSON: {{"kind": "action" or "why" or "claude", "action": "...", "instruction": "", "queries": [], "count": 2, "options": [],
-"module": "", "params": {{}},
+"module": "", "params": {{}},{extra_keys}
 "reply": "one or two short sentences to the editor: what you are doing, or the answer (from the facts above only; say so if they don't tell)"}}
 "kind" is "why" when they ask why something happened / was rejected / was chosen, or ask you to diagnose or explain.
 "kind" is "claude" (with action "none") when the request needs judgment or taste beyond these actions (rewrite the narration's
@@ -214,6 +214,23 @@ def _cands_text(rv, bid):
         out.append(f"{i}. {RUNG.get(c['rung'], c['rung'])}{' ' + c['item'].get('tag', '') if c['item'].get('tag') else ''}: "
                    f"{'accepted' if c['ok'] else 'REJECTED'} - {c['why'][:100]}")
     return "\n".join(out) or "(none)", ids
+
+def _ctx_on():
+    from .edit import v2
+    return v2()
+
+def _context(j, bid, edit):
+    """The script around the beat: the previous / next beat (Short), or the section's title and full narration (explainer slot)."""
+    try:
+        sp = j.short_plan() if not edit or not str(bid).count("_") else None
+        if sp:
+            secs = sp["sections"]; i = next(k for k, x in enumerate(secs) if x["id"] == bid)
+            prev = secs[i - 1]["vo"] if i > 0 else "(start of the video)"; nxt = secs[i + 1]["vo"] if i + 1 < len(secs) else "(end)"
+            return f"- title: {sp.get('title', '')}\n- previous beat: {prev[:300]}\n- next beat: {nxt[:300]}"
+        plan = j.plan(); sid = str(bid).rsplit("_", 1)[0]
+        sec = next(x for x in plan["sections"] if x["id"] == sid)
+        return f"- video: {plan.get('title', '')}\n- section: {sec.get('title', '')}\n- the section's narration: {sec['vo'][:900]}"
+    except Exception: return "- (not available)"
 
 def chat(studio, jid, bid, text, cfg, edit=False):
     """-> chat entry {t, you, reply, backend, action, kind[, select]}. Executes clear actions through the review machinery.
@@ -245,15 +262,25 @@ def chat(studio, jid, bid, text, cfg, edit=False):
     vo = (ch.get("vo") or (rv or {}).get("beats", {}).get(bid, {}).get("vo", ""))
     prompt = CHAT.format(n=int(bid[1:]) + 1 if bid[1:].isdigit() else bid, vo=vo[:400],
                          label=label, chain=chain, cands=ctext, log=logtail[-3000:], text=text.replace('"', "'"), history=history,
-                         modules=physics.describe())
+                         modules=physics.describe(), ctx=("Script around this beat:\n" + _context(j, bid, edit) + "\n") if _ctx_on() else "",
+                         extra_keys=' "src": "", "tag": "", "text": "", "kicker": "",' if edit and _ctx_on() else "")
+    from .edit import v2 as _v2
     if edit:   # the finished video: no "continue"; "apply" renders the chosen treatment into the video
-        prompt = prompt.replace('- "continue": resume the pipeline.', '- "apply": put the selected / named option(s) into the finished video now (re-render this beat only and splice it in); "options" = option numbers, or [] for the current selection. Only when the editor approves or asks to apply / use it in the video.')
+        prompt = prompt.replace('- "continue": resume the pipeline.', '- "apply": put the selected / named option(s) into the finished video now (re-render this beat only and splice it in); "options" = option numbers, or [] for the current selection. Only when the editor approves or asks to apply / use it in the video.' + ('\n'
+            '- "supply": use the editor\'s own picture or video; "src" = the file path on this PC or the URL they gave, "tag" = "" or FILE / ILLUSTRATIVE / GENERATED.\n'
+            '- "card": a headline card with the editor\'s own words on screen ("rewrite the text", "say X on screen"); "text" = the card text (max ~12 words), "kicker" = optional small label.\n'
+            'Rewriting the NARRATION itself is not possible here (it changes the timing of everything after it; that needs a new render): say so and offer a card instead.' if _v2() else ''))
+        prompt = prompt.replace('vertical news Short.', 'finished video (a vertical news Short or a 16:9 explainer).')
     def chk(x):
-        if x.get("action") not in ("refine", "more_stock", "use", "thumbnails", "skip", "continue", "simulate", "apply", "none"): raise ValueError("unknown action")
-    with LLM(c, j.log, lambda: False) as llm:
-        backend = llm.name
-        try: x = llm.chat_json("You are a precise assistant for a video editor. Reply with JSON only.", prompt, max_tokens=800, check=chk)
-        except RuntimeError: x = {"kind": "why", "action": "none", "reply": "I couldn't work out what to do; try rephrasing."}
+        if x.get("action") not in ("refine", "more_stock", "use", "thumbnails", "skip", "continue", "simulate", "apply", "none") + (("supply", "card") if edit and _v2() else ()): raise ValueError("unknown action")
+    backend = "none"
+    try:
+        with LLM(c, j.log, lambda: False) as llm:
+            backend = llm.name
+            try: x = llm.chat_json("You are a precise assistant for a video editor. Reply with JSON only.", prompt, max_tokens=800, check=chk)
+            except RuntimeError: x = {"kind": "why", "action": "none", "reply": "I couldn't work out what to do; try rephrasing."}
+    except Exception as e:   # no chat model reachable (no DeepSeek key and Ollama not running): say so in the chat
+        x = {"kind": "claude", "action": "none", "reply": f"The chat model isn't available ({str(e)[:120]})."}
     why = x.get("kind") == "why" or bool(WHYISH.search(text))
     to_claude = x.get("kind") == "claude"
     reply = str(x.get("reply") or "").strip()[:500]
@@ -301,6 +328,21 @@ def chat(studio, jid, bid, text, cfg, edit=False):
                 else:
                     err = E.start_apply(jd, bid, cids, "auto", cfg, j.log)
                     if not err: reply += "\n(Rendering this beat and splicing it into the video...)"; select = cids
+        elif act == "supply":
+            if not edit: err = "supply your own file from the review panel's Supply box"
+            elif not str(x.get("src") or "").strip(): err = "give the file path on this PC or a URL"
+            else:
+                cid = review.supply(wsd, bid, str(x["src"]), str(x.get("tag") or ""), cfg, j.log); select = [cid]   # added + selected
+                reply += "\n(Your file is added and selected. Say 'apply it' or press Apply to video.)"
+        elif act == "card":
+            t = str(x.get("text") or "").strip()[:90]
+            if not t: err = "no card text"
+            else:
+                rv2 = review.load(wsd); sk = dict(rv2["beats"][bid].get("skip_item") or {"type": "graphic", "g": {"kind": "headline"}})
+                g = dict(sk.get("g") or {"kind": "headline"}); g.update(kind="headline", text=t, kicker=str(x.get("kicker") or g.get("kicker") or "")[:30], sub="")
+                cid = review._add(rv2, bid, {"type": "graphic", "g": g}, "headline", True, f"your card: {t[:60]}")
+                review.save(wsd, rv2); review.decide(wsd, bid, "choose", [cid], cfg, j.log); review.thumbs(wsd, cfg, j.log, [cid]); select = [cid]
+                reply += "\n(Card added and selected." + (" Say 'apply it' or press Apply to video.)" if edit else ")")
         elif act == "continue":
             if edit: err = "the video is finished - say 'apply it' to put the change in"
             elif s.get("status") == "paused": studio.resume(jid)

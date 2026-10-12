@@ -53,6 +53,15 @@ DEFAULTS = {
     "short_i2v_steps": 8,
     "short_i2v_frames": 169,          # ~7 s at 24 fps
     "tts_model": "qwen3_tts_base",
+    "tts_engine": "wanGP",            # narration: wanGP (cloned voice, ~10-15 min per job) | kokoro (preset voice, seconds; studio/tts.py)
+    "kokoro_voice": "am_michael",     # Kokoro preset voice (only used when tts_engine is kokoro)
+    "own_clips": False,
+    "post_edit_v2": False,            # timeline editor: Remotion explainers editable slot by slot, Short/Explainer switch, open a job by ID,
+                                      # chat "supply" / "card" actions (studio/edit.py); off = the editor as before               # job form "Provide clips": your footage matched to beats (studio/clips.py)
+    "kokoro_speed": 1.0,
+    "kokoro_wpm": 160,                # Kokoro's pace for sizing Shorts (estimate; measure after activation, like voice_wpm)
+    "kokoro_python": "",              # "" = app/kenv (pinokio/install_kokoro.js)
+    "kokoro_device": "",              # "" = cuda when available
     "image_qa": True,
 }
 

@@ -3,7 +3,7 @@ Almost no GPU: only the narration (WanGP TTS) and the clip vetting (small vision
 import base64, io, json, math, os, re, shutil, subprocess, time
 from pathlib import Path
 import requests
-from . import config, media
+from . import config, media, tts
 from .llm import LLM, parse_json
 from .writer import SYSTEM, make_notes, fact_check
 
@@ -129,7 +129,7 @@ def verify_quotes(plan, transcript, log):
 
 # ---------------------------------------------------------------- script
 def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir, smoke=False):
-    wpm = cfg.get("voice_wpm", 155)
+    wpm = tts.wpm(cfg)
     # target = narration + a pause after each beat + the end tail + the closing line (~16 words); size the story to fill the rest
     words = int((secs - TAIL - GAP * 9 - 16 / wpm * 60) * wpm / 60)
     nb = max(7, min(12, round(words / 38)))
@@ -219,19 +219,25 @@ def do_stock(job, plan, cfg, log, stop):
     from . import footage
     d = job / "short" / "stock"
     slots, need = [], {}
+    own = {}
+    from . import clips
+    if clips.enabled(cfg):
+        own = clips.for_short(job, plan, cfg, log, stop)   # your footage first: covered beats aren't searched
     for s in plan["sections"]:
+        if s["id"] in own: continue
         if s.get("cta"):
             slots.append({"id": s["id"], "text": "calm, general background for the closing end card", "queries": ["city skyline dusk aerial", "night sky stars timelapse"]})
             need[s["id"]] = 1
         elif s.get("subject"):
             continue   # locked to a specific subject: stock libraries don't have it; real photos / reconstruction come in short_fallback
         else:
-            secs = len(s["vo"].split()) / cfg.get("voice_wpm", 142) * 60 + GAP
+            secs = len(s["vo"].split()) / tts.wpm(cfg) * 60 + GAP
             slots.append({"id": s["id"], "text": s["vo"], "queries": s["queries"], "subject": s.get("subject"), "avoid": s.get("avoid") or []})
             need[s["id"]] = max(2, min(3, math.ceil(secs / 6.0)))
     picked = footage.fill(cfg, slots, "portrait", need, d, log, stop, want_long_side=2560, max_secs=10.0, state_file=d / "footage.json", fallback=True)
     for s in plan["sections"]:
         if s.get("subject") and not s.get("cta"): picked.setdefault(s["id"], [])
+    picked = dict(picked); picked.update(own)
     (d / "pick.json").write_text(json.dumps(picked, indent=1), encoding="utf-8")
     n = sum(len(v) for v in picked.values()); short_ = [k for k, v in picked.items() if len(v) < need.get(k, 0)]
     log(f"Stock footage: {n} clips ready" + (f"; fewer than wanted for {', '.join(short_)}" if short_ else ""))
@@ -288,7 +294,8 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         bid = sec["id"]
         if bid in chs: return
         k = len(pick.get(bid, []))
-        chs[bid] = {"n": int(bid[1:]) + 1, "vo": sec["vo"], "stock_found": k, "chain": [f"stock ({k} clip(s), coherent)"], "uses": ["stock"],
+        mine = any(c.get("own") for c in pick.get(bid, []))
+        chs[bid] = {"n": int(bid[1:]) + 1, "vo": sec["vo"], "stock_found": k, "chain": ["your footage" if mine else f"stock ({k} clip(s), coherent)"], "uses": ["yours" if mine else "stock"],
                     "failed": [], "stock_rejected": srej(bid), "photos_rejected": []}
     def info(sec):
         c = chs.get(sec["id"], {})
@@ -297,7 +304,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
     log("Visual ladder per beat (1 stock/photo -> 2 cloud still -> 3 WanGP still -> 4 parallax -> 5 illustration / silhouette -> 6 reconstruction / headline; animate on click):")
     for s in beats:   # beats step 1 covered on its own
         if s["id"] in base_needs: continue
-        log(f"  {s['id']}: stock ({len(pick.get(s['id'], []))} clip(s), coherent)"); stock_beat(s)
+        log(f"  {s['id']}: " + ("your footage" if any(c.get("own") for c in pick.get(s["id"], [])) else f"stock ({len(pick.get(s['id'], []))} clip(s), coherent)")); stock_beat(s)
     if not needs and not dbg:
         log("  no other beats need visuals"); save_out(); return
     ents = json.loads((job / "entities.json").read_text(encoding="utf-8")) if (job / "entities.json").exists() else []
@@ -493,6 +500,8 @@ def do_voice(job, plan, cfg, wg, log, stop):
     if groups: log(f"Narration: {len(todo)} beats in {len(groups)} voice call(s)")
     seed = 9100
     from .pipeline import progress
+    if groups and tts.engine(cfg) == "kokoro":   # every batch in one Kokoro run (seconds); the split / timings below are unchanged
+        tts.kokoro_batch(cfg, [(" ".join(s["vo"] for s in grp), vd / f"batch_{grp[0]['id']}.wav") for grp in groups], log, "Short narration", stop)
     for gi, grp in enumerate(groups):
         progress(job, sum(len(g) for g in groups[:gi]) + len(grp), len(todo))
         if stop(): raise RuntimeError("cancelled")
@@ -653,7 +662,7 @@ def build(job, plan, cfg, log):
                 if not dst.exists(): shutil.copy2(src, dst)
                 used.append(f"stock/clips/{c['id']}.mp4")
                 bg = {"src": f"media/stock/{c['id']}.mp4", "type": "video", "from": round(t0, 3)}
-                if story_subjects: bg["tag"] = "ILLUSTRATIVE"   # generic footage in a story about a specific event
+                if story_subjects and not c.get("own"): bg["tag"] = "ILLUSTRATIVE"   # generic footage in a story about a specific event (not your own)
                 if c.get("orient") == "landscape": bg["fit"] = "frame"
             elif c["type"] == "image":
                 used.append(c["src"]); dst = pub / "media" / "fb" / Path(c["src"]).name

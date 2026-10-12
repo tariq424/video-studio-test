@@ -37,6 +37,12 @@ def do_voice(job, plan, cfg, wg, log, stop):
     gap = d / "_gap.wav"; media.ff("-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", 0.25, gap)
     seed = 9000
     from .pipeline import progress
+    from . import tts
+    if tts.engine(cfg) == "kokoro":   # all chunks in one Kokoro run; the per-section concat below is unchanged
+        import unicodedata
+        items = [(text, d / f"{s['id']}_{ci}.wav") for s in plan["sections"] if not media.ok(d / f"{s['id']}.wav")
+                 for ci, text in enumerate(chunks(unicodedata.normalize("NFKD", s["vo"]).encode("ascii", "ignore").decode()))]
+        tts.kokoro_batch(cfg, items, log, "Narration", stop)
     for si, s in enumerate(plan["sections"]):
         progress(job, si + 1, len(plan["sections"]))
         out = d / f"{s['id']}.wav"
