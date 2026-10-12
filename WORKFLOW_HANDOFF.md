@@ -591,7 +591,7 @@ What is installed (F:\code\video-studio\app\kenv, Python 3.10.20 from Pinokio's 
 - kokoro 0.9.4, misaki 0.9.4, soundfile 0.14.0, spaCy + en_core_web_sm 3.8.0, transformers 5.19.0
 - espeak-ng: bundled by espeakng-loader 0.2.4 (kenv\lib\site-packages\espeakng_loader\espeak-ng.dll). No OS install was
   needed and none was done.
-- Kokoro-82M model + am_michael voice cached in the Hugging Face cache (downloaded by the warm-up, "kokoro ok").
+- Kokoro-82M model + am_michael voice cached in C:\pinokio\api\video-studio\cache\HF_HOME (downloaded by the warm-up, "kokoro ok").
 - Installed by C:\pinokio\api\video-studio\install_kokoro.js (same as the branch's pinokio/install_kokoro.js). Also
   left there: kokoro_smoke.js/.py, kokoro_bench.js/.py, kokoro_worker_branch.py (test helpers; safe to move to _to_delete).
 
@@ -632,8 +632,10 @@ Branch changes from the install (committed on feat/kokoro-clips-postedit): the w
 - Kokoro is a preset voice, not your cloned narrator: Shorts and explainers will sound different from earlier videos.
 - Slower than the cloned voice (140 vs ~155 wpm): same script = longer video; Short sizing accounts for it via kokoro_wpm.
   kokoro_speed 1.1 would bring it close to 155 if you prefer the old pace (then set kokoro_wpm ~154).
-- Offline by default: if the Hugging Face cache (C:\Users\Tarri\.cache\huggingface) is ever cleared, the worker fails with
-  a "couldn't find model" error -> set "kokoro_online": true for one run (or re-run install_kokoro.js).
+- Offline by default: the model sits in the app's Pinokio HF cache, C:\pinokiopiideo-studio\cache\HF_HOME
+  (HF_HOME=./cache/HF_HOME in the app's ENVIRONMENT; Video Studio started from Pinokio passes it to the worker). If that
+  cache is cleared, or Video Studio is started outside Pinokio (start-video-studio.bat, HF_HOME not set), the worker can't
+  find the model offline -> set "kokoro_online": true (downloads ~330 MB once) or re-run install_kokoro.js.
 - First call per job loads the model (~9 s) and uses ~0.5-1 GB VRAM alongside WanGP; fine on 16 GB.
 - Benign warnings in the worker output (LSTM dropout, weight_norm deprecation) - ignore.
 - The Pinokio menu entry for the installer only appears once pinokio.js from the branch is copied (step 2).
