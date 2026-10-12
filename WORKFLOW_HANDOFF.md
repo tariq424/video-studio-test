@@ -632,7 +632,7 @@ Branch changes from the install (committed on feat/kokoro-clips-postedit): the w
 - Kokoro is a preset voice, not your cloned narrator: Shorts and explainers will sound different from earlier videos.
 - Slower than the cloned voice (140 vs ~155 wpm): same script = longer video; Short sizing accounts for it via kokoro_wpm.
   kokoro_speed 1.1 would bring it close to 155 if you prefer the old pace (then set kokoro_wpm ~154).
-- Offline by default: the model sits in the app's Pinokio HF cache, C:\pinokiopiideo-studio\cache\HF_HOME
+- Offline by default: the model sits in the app's Pinokio HF cache, C:\pinokio\api\video-studio\cache\HF_HOME
   (HF_HOME=./cache/HF_HOME in the app's ENVIRONMENT; Video Studio started from Pinokio passes it to the worker). If that
   cache is cleared, or Video Studio is started outside Pinokio (start-video-studio.bat, HF_HOME not set), the worker can't
   find the model offline -> set "kokoro_online": true (downloads ~330 MB once) or re-run install_kokoro.js.
