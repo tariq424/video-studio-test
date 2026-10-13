@@ -62,6 +62,35 @@ v2 order per beat (Shorts: `short.do_fallback` -> `short._v2_rungs`; explainers:
   VectCutAPI, set `capcut_api_dir`, `"capcut_fallback": true`; first run with CapCut open and watch it. (3) Optional AIS:
   `pip install websocket-client`, `aisstream_api_key` (free at aisstream.io; stored in the vault).
 
+## Audience, script length gate, timeline scrubber (2026-10-13)
+**Audience (per job, both Shorts and explainers).** Job form "Audience" (next to Narration): Settings default / Common / Informed /
+Expert -> state `audience`; global default `"audience": "common"` in settings.json. The only pipeline change is one line in the
+narration prompts (`writer.AUDIENCE`, `audience_line(cfg)`): explainer SECTION prompt, Short prompt, and the length pass's RESIZE prompt
+(so a trimmed / expanded section keeps the register). Choices: the line goes in as `AUDIENCE: ...` after the narration-style rules; the
+outline, notes and fact-check prompts are unchanged; an unknown value falls back to Common.
+
+**Script length (explainers).** Diagnosis: the section prompt asked for 1.25x the section budget but only checked a floor (85%), so
+DeepSeek landed either near the inflated number (3-min test: 551 of ~465 words, +18%) or under the floor three times, after which an
+UNCHECKED fresh call was kept (15-min: 1,870 of 2,325, -20%); nothing checked the total, and the fact-check pass could change length
+freely. Shorts didn't have this (two-sided +/-5%, closest try kept, middle beats dropped) and landed +1%.
+Fix (picked: measure and correct, the Short's pattern; not a looser target, which would only move the miss):
+  1. sections ask for the real budget, checked two-sided (+/-10%, `LEN_LO`/`LEN_HI`); after 3 misses the CLOSEST try is kept.
+  2. `writer.fit_length`: after all sections, while the total is more than 6% off (`TOTAL_TOL`), the section furthest from its own
+     budget in the helpful direction is rewritten to its budget from its own points (RESIZE, +/-8%, closest kept, never made worse;
+     each section at most once). Visual counts follow (extra visuals dropped when a section shrinks).
+  3. fact-check must keep each section within +/-10% of its length, else that section's check is skipped (original kept).
+  Log lines: `length: section N a -> b words (budget c); script now x of y` and a final `length: ... within 6%` or `... off`.
+  Sandbox-tested with a fake model (20% short -> within 6% in 8 calls; 18% long -> +4.5%; a model that never complies -> unchanged + warning).
+  Not changed: the word target still uses settings `wpm` (155; Kokoro measured ~150 on the overnight explainer).
+  Not tested on the PC yet: the next real explainer is the test.
+
+**Timeline scrubber (job page, any finished job).** Panel above the edit bar: Video selector Short / Explainer (uses `edit/target`;
+the other button is disabled when the job has only one), range scrubber, a beat strip under it (click a beat to jump; title / end
+cards dimmed), timestamp m:ss.s / total, the beat at that time (`edit/beats` start+dur), Play, Stop, "Edit this beat" -> `edOpen(beat)`
+(the existing panel: chat, candidates, splice, undo). Choices: Stop = pause and keep the position (rewinding would lose the beat);
+"Edit this beat" is enabled only when stopped on an editable beat; the old "Edit at" button and "Jump to beat" list stay. Tested in a
+headless browser against mocked endpoints (seek, play, stop, edit -> right beat id, segment click, Short <-> Explainer).
+
 ## Explainer B-roll under ladder v2: no 3D reconstruction (2026-10-13)
 - **Why:** overnight job 20261013_002153 (v2 on) still got 18 reconstructions in the explainer: B-roll (`footage.long_broll`) gives
   subject-locked shots real photos, else `coherence.recon` - 12 of them the generic "object" scene (an icosahedron on a pedestal

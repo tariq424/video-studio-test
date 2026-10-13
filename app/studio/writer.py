@@ -51,6 +51,7 @@ Must cover these points (use only these facts; never invent numbers, quotes or n
 {points}
 
 NARRATION: {words} words (count them; stay within +/-10%). Longer sections should add detail, examples and context from the points, never padding. Calm, clear documentary voice-over. Short sentences, plain words.
+AUDIENCE: {audience}
 Attribute opinions and predictions to the speaker ("Diamandis argues...", "his guest predicts..."); present predictions
 as predictions. Write numbers as spoken ("four point seven percent", "twenty thirty", "ten billion dollars").
 No markdown, stage directions or speaker labels. Flow naturally from the previous section; don't repeat its content.
@@ -109,6 +110,16 @@ Reply with ONLY JSON: {{"vo":"corrected narration","charts":[...same chart objec
 
 _STOP = set("the a an and or but of to in on for with at by from is are was were be been it this that these those as not no so if then than too very just about into over under more most less least can could would should will may might do does did have has had you your we our they their he his she her i me my them what which who whom how why when where there here all any some such only own same other".split())
 
+AUDIENCE = {   # one line per level, added to the narration prompts (explainer sections and Shorts); job form "Audience"
+    "common": "Write for a general audience with no technical background. Use technical terms where they are the right word, but explain each one in a short phrase the first time it appears. Use analogies when they help. Keep the pacing accessible.",
+    "informed": "Write for a viewer with some technical familiarity. Use technical terms freely, adding brief context only for unusual ones. Skip basic explanations.",
+    "expert": "Write for a specialist. Use jargon without explanation. Assume deep familiarity with the domain.",
+}
+
+def audience_line(cfg):
+    """The prompt line for this job's audience (cfg["audience"]: the job's choice, else settings.json, else common)."""
+    return AUDIENCE.get(str(cfg.get("audience") or "common").lower(), AUDIENCE["common"])
+
 def _passages(transcript_words, text, n=2, size=900):
     kw = {w.lower().strip(".,!?\"'():;") for w in text.split()}
     kw = {w for w in kw if len(w) > 3 and w not in _STOP}
@@ -136,6 +147,8 @@ def fact_check(llm, plan, meta, transcript, log, stop=None):
         log(f"  checking section {k}/{len(plan['sections'])} against the transcript")
         def chk(j):
             if not isinstance(j.get("vo"), str) or len(j["vo"].split()) < 0.6 * len(s["vo"].split()): raise ValueError("narration missing or cut too much")
+            n0, n1 = len(s["vo"].split()), len(j["vo"].split())
+            if not 0.88 * n0 <= n1 <= 1.12 * n0: raise ValueError(f"narration is {n1} words; keep it at {n0} words (+/-10%): fix, don't rewrite")
         try:
             j = llm.chat_json(SYSTEM, FACTCHECK.format(title=title, channel=channel, desc=desc, stitle=s["title"],
                     words=len(s["vo"].split()), vo=s["vo"], charts=json.dumps([c["chart"] for c in charts], ensure_ascii=False),
@@ -214,19 +227,25 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
             mrule = ("include ONE motion clip (not first) for the most dynamic moment" if big and motion_left > 0
                      else "none in this section")
             role = " (the opening hook)" if k == 1 else " (the closing: key takeaways)" if k == len(secs) else ""
-            def chk2(j):
+            tries = []   # every usable attempt, so a near miss is kept instead of an unchecked re-ask
+            def chk2(j, s=s, tries=tries):
                 if not isinstance(j.get("vo"), str): raise ValueError("narration missing")
-                n = _nw(j["vo"])
-                if n < s["words"] * 0.85: raise ValueError(f"narration is {n} words but must be about {s['words']} words; expand it with more of the section's points, examples and context")
                 if not j.get("visuals"): raise ValueError("no visuals")
+                n = _nw(j["vo"]); tries.append((abs(n - s["words"]), j))
+                if n < s["words"] * LEN_LO: raise ValueError(f"narration is {n} words but must be {s['words']} words (+/-10%); expand it with more of the section's points, examples and context")
+                if n > s["words"] * LEN_HI: raise ValueError(f"narration is {n} words but must be {s['words']} words (+/-10%); cut the weakest sentences")
             log(f"  section {k}/{len(secs)}: {s['title']}")
             sec_prompt = SECTION.format(k=k, n=len(secs), title=title, channel=channel, outline=outline_str,
-                    stitle=s["title"], role=role, points="\n".join("- " + p for p in s["points"]), words=int(s["words"] * 1.25),
-                    nvis=nvis, motion_rule=mrule)
+                    stitle=s["title"], role=role, points="\n".join("- " + p for p in s["points"]), words=s["words"],
+                    nvis=nvis, motion_rule=mrule, audience=audience_line(cfg))
             try: j = llm.chat_json(SYSTEM, sec_prompt, max_tokens=4000, check=chk2)
             except RuntimeError:
-                log("  length still short after 3 tries; keeping the best version")
-                j = llm.chat_json(SYSTEM, sec_prompt, max_tokens=4000, check=lambda x: None if isinstance(x.get("vo"), str) and x.get("visuals") else (_ for _ in ()).throw(ValueError("bad section")))
+                if tries:
+                    j = min(tries, key=lambda x: x[0])[1]
+                    log(f"  length still off after 3 tries; keeping the closest ({_nw(j['vo'])} words, budget {s['words']})")
+                else:
+                    log("  no usable section after 3 tries; asking once more without the length check")
+                    j = llm.chat_json(SYSTEM, sec_prompt, max_tokens=4000, check=lambda x: None if isinstance(x.get("vo"), str) and x.get("visuals") else (_ for _ in ()).throw(ValueError("bad section")))
             vis = [v for v in j["visuals"] if isinstance(v, dict)]
             want = max(2, round(_nw(j["vo"]) / cfg["wpm"] * 60 / spv))
             vis = vis[:want]   # keep visuals in step with the narration actually written
@@ -236,6 +255,7 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
             motion_left -= sum(1 for v in vis if v.get("type") == "motion")
             plan["sections"].append({"title": s["title"], "vo": j["vo"], "visuals": vis})
         plan = normalize(plan)
+        fit_length(llm, plan, secs, words, cfg, log, stop)
         log("Checking the script against the transcript (names, attributions, claims)...")
         plan = fact_check(llm, plan, meta, transcript, log, stop)
         plan = normalize(plan)
@@ -244,6 +264,57 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
         log(f"Script ready: {len(plan['sections'])} sections, {w} words (~{w / cfg['wpm']:.1f} min), "
             f"{sum(len(s['visuals']) for s in plan['sections'])} visuals.{tk}")
         return plan
+
+LEN_LO, LEN_HI = 0.9, 1.1   # per-section band (explainer); the whole script must land within +/-TOTAL_TOL of its target
+TOTAL_TOL = 0.06
+
+RESIZE = """Rewrite this narration for section "{stitle}" of an explainer video to EXACTLY {words} words (count them; +/-8%).
+It is {n} words now. {how}
+Use only these facts (never invent numbers, quotes or names):
+{points}
+Keep the same voice, order and meaning; keep it flowing from the previous section. Numbers as spoken words.
+AUDIENCE: {audience}
+NARRATION:
+{vo}
+
+Reply with ONLY JSON: {{"vo":"the rewritten narration"}}"""
+
+def fit_length(llm, plan, secs, words, cfg, log, stop=None):
+    """Length gate for the whole explainer script. The script AI misses word counts unpredictably in both directions
+    (2026-10-13: 1,870 of 2,325 words for 15 min; 551 of ~465 for 3 min), and per-section checks alone let the misses add up.
+    While the total is more than TOTAL_TOL off target, the section furthest from its own budget (in the direction that helps)
+    is rewritten to its budget with its own points (trim or expand, checked +/-8%, closest try kept); each section at most once.
+    Visual counts follow the new length (extra visuals dropped when a section shrinks; a grown section's visuals get longer slots)."""
+    spv = cfg["seconds_per_visual"]
+    tot = lambda: sum(_nw(x["vo"]) for x in plan["sections"])
+    done = set()
+    while abs(tot() - words) > words * TOTAL_TOL and len(done) < len(plan["sections"]):
+        if stop and stop(): raise RuntimeError("stopped")
+        short = tot() < words
+        cand = [(i, (b["words"] - _nw(x["vo"])) / b["words"]) for i, (x, b) in enumerate(zip(plan["sections"], secs)) if i not in done]
+        cand = [c for c in cand if (c[1] > 0) == short and abs(c[1]) > 0.04] or [c for c in cand if (c[1] > 0) == short]
+        if not cand: break
+        i = max(cand, key=lambda c: abs(c[1]))[0]; done.add(i)
+        x, b = plan["sections"][i], secs[i]; n = _nw(x["vo"]); tries = []
+        def chk(j, b=b, tries=tries):
+            if not isinstance(j.get("vo"), str): raise ValueError("narration missing")
+            m = _nw(j["vo"]); tries.append((abs(m - b["words"]), j["vo"]))
+            if not 0.92 * b["words"] <= m <= 1.08 * b["words"]: raise ValueError(f"narration is {m} words but must be {b['words']} (+/-8%)")
+        how = ("Expand it with more detail, examples and context from the facts below." if n < b["words"]
+               else "Shorten it: cut the weakest sentences and any repetition.")
+        try: new = llm.chat_json(SYSTEM, RESIZE.format(stitle=x["title"], words=b["words"], n=n, how=how, points="\n".join("- " + p for p in b.get("points", [])),
+                                                       audience=audience_line(cfg), vo=x["vo"]), max_tokens=3000, check=chk)["vo"]
+        except Exception:
+            new = min(tries)[1] if tries else None
+        if new and abs(_nw(new) - b["words"]) < abs(n - b["words"]):
+            x["vo"] = re.sub(r"\s+", " ", new).strip()
+            want = max(2, round(_nw(x["vo"]) / cfg["wpm"] * 60 / spv))
+            if len(x["visuals"]) > want: x["visuals"] = x["visuals"][:want]
+            log(f"  length: section {i + 1} {n} -> {_nw(x['vo'])} words (budget {b['words']}); script now {tot()} of {words}")
+    w = tot()
+    if abs(w - words) > words * TOTAL_TOL: log(f"  length: script is {w} words, {100 * (w - words) / words:+.0f}% off the {words}-word target after the length pass")
+    else: log(f"  length: {w} words, within {TOTAL_TOL:.0%} of the {words}-word target")
+    return plan
 
 def normalize(plan):
     """Give every section/visual a stable id and fix common issues."""

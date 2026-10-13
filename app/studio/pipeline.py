@@ -101,7 +101,7 @@ class Studio:
 
     def create(self, url, minutes, presenter=False, auto_approve=False, transcript_text="", provider="", captions=True,
                mode="both", short_secs=165, upload=None, upload_name="", src_title="", src_credit="", visual_review="auto", dbg_on=False, bps=None,
-               own_clips=None, tts_engine=""):
+               own_clips=None, tts_engine="", audience=""):
         smoke = mode == "smoke"   # pipeline check: a ~30-second Short (about 75 words); real Shorts keep the 2:00 minimum
         if smoke: mode, short_secs = "short", SMOKE_SECS
         jid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -123,6 +123,7 @@ class Studio:
                 shutil.rmtree(j.dir, ignore_errors=True); raise
             j.save(my_clips=mc); j.log(f"Your clips: {len(mc)} file(s)" + (" with a placement note" if (own_clips.get("hints") or "").strip() else ""))
         if tts_engine in ("kokoro", "wanGP"): j.save(tts_engine=tts_engine)
+        if audience in ("common", "informed", "expert"): j.save(audience=audience)
         what = url or (f"file {up}" if up else "pasted text")
         j.log(f"Job created for {what} (output: {'SMOKE TEST, ' if smoke else ''}{mode}; long {minutes} min, short {short_secs:.0f}s)"); self.q.put(jid); return jid
 
@@ -286,6 +287,7 @@ class Studio:
     def _run(self, jid):
         j = self.job(jid); s = j.state; cfg = config.load()
         if s.get("tts_engine") in ("kokoro", "wanGP"): cfg["tts_engine"] = s["tts_engine"]   # the job's own narration choice
+        if s.get("audience") in ("common", "informed", "expert"): cfg["audience"] = s["audience"]   # the job's own audience (script prompts)
         if s.get("cancelled") and s.get("status") == "stopped": return   # cancelled while it waited in the queue
         self.current = jid
         stop = lambda: jid in self.cancel

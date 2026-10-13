@@ -20,6 +20,9 @@ button.sec{background:transparent;color:var(--fg);border:1px solid var(--line)}b
 .stages{display:flex;gap:4px;flex-wrap:wrap;margin:10px 0}.st{font-size:12px;padding:3px 8px;border-radius:6px;background:#0d1117;border:1px solid var(--line);color:var(--mut)}
 .st.done{color:var(--ok);border-color:var(--ok)}.st.cur{color:var(--acc);border-color:var(--acc)}
 pre{background:#0d1117;border:1px solid var(--line);border-radius:8px;padding:10px;max-height:320px;overflow:auto;font-size:12.5px;white-space:pre-wrap}
+.sc button.on{background:var(--acc);color:#111;border-color:var(--acc)}.sc{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:8px 0}.sc-strip{position:relative;height:22px;margin-top:4px}
+.sc-seg{position:absolute;top:0;height:20px;box-sizing:border-box;border:1px solid var(--line);border-radius:4px;font-size:11px;line-height:18px;text-align:center;overflow:hidden;cursor:pointer;background:rgba(127,127,127,.12)}
+.sc-seg.off{opacity:.45;cursor:default}.sc-seg.cur{background:var(--acc);color:#111;font-weight:700}
 .sec-edit{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}.sec-edit input{font-weight:600}
 video{width:100%;border-radius:8px;margin-top:10px}
 details summary{cursor:pointer;color:var(--mut);font-size:13px;margin-top:10px}
@@ -83,6 +86,7 @@ html.embed main{grid-template-columns:1fr;padding:0;max-width:none}html.embed bo
    <label><input id="caps" data-testid="toggle-captions" type="checkbox" checked> Animated captions with icons</label>
    <label><input id="pres" data-testid="toggle-presenter" type="checkbox"> On-screen presenter (small corner window, experimental)</label></div>
   <label>Narration</label><select id="ttse" data-testid="narration-engine" aria-label="Narration"><option value="">Settings default (Kokoro, falls back to WanGP)</option><option value="kokoro">Kokoro (fast preset voice)</option><option value="wanGP">WanGP cloned voice (slow)</option></select>
+  <label>Audience</label><select id="aud" data-testid="audience" aria-label="Audience"><option value="">Settings default (Common)</option><option value="common">Common: plain language, jargon explained on first use</option><option value="informed">Informed: technical terms used freely</option><option value="expert">Expert: jargon throughout, no hand-holding</option></select>
   <label>Script AI for this video</label><select id="jp" data-testid="script-ai" aria-label="Script AI"><option value="">Use Settings default</option><option value="zai">z.ai GLM</option><option value="deepseek">DeepSeek</option><option value="claude">Claude</option><option value="local">Local AI (Ollama)</option></select>
   <div id="m_vr"><label>Visuals (Shorts)</label><select id="vrev" data-testid="visuals-mode" aria-label="Visuals (Shorts)"><option value="never" selected>Decide everything: never pause, make the best call when unsure</option><option value="auto">Auto: pick automatically, pause only when unsure</option><option value="every">Review every beat: make every treatment, pause to choose</option></select></div>
   <label><input id="auto" data-testid="toggle-skip-script-review" type="checkbox" checked> Skip script review (render straight away; untick to read and edit the script first)</label>
@@ -118,7 +122,7 @@ function runUI(js){const r=(js||[]).find(x=>BUSY.includes(x.status));RUNJOB=r?r.
  $('jobrun').textContent=r?('● '+({running:'Job running',queued:'Job queued',paused:'Job paused',awaiting_visuals:'Job waiting for your visual choices',awaiting_review:'Job waiting for script review'}[r.status]||'Job active')+': '+(r.title||r.id).slice(0,60)+(r.cancel_req?' · stopping at the next safe point…':'')):'';$('jobrun').style.color=r?'var(--acc)':''}
 async function stopVideo(){if(!RUNJOB)return;$('stopbtn').disabled=true;try{const d=await j(`/api/jobs/${RUNJOB}/stop`,{method:'POST'});$('cmsg').textContent=d.state=='stopping'?'Stopping at the next safe point (never mid-render)…':'Stopped.'}catch(e){$('cmsg').textContent=e.message}$('stopbtn').disabled=false;loadJobs()}
 async function createJob(){if(RUNJOB||STARTING)return;STARTING=true;$('makebtn').disabled=true;$('cmsg').textContent='Starting...';const k=$('srck').value;const fd=new FormData();
- const f={mode:$('mode').value,short_secs:$('ssec').value,minutes:$('min').value,presenter:$('pres').checked,captions:$('caps').checked,auto_approve:$('auto').checked,provider:$('jp').value,visual_review:$('vrev').value,tts_engine:$('ttse').value,debug:$('dbgon').checked,breakpoints:$('dbgbps').value,src_title:$('stt').value,src_credit:$('scr').value,
+ const f={mode:$('mode').value,short_secs:$('ssec').value,minutes:$('min').value,presenter:$('pres').checked,captions:$('caps').checked,auto_approve:$('auto').checked,provider:$('jp').value,visual_review:$('vrev').value,tts_engine:$('ttse').value,audience:$('aud').value,debug:$('dbgon').checked,breakpoints:$('dbgbps').value,src_title:$('stt').value,src_credit:$('scr').value,
   url:k=='yt'?$('url').value.trim():'',transcript:k=='yt'?$('tx').value:k=='text'?$('ptx').value:''};
  for(const x in f)fd.append(x,f[x]);
  if($('s_clips')&&$('s_clips').style.display!='none'){for(const cf of $('clipf').files)fd.append('clips',cf);fd.append('clip_paths',$('clipp').value);fd.append('clip_hints',$('cliph').value)}
@@ -156,8 +160,8 @@ async function loadDetail(){if(editing)return;const s=await j('/api/jobs/'+sel);
  if(['error','stopped'].includes(s.status))h+=`<button onclick="act('resume')">Resume</button>`;
  h+=`</div>`;
  if(s.status=='error'&&s.stage=='transcript')h+=`<details open style="margin-top:12px"><summary>Paste transcript (continues without YouTube)</summary><textarea id="jptx" rows="8" style="width:100%" placeholder="Paste the video's transcript here"></textarea><button onclick="pasteTx()">Use this transcript and continue</button> <span id="jptxm" class="mut"></span></details>`;
- if(s.short_output&&!(s.output&&s.edit_target=='long')){const rel=s.short_output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished Short: <code>${esc(s.short_output)}</code><br><span class="mut">YouTube description with credits: output/youtube_short_description.txt</span></p><div class="row" style="align-items:flex-start"><div><video id="ov" controls style="max-width:360px" src="/files/${sel}/${rel}?t=${Date.now()}" ontimeupdate="edTick()"></video><div id="edbar"></div></div><div id="thumbp" style="flex:1;min-width:260px"></div></div><div id="edp"></div>`}
- if(s.output&&(!s.short_output||s.edit_target=='long')){const rel=s.output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished video: <code>${esc(s.output)}</code></p><video id="ov" controls src="/files/${sel}/${rel}?t=${Date.now()}" ontimeupdate="edTick()"></video><div id="edbar"></div><div id="edp"></div>`}
+ if(s.short_output&&!(s.output&&s.edit_target=='long')){const rel=s.short_output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished Short: <code>${esc(s.short_output)}</code><br><span class="mut">YouTube description with credits: output/youtube_short_description.txt</span></p><div class="row" style="align-items:flex-start"><div><video id="ov" controls style="max-width:360px" src="/files/${sel}/${rel}?t=${Date.now()}" ontimeupdate="edTick()" onloadedmetadata="scDraw()" onplay="scTick()" onpause="scTick()"></video><div id="scrub"></div><div id="edbar"></div></div><div id="thumbp" style="flex:1;min-width:260px"></div></div><div id="edp"></div>`}
+ if(s.output&&(!s.short_output||s.edit_target=='long')){const rel=s.output.replace(/\\/g,'/').split('/').slice(-2).join('/');h+=`<p>Finished video: <code>${esc(s.output)}</code></p><video id="ov" controls src="/files/${sel}/${rel}?t=${Date.now()}" ontimeupdate="edTick()" onloadedmetadata="scDraw()" onplay="scTick()" onpause="scTick()"></video><div id="scrub"></div><div id="edbar"></div><div id="edp"></div>`}
  if(s.trace)h+=`<p class="mut" style="font-size:13px">Debug trace: <a data-testid="debug-trace" href="/files/${sel}/trace.md?t=${Date.now()}" target="_blank">trace.md</a> (in the job folder)</p>`;
  h+=`<div id="dbp"></div><div id="rvp"></div><div id="sdoc"></div><div id="doc"></div><div id="ed"></div>`;
  h+=`<details ${s.status=='error'?'open':''} style="margin-top:18px"><summary class="mut">Technical log</summary><pre id="log">${esc((s.log||[]).join('\n'))}</pre></details>`;
@@ -264,8 +268,8 @@ function fmtT(x){return Math.floor(x/60)+':'+String(Math.floor(x%60)).padStart(2
 async function edInit(){try{const d=await j(`/api/jobs/${sel}/edit/beats`);ED.beats=d.beats||[];ED.kind=d.kind;edBar(d)}catch(e){}}
 function edJump(id){const v=$('ov'),b=ED.beats.find(x=>x.id==id);if(!v||!b)return;v.pause();v.currentTime=b.start+Math.min(0.5,b.dur/2);ED.cur=b.id;edBar()}
 function edAt(t){return ED.beats.find(b=>t>=b.start&&t<b.start+b.dur)}
-function edTick(){const v=$('ov');if(!v||!ED.beats.length)return;const b=edAt(v.currentTime);const k=b?b.id:'';if(k!==ED.cur){ED.cur=k;edBar()}}
-function edBar(d){const el=$('edbar');if(!el)return;const v=$('ov');const b=v?edAt(v.currentTime):null;d=d||ED.last||{};ED.last=d;
+function edTick(){scTick();const v=$('ov');if(!v||!ED.beats.length)return;const b=edAt(v.currentTime);const k=b?b.id:'';if(k!==ED.cur){ED.cur=k;edBar()}}
+function edBar(d){const el=$('edbar');if(!el)return;const v=$('ov');const b=v?edAt(v.currentTime):null;d=d||ED.last||{};ED.last=d;scDraw();
  let h=`<div class="ed-bar">`;
  if(d.busy)h+=`<span class="rv-badge" style="color:var(--acc)">${esc(d.busy)}</span>`;
  else if(b&&b.editable)h+=`<button data-testid="edit-at" data-beat="${b.id}" onclick="edOpen('${b.id}')">Edit at ${fmtT(v.currentTime)} (${esc(b.label)}${ED.kind!='short'?' · '+b.id:''})</button>`;
@@ -279,6 +283,35 @@ function edBar(d){const el=$('edbar');if(!el)return;const v=$('ov');const b=v?ed
  if(d.error)h+=`<span style="color:var(--bad);font-size:13px">Last edit failed: ${esc(d.error)}</span>`;
  if(d.edits&&d.edits.length)h+=`<span class="mut" style="font-size:12px">${d.edits.length} edit(s) applied</span>`;
  el.innerHTML=h+`</div>`}
+// ---------------- timeline scrubber: find a beat by scrubbing the video, then open it in the edit panel below
+// Short / Explainer selector (edit/target), player scrubber with the beat strip, timestamp, beat at that time, Play / Stop,
+// "Edit this beat" -> edOpen(beat). Stop pauses and keeps the position, so the beat stays selected for editing.
+function fmtTs(x){x=Math.max(0,x||0);return Math.floor(x/60)+':'+(x%60).toFixed(1).padStart(4,'0')}
+function scDraw(){const el=$('scrub'),v=$('ov');if(!el||!v)return;const d=ED.last||{},lb=ED.beats.length?ED.beats[ED.beats.length-1]:null,D=(isFinite(v.duration)&&v.duration)||(lb?lb.start+lb.dur:0);
+ const outs=d.outputs||[],tgt=d.target||(ED.kind=='short'?'short':'long');
+ const has=k=>!outs.length?(k==(ED.kind=='short'?'short':'long')):outs.includes(k);
+ let h=`<div class="sc" data-testid="scrubber"><div class="row" style="align-items:center;gap:6px;margin:0 0 6px">
+  <span class="mut" style="font-size:13px">Video:</span>
+  <button class="sec ${tgt=='short'?'on':''}" data-testid="scrub-pick-short" aria-pressed="${tgt=='short'}" ${has('short')&&!d.busy?'':'disabled'} onclick="${tgt=='short'?'':"edTarget('short')"}">Short</button>
+  <button class="sec ${tgt!='short'?'on':''}" data-testid="scrub-pick-long" aria-pressed="${tgt!='short'}" ${has('long')&&!d.busy?'':'disabled'} onclick="${tgt!='short'?'':"edTarget('long')"}">Explainer</button></div>`;
+ h+=`<input type="range" id="scr_r" data-testid="scrub-range" aria-label="Scrub the video" min="0" max="${D.toFixed(2)}" step="0.05" value="${(v.currentTime||0).toFixed(2)}" oninput="scSeek(this.value)" style="width:100%;margin:0">`;
+ if(D>0&&ED.beats.length)h+=`<div class="sc-strip">${ED.beats.map(b=>`<div class="sc-seg ${b.editable?'':'off'}" data-beat="${b.id}" title="${esc(b.label)} (${fmtT(b.start)})" style="left:${(b.start/D*100).toFixed(3)}%;width:${(b.dur/D*100).toFixed(3)}%" onclick="scSeek(${(b.start+Math.min(0.5,b.dur/2)).toFixed(2)})">${ED.kind=='short'?(b.label||'').replace(/^Beat /,''):b.id}</div>`).join('')}</div>`;
+ h+=`<div class="row" style="align-items:center;gap:8px;margin-top:6px">
+  <button class="sec" data-testid="scrub-play" onclick="$('ov').play()">▶ Play</button><button class="sec" data-testid="scrub-stop" onclick="$('ov').pause()">■ Stop</button>
+  <span data-testid="scrub-time" id="scr_t" style="font-variant-numeric:tabular-nums;font-weight:600">0:00.0</span><span class="mut" style="font-size:13px">/ ${fmtTs(D)}</span>
+  <span data-testid="scrub-beat" id="scr_b" class="rv-badge">—</span>
+  <button data-testid="scrub-edit" id="scr_e" onclick="scEdit()" disabled>Edit this beat</button></div></div>`;
+ el.innerHTML=h;scTick()}
+function scSeek(t){const v=$('ov');if(!v)return;v.currentTime=+t;scTick()}
+function scTick(){const v=$('ov'),r=$('scr_r');if(!v||!r)return;const t=v.currentTime||0;
+ if(document.activeElement!==r)r.value=t.toFixed(2);if(isFinite(v.duration)&&+r.max<v.duration)r.max=v.duration.toFixed(2);
+ $('scr_t').textContent=fmtTs(t);const b=edAt(t),busy=(ED.last||{}).busy;
+ $('scr_b').textContent=b?(b.label+(ED.kind!='short'?' · '+b.id:'')+(b.editable?'':' (not editable)')):(ED.beats.length?'between beats':'beats not loaded');
+ $('scr_b').dataset.beat=b?b.id:'';
+ const e=$('scr_e');e.disabled=!(b&&b.editable)||!!busy||!v.paused;e.title=!v.paused?'Stop the video first':busy?String(busy):'';
+ document.querySelectorAll('.sc-seg').forEach(x=>x.classList.toggle('cur',!!b&&x.dataset.beat==b.id))}
+function scEdit(){const v=$('ov');if(!v)return;v.pause();const b=edAt(v.currentTime);if(b&&b.editable)edOpen(b.id)}
+
 async function edTarget(t){try{await rvPost(`/api/jobs/${sel}/edit/target`,{target:t});ED.open=null;lastKey='';loadJobs()}catch(e){alert(e.message)}}
 async function edAll(a){try{await rvPost(`/api/jobs/${sel}/edit_all/${a}`);if(a=='undo'){edReload()}else{lastKey='';loadJobs()}}catch(e){alert(e.message)}}
 function edReload(){const v=$('ov');if(v){const t=v.currentTime;v.src=v.src.split('?')[0]+'?t='+Date.now();v.currentTime=t}edInit()}

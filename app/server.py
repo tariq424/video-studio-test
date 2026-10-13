@@ -105,7 +105,7 @@ def create():
                             b.get("provider", ""), b.get("captions", True), b.get("mode", "both"), ssec,
                             f if (f and f.filename) else None, f.filename if f else "", b.get("src_title", ""), b.get("src_credit", ""),
                             b.get("visual_review") or config.load().get("visual_review_default", "never"), dbg_on=dbg_on, bps=bps, own_clips=own,
-                            tts_engine=b.get("tts_engine", ""))
+                            tts_engine=b.get("tts_engine", ""), audience=str(b.get("audience") or "").lower())
     except ValueError as e: return jsonify(error=str(e)[:300]), 400
     return jsonify(id=jid)
 

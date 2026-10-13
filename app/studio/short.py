@@ -5,7 +5,7 @@ from pathlib import Path
 import requests
 from . import config, media, tts
 from .llm import LLM, parse_json
-from .writer import SYSTEM, make_notes, fact_check
+from .writer import SYSTEM, make_notes, fact_check, audience_line
 
 GAP, TAIL, MAX_SECS = 0.35, 2.2, 176.0   # YouTube Shorts allow up to 180 s; keep a margin
 SMOKE_WORDS = 58   # smoke-test Short: 2 beats of narration (the model runs ~10% long); with the ~12-word closing line about 75 words (~30 s)
@@ -30,6 +30,7 @@ YouTube Shorts are cut off at 3 minutes, so do not go over.
   Attribute opinions and predictions to who said them (first name is fine in narration).
 - Last beat: the payoff / biggest takeaway, ending on a strong line.
 Narration: spoken, punchy, short sentences, plain words, numbers written as spoken words ("ten billion dollars", "twenty thirty").
+AUDIENCE: {audience}
 No markdown, no stage directions. Never invent numbers, quotes or names.
 
 For each beat also give:
@@ -149,7 +150,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             tries.append((abs(n - words), j))
             if n < words * lo: raise ValueError(f"narration is {n} words in total but must be about {words}; add detail from the notes")
             if n > words * hi: raise ValueError(f"narration is {n} words in total but must be at most {int(words * 1.05)}; cut weaker points")
-        prompt = SHORT.format(secs=int(secs), words=words, title=title, channel=channel, notes=notes[:24000], nb=nb,
+        prompt = SHORT.format(secs=int(secs), words=words, title=title, channel=channel, notes=notes[:24000], nb=nb, audience=audience_line(cfg),
                               people=(meta.get("description") or "")[:1200] or "(see notes)")
         try: j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=chk)
         except RuntimeError:
