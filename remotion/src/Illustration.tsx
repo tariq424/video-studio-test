@@ -12,6 +12,8 @@ export type Illustration = {
   attitude?: "level" | "dive" | "climb" | "bank" | "down" | "up" | "landing" | "ground";
   ground?: "desert" | "green" | "sea";
   alarm?: boolean;
+  aircraft?: "airliner" | "fighter";   // which aircraft the sky / airport scene draws (illustrate.aircraft_for); default airliner
+  count?: number;                       // fighters: 2 = a pair in formation (lead + wingman)
   seed?: number;
 };
 export type Silhouette = {
@@ -65,6 +67,35 @@ const Airliner: React.FC<{ flat?: boolean; fill?: string; gear?: boolean; night?
       {flat ? <rect x={202} y={86} width={8} height={13} rx={3} fill="#3b4656" /> : null}
       {gear ? <g fill={dark}><rect x={318} y={74} width={4} height={18} /><circle cx={320} cy={95} r={6} /><rect x={176} y={74} width={5} height={22} /><circle cx={178} cy={99} r={7} /></g> : null}
       {flat ? <circle cx={226} cy={110} r={4} fill={blink || !night ? "#ff4b4b" : "#5b1b1b"} /> : null}
+    </g>
+  );
+};
+
+// Flat side-view fighter facing right (400 x 120 box, nose at x=398, y=60): single-engine stealth shape - chined nose, bubble canopy,
+// side intake, twin canted tails, afterburner flame when burner=true. Generic (no markings, no national insignia, no serials).
+const Fighter: React.FC<{ f: number; burner?: boolean; gear?: boolean; night?: boolean }> = ({ f, burner, gear, night }) => {
+  const body = "#8a949f", top = "#a3adb8", dark = "#5c6570", deep = "#3c434c";
+  const fl = burner ? 70 + Math.sin(f * 1.7) * 10 + Math.sin(f * 0.9) * 6 : 0;   // flame length flickers
+  const blink = Math.floor(f / 18) % 2 === 0;
+  return (
+    <g transform="translate(0,60) scale(1,1.32) translate(0,-60)">
+      {burner ? <g>
+        <path d={`M28,52 L${28 - fl},60 L28,68 Z`} fill="#ff8a1f" opacity={0.85} />
+        <path d={`M28,55 L${28 - fl * 0.62},60 L28,65 Z`} fill="#ffd34d" />
+        <path d={`M28,57.5 L${28 - fl * 0.3},60 L28,62.5 Z`} fill="#fff6d6" />
+      </g> : null}
+      <path d="M78,50 L44,8 L70,8 L118,50 Z" fill={dark} />
+      <path d="M96,51 L70,16 L90,16 L130,51 Z" fill={body} />
+      <path d="M70,66 L26,84 L52,86 L112,68 Z" fill={dark} />
+      <path d="M28,54 C34,50 48,48 72,48 L240,46 L300,45 C334,45 366,51 398,60 C366,68 334,72 300,72 L240,74 L72,72 C48,72 34,70 28,66 Z" fill={body} />
+      <path d="M72,48 L240,46 L300,45 C334,45 366,51 398,60 L330,57 L240,56 L72,58 Z" fill={top} />
+      <path d="M296,46 C306,30 334,30 352,48 C336,47 316,46 296,46 Z" fill={night ? "#1b2433" : "#2f3e52"} />
+      <path d="M306,42 C314,35 328,35 338,43 C326,41 316,41 306,42 Z" fill="#c9d6e6" opacity={0.55} />
+      <path d="M244,58 L290,58 L284,71 L244,71 Z" fill={deep} />
+      <path d="M210,62 L136,96 L176,98 L262,64 Z" fill={dark} />
+      <rect x={20} y={53} width={12} height={14} rx={3} fill={deep} />
+      {gear ? <g fill={deep}><rect x={318} y={70} width={4} height={18} /><circle cx={320} cy={91} r={6} /><rect x={150} y={72} width={5} height={20} /><circle cx={152} cy={95} r={7} /></g> : null}
+      <circle cx={150} cy={96} r={3.5} fill={blink || !night ? "#ff4b4b" : "#5b1b1b"} />
     </g>
   );
 };
@@ -135,16 +166,20 @@ export const IllustrationBackdrop: React.FC<{ g: Illustration; dur: number }> = 
   const zoom = interpolate(p, [0, 1], [1.09, 1.15]); const tall = H > W; const u = Math.min(W, H) / 1080; const cam = useCam(seed, p, W);
   const ground = GROUND[g.ground || "desert"]; const id = `sky${seed}`;
   let scene: React.ReactNode = null;
+  const fighter = g.aircraft === "fighter"; const burner = fighter && (g.attitude === "climb" || g.attitude === "up");
   if (g.scene === "sky") {
     const { ang, dy, sy } = airPose(g.attitude || "level", p, t, W, H);
-    const k = (tall ? 1.85 : 2.3) * u, dx = interpolate(p, [0, 1], [-W * 0.05, W * 0.05]);
+    const pair = fighter && (g.count ?? 1) > 1;
+    const k = (tall ? 1.85 : 2.3) * u * (pair ? 0.82 : 1), dx = interpolate(p, [0, 1], [-W * 0.05, W * 0.05]);
     scene = (<>
       <g transform={cam(0.15)}><Sky W={W} H={H} time={time} id={id} />
       {time === "dusk" || time === "day" ? <circle cx={W * 0.72} cy={H * 0.74} r={W * 0.16} fill={time === "dusk" ? "#ffd27a" : "#fff6cf"} opacity={0.9} /> : null}</g>
-      <g transform={cam(0.45)}><Clouds W={W} H={H} f={f} time={time} seed={seed} band={[0.06, 0.55]} /></g>
+      <g transform={cam(0.45)}><Clouds W={W} H={H} f={fighter ? f * 2.6 : f} time={time} seed={seed} band={[0.06, 0.55]} /></g>
       <g transform={cam(0.8)}><path d={`M0,${H * 0.84} C${W * 0.25},${H * 0.8} ${W * 0.55},${H * 0.86} ${W},${H * 0.81} L${W},${H} L0,${H} Z`} fill={ground} opacity={0.95} />
       <path d={`M0,${H * 0.9} C${W * 0.3},${H * 0.86} ${W * 0.7},${H * 0.93} ${W},${H * 0.88} L${W},${H} L0,${H} Z`} fill="#000" opacity={0.18} /></g>
-      <g transform={cam(1.2)}><g transform={`translate(${W / 2 - 200 * k + dx},${H * 0.42 + dy}) scale(${k}) rotate(${ang} 200 60) translate(0,${60 * (1 - sy)}) scale(1,${sy})`}><Airliner flat night={time === "night"} f={f} /></g></g>
+      <g transform={cam(1.2)}>
+        {pair ? <g transform={`translate(${W / 2 - 200 * k + dx - 70 * k},${H * 0.42 + dy - (tall ? 0 : H * 0.06) + 135 * k}) scale(${k * 0.78}) rotate(${ang} 200 60)`}><Fighter f={f + 7} burner={burner} night={time === "night"} /></g> : null}
+        <g transform={`translate(${W / 2 - 200 * k + dx},${H * 0.42 + dy - (pair && !tall ? H * 0.06 : 0)}) scale(${k}) rotate(${ang} 200 60) translate(0,${60 * (1 - sy)}) scale(1,${sy})`}>{fighter ? <Fighter f={f} burner={burner} night={time === "night"} /> : <Airliner flat night={time === "night"} f={f} />}</g></g>
       {time === "storm" && Math.floor(t * 2.3) % 7 === 3 ? <rect width={W} height={H} fill="#fff" opacity={0.18} /> : null}
     </>);
   } else if (g.scene === "airport") {
@@ -167,7 +202,7 @@ export const IllustrationBackdrop: React.FC<{ g: Illustration; dur: number }> = 
         return <path key={i} d={`M${W * 0.5 - 2 - a * 10},${y1} L${W * 0.5 + 2 + a * 10},${y1} L${W * 0.5 + 2 + b * 10},${y2} L${W * 0.5 - 2 - b * 10},${y2} Z`} fill="#f1f1ea" />; })}
       {Array.from({ length: 10 }, (_, i) => { const a = (i + 1) / 11, y = hz + (H - hz) * a * a, on = Math.floor(f / 10 + i) % 10 === 0;
         return <g key={i}><circle cx={W * 0.44 - a * W * 0.54} cy={y} r={3 + a * 6} fill={on ? "#fff" : "#ffcf6b"} /><circle cx={W * 0.56 + a * W * 0.54} cy={y} r={3 + a * 6} fill={on ? "#fff" : "#ffcf6b"} /></g>; })}
-      <g transform={cam(1.2)}><g transform={`translate(${px},${py}) scale(${k}) rotate(${landing ? -4 : 0} 200 60)`}><Airliner flat gear night={time === "night"} f={f} /></g></g>
+      <g transform={cam(1.2)}><g transform={`translate(${px},${py}) scale(${k}) rotate(${landing ? -4 : 0} 200 60)`}>{fighter ? <Fighter f={f} gear night={time === "night"} /> : <Airliner flat gear night={time === "night"} f={f} />}</g></g>
     </>);
   } else if (g.scene === "city") {
     const base = H * (tall ? 0.78 : 0.82);

@@ -62,6 +62,18 @@ v2 order per beat (Shorts: `short.do_fallback` -> `short._v2_rungs`; explainers:
   VectCutAPI, set `capcut_api_dir`, `"capcut_fallback": true`; first run with CapCut open and watch it. (3) Optional AIS:
   `pip install websocket-client`, `aisstream_api_key` (free at aisstream.io; stored in the vault).
 
+## Aircraft type in illustrations (2026-10-13)
+- **Why:** smoke job 20261012_192051, beat b1 ("...tried to crash the jet. Netanyahu scrambled F-35 fighters...") drew a diving
+  passenger jet over the F-35 line. Chain: `photo -> illustration (WanGP skipped: aircraft beat)`. Graphics (rung 5) runs once per beat
+  and was spent on slot 1 (`template:stat`, "2 pilots"); slot 2 fell to rung 9, and the illustration rung only knew one aircraft
+  (the beat subject, flydubai 737) and drew `<Airliner>` with the whole beat's verb ("crash" -> dive). Not a classifier or render failure.
+- **Fix:** `illustrate.aircraft_for(sec, pos)`: a beat can name two aircraft; slot i of n draws the aircraft named in the i-th n-th of
+  the narration (a fighter mention there wins; "the jet" / "the plane" = the beat's subject). Plural -> a pair; a scramble /
+  launch / intercept clause -> climb with afterburner. Illustration `g.aircraft` = "airliner" | "fighter", `g.count`;
+  Illustration.tsx has a flat generic `Fighter` (twin tails, canopy, side intake, no markings). Silhouettes follow the same type.
+  The review menu (`illustrate.variants`) offers each aircraft the beat names. Explainers: each visual's own narration picks it.
+- Test clip: b1 slot 2 re-rendered -> pair of fighters climbing on burner, 8 s, 1080x1920.
+
 ## Status and policy (2026-10-09) — read first
 - **Project closed 2026-10-09** (no tuning; only blockers get fixed), **reopened once 2026-10-10** for cloud stills (commissioned by Tariq).
 - **The pipeline is a draft generator.** Expect 2-5 beats per video to be wrong. The **timeline editor** (post-render editing, below)

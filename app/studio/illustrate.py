@@ -69,13 +69,59 @@ def shape_of(subject, text, ents):
     return None
 
 
-def options(sec, ents, moment=None, k=0):
-    """Every illustration / silhouette that fits this beat, best first: [{"type": "graphic", "g": ..., "rung", "tag"}]."""
+FIGHTER = (r"\b(f-?\d{1,3}[a-z]?s?|fighters?(\s+jets?)?|fighter\s+jets?|warplanes?|combat\s+(jets?|aircraft)|stealth\s+(jets?|fighters?)|"
+           r"mig-?\d+s?|su-?\d{2}s?|eurofighters?|rafales?|gripens?|interceptors?|military\s+jets?|air\s+force\s+jets?)\b")
+AIRLINER = r"\b(airliners?|jetliners?|passenger\s+(jets?|planes?)|boeing|airbus|7[2-8]7(-\d+)?|[ab]3\d\d(neo)?|embraer|bombardier|airlines?)\b"
+SCRAMBLE = r"\b(scrambl\w*|launch\w*|intercept\w*|took off|taking off|take-?off|sent up|dispatch\w*|escort\w*)\b"
+
+
+def _subject_type(subject):
+    if (subject or {}).get("kind") != "aircraft": return None
+    return "fighter" if re.search(MILITARY, subject.get("name", ""), re.I) else "airliner"
+
+
+def aircraft_for(sec, pos=None):
+    """Which aircraft this slot draws: {"type": "fighter" | "airliner", "count", "attitude" (or None = the beat's)} or None.
+    A beat can name two aircraft ("the jet ... scrambled F-35 fighters"): the beat's subject is one, the narration names another.
+    pos = (slot index, slots in the beat): slot i of n plays during the i-th n-th of the narration, so it draws the aircraft named
+    in that part (a fighter mention there wins: it is the specific new picture). pos None: the subject, else the first aircraft named."""
+    vo = sec.get("vo", ""); sub = _subject_type(sec.get("subject"))
+    ments = [(m.start(), "fighter", m.group(0)) for m in re.finditer(FIGHTER, vo, re.I)]
+    ments += [(m.start(), "airliner", m.group(0)) for m in re.finditer(AIRLINER, vo, re.I)
+              if not any(abs(m.start() - p) < 3 for p, _, _ in ments)]
+    if sub:   # "the jet", "the plane", "cockpit" with no type: the beat's own aircraft
+        ments += [(m.start(), sub, m.group(0)) for m in re.finditer(AIRCRAFT, vo, re.I)
+                  if not any(abs(m.start() - p) < 6 for p, _, _ in ments)]
+    ments.sort()
+    if not ments: return {"type": sub, "count": 1, "attitude": None} if sub else None
+    if pos is None or not pos[1]:
+        typ = sub or ments[0][1]
+        pick = next((m for m in ments if m[1] == typ), None)
+    else:
+        i, n = pos; L = max(1, len(vo)); lo, hi = L * i / n, L * (i + 1) / n
+        inside = [m for m in ments if lo <= m[0] < hi]
+        pick = (next((m for m in inside if m[1] == "fighter"), None) or (inside[0] if inside else None)
+                or min(ments, key=lambda m: min(abs(m[0] - lo), abs(m[0] - hi))))
+        typ = pick[1]
+    if not pick: return {"type": typ, "count": 1, "attitude": None}
+    # the clause around the mention decides plural and attitude (a scramble climbs), not the whole beat
+    a = max(vo.rfind(c, 0, pick[0]) for c in ".;,!?") + 1; b = min([x for x in (vo.find(c, pick[0]) for c in ".;!?") if x >= 0] or [len(vo)])
+    clause = vo[a:b]
+    plural = bool(re.search(r"(s|\bjets|\bfighters|\bwarplanes)$", pick[2], re.I)) or bool(re.search(r"\b(two|pair|several|squadron|jets|fighters|warplanes|f-?\d{1,3}s)\b", clause, re.I))
+    att = "climb" if typ == "fighter" and re.search(SCRAMBLE, clause, re.I) else None
+    return {"type": typ, "count": 2 if typ == "fighter" and plural else 1, "attitude": att}
+
+
+def options(sec, ents, moment=None, k=0, pos=None):
+    """Every illustration / silhouette that fits this beat, best first: [{"type": "graphic", "g": ..., "rung", "tag"}].
+    pos = (slot index, slots in the beat), for the aircraft that part of the narration names (aircraft_for)."""
     vo = sec.get("vo", ""); look = vo + " " + (sec.get("still_prompt") or "")
     subject = sec.get("subject")
     aero = (subject or {}).get("kind") == "aircraft" or bool(re.search(AIRCRAFT, look, re.I))
     ph = (coherence.phase(vo) if moment is None else moment) if aero else ""   # flight phases only mean something in an aviation beat
+    ac = aircraft_for(sec, pos) if aero else None
     tod, att, gr = time_of_day(look), (attitude(vo, ph) if aero else "level"), ground(look)
+    if ac and ac.get("attitude"): att = ac["attitude"]
     seed = 3 + int(re.sub(r"\D", "", sec.get("id", "0")) or 0) * 7 + k
     scenes = [name for name, rx in SCENES if re.search(rx, vo, re.I)]
     if (subject or {}).get("interior") and "cockpit" not in scenes: scenes.insert(0, "cockpit")
@@ -91,8 +137,12 @@ def options(sec, ents, moment=None, k=0):
         g = {"kind": "illustration", "scene": s, "time": tod, "attitude": "landing" if s == "airport" and ph == "landing" else att,
              "ground": gr, "seed": seed}
         if s == "cockpit": g["alarm"] = bool(re.search(r"\b(alarm\w*|warning|emergency|fight\w*|fought|struggl\w*|hijack\w*|attack\w*)\b", vo, re.I))
+        if ac and s in ("sky", "airport"): g["aircraft"] = ac["type"]; g["count"] = ac["count"]
         out.append({"type": "graphic", "g": g, "rung": "illustration", "tag": "ILLUSTRATION"})
+    if ac and ac["type"] == "fighter":   # a fighter slot: the fighter in the sky first (a cockpit / radar scene would hide it)
+        out.sort(key=lambda o: o["g"].get("scene") != "sky")
     sh = shape_of(subject, vo, ents)
+    if ac and sh in ("airliner", "jet"): sh = "jet" if ac["type"] == "fighter" else "airliner"
     if sh:
         # a black shape needs a light sky behind it: night and day become dusk. No text: the beat's own graphics carry the words.
         out.append({"type": "graphic", "g": {"kind": "silhouette", "shape": sh, "time": "storm" if tod == "storm" else "dusk",
@@ -101,9 +151,20 @@ def options(sec, ents, moment=None, k=0):
     return out
 
 
-def pick(sec, ents, moment=None, k=0):
+def variants(sec, ents, moment=None):
+    """For the review menu: the beat's options for every aircraft it names (a beat with the airliner and the scrambled fighters
+    offers both), duplicates removed."""
+    out, seen = [], set()
+    for pos in (None, (0, 4), (1, 4), (2, 4), (3, 4)):
+        for o in options(sec, ents, moment, 0, pos):
+            g = o["g"]; key = (g["kind"], g.get("scene"), g.get("shape"), g.get("aircraft"))
+            if key not in seen: seen.add(key); out.append(o)
+    return out
+
+
+def pick(sec, ents, moment=None, k=0, pos=None):
     """The k-th option for slot k of this beat (cycling), or None when nothing fits."""
-    opts = options(sec, ents, moment, k)
+    opts = options(sec, ents, moment, k, pos)
     return opts[k % len(opts)] if opts else None
 
 

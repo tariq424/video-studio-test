@@ -102,8 +102,8 @@ def _cheap_cands(rv, sec, job, phases, cfg=None):
     if bd.get("kind") == "map": _add(rv, bid, {"type": "graphic", "g": bd}, "map", True, "the route / places in this beat")
     ef = Path(job) / "entities.json"; ents = json.loads(ef.read_text(encoding="utf-8")) if ef.exists() else []
     from . import illustrate
-    for it in illustrate.options(sec, ents, phases.get(bid)):   # flat illustration / silhouette: free, CPU only
-        g = it["g"]; what = f"flat {g['scene']} illustration" if g["kind"] == "illustration" else f"{g['shape']} silhouette against the sky"
+    for it in illustrate.variants(sec, ents, phases.get(bid)):   # flat illustration / silhouette (each aircraft named): free, CPU only
+        g = it["g"]; what = f"flat {g['scene']} illustration" + (f" ({g['aircraft']})" if g.get("aircraft") else "") if g["kind"] == "illustration" else f"{g['shape']} silhouette against the sky"
         _add(rv, bid, {"type": "graphic", "g": g, "tag": it["tag"]}, it["rung"], True, what)
     if sec.get("subject") and not (cfg or {}).get("ladder_v2"):
         cap = bd.get("text", "") if bd.get("kind") == "headline" else bd.get("title", "")

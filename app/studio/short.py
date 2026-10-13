@@ -408,12 +408,12 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                               "rung": "parallax", "cloud": cloud})
             elif v2:
                 if not nowan: why.append(f"still: {r.get('still_why') or 'not made'}"); failed.append("still")
-                it = _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill, log)
+                it = _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill, log, pos=(len(items), needs[s["id"]]))
                 if it.get("rung") in ("illustration", "silhouette"): kill += 1
                 items.append(it)
             else:
                 if not nowan: why.append(f"still: {r.get('still_why') or 'not made'}"); failed.append("still")
-                ill = illustrate.pick(s, ents, phases.get(s["id"], ""), k5 + kill)
+                ill = illustrate.pick(s, ents, phases.get(s["id"], ""), k5 + kill, pos=(len(items), needs[s["id"]]))
                 if ill:   # a flat illustration / silhouette looks like a design choice; claymation only when nothing fits
                     chain.append(ill["rung"]); items.append(ill); kill += 1
                 elif s.get("subject"):
@@ -472,7 +472,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         if dbg: save_out(); dbg.point(info(s))
     save_out()
 
-def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill, log):
+def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill, log, pos=None):
     """Visual ladder v2, rungs 5-10 for one slot whose cloud / WanGP still didn't pass. -> the bg item. Appends to chain / why /
     failed. vb carries per-beat state: graphics and physics run once per beat (a second slot of the same beat goes on down)."""
     from . import graphics, physics, capcut, illustrate
@@ -504,7 +504,7 @@ def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill,
     if r.get("still") and "unavailable" in sw:   # 8. parallax: a still the check couldn't judge (never one rejected for its content)
         chain.append("parallax"); lay = depth_free(sd / r["still"], sd / "fallback" / f"{sl['key']}_p8")
         return {"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED · PARALLAX", "rung": "parallax"}
-    ill = illustrate.pick(s, ents, phases.get(s["id"], ""), kill)   # 9. illustration / silhouette
+    ill = illustrate.pick(s, ents, phases.get(s["id"], ""), kill, pos=pos)   # 9. illustration / silhouette (aircraft by slot position)
     if ill: chain.append(ill["rung"]); return ill
     chain.append("headline")   # 10. headline card
     return {"type": "graphic", "g": bd if bd.get("kind") == "headline" else {"kind": "headline", "kicker": "", "text": s["vo"][:70], "sub": ""}, "rung": "headline"}
