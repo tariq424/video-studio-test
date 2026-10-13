@@ -77,6 +77,9 @@ by itself), ship_route (vessel + voyage words), else None. Attempts / hypothetic
   - Fix (Phase 2 job 20261013_100822): a beat whose action sits outside every generated slot's slice (map backdrop = slot 0, so slot
     1 of 3 reads the middle third and missed "dropped" in the first) got no simulation. Now the first slot to reach the physics rung
     uses the beat-level action when no slot slice has one (non-events are filtered, so the F-35 slot is unaffected).
+  - Fighters named -> fighter drawing first (Phase 2): the explainer's F-35 shots (s3_2 / s3_3) became GRAPHICS "abstract" text
+    cards, because graphics runs before illustration. Now a slot / visual whose own narration names fighters (illustrate.FIGHTER)
+    gets the fighter illustration before graphics (Shorts: `_v2_rungs`; explainers: `v2_after_wangp`).
   - Rung 6 (physics after graphics) now also uses the slot's action, not the whole beat: whole-beat matching ("tried to crash the
     jet") had put the flydubai simulation over "...scrambled F-35s" (caught in the sandbox test before shipping).
   - aircraft_flight fixes: a descent with no stated end altitude no longer defaults to 0 ft (it looked like a crash); spelled-out

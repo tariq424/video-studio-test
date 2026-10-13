@@ -220,6 +220,11 @@ def v2_after_wangp(cfg, job, v, vo, log):
         if g6:
             v["type"] = "motion"; v["g"] = g6; v["tag"] = "SIMULATION"; log(f"  {v['id']}: simulation ({amod}, action: {verb})"); return "simulation"
         log(f"  {v['id']}: simulation {amod} had no usable data")
+    from . import illustrate
+    ac = illustrate.aircraft_for(sec)
+    if ac and ac["type"] == "fighter" and re.search(illustrate.FIGHTER, vo, re.I):   # fighters named: draw them, not a text card
+        rung = illustration_still(cfg, job, v, vo, log)
+        if rung: return rung
     try: g5 = graphics.make(cfg, _ws(job), sec, v["id"], log, tag="GRAPHICS")
     except Exception as e: g5 = {"ok": False, "why": f"crash ({str(e)[:100]})"}
     if g5.get("ok"):

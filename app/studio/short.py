@@ -497,6 +497,11 @@ def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill,
         chain.append(f"simulation ({amod}, action: {verb})")
         if g6: vb["pok"] = True; return {"type": "graphic", "g": g6, "tag": "SIMULATION", "rung": "simulation"}
         why.append(f"simulation: {amod} had no usable data"); failed.append("simulation")
+    ac = illustrate.aircraft_for(s, pos)
+    if ac and ac["type"] == "fighter" and re.search(illustrate.FIGHTER, physics.slot_text(s.get("vo", ""), pos), re.I):
+        # the slot's narration names fighters ("scrambled F-35s"): the fighter drawing IS the specific picture; a text card isn't
+        ill = illustrate.pick(s, ents, phases.get(s["id"], ""), kill, pos=pos)
+        if ill and ill["g"].get("aircraft") == "fighter": chain.append(f"{ill['rung']} (fighters named)"); return ill
     if not vb["g"]:   # 5. Remotion graphics (template, else Claude-generated)
         vb["g"] = True
         try: g5 = graphics.make(cfg, sd, s, sl["key"], log)
