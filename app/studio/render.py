@@ -215,7 +215,8 @@ def v2_after_wangp(cfg, job, v, vo, log):
     sec["subject"] = v.get("subject")
     verb, amod = physics.action(sec) if cfg.get("physics_auto", True) else ("", None)
     if amod:   # action (2026-10-13): the module that animates it before graphics
-        g6 = physics.run(amod, physics.fill(cfg, amod, sec, log), cfg)
+        from . import liveries
+        g6 = physics.run(amod, physics.fill(cfg, amod, {**sec, "_story": liveries.story_text(_ents(job))}, log), cfg)
         if g6:
             v["type"] = "motion"; v["g"] = g6; v["tag"] = "SIMULATION"; log(f"  {v['id']}: simulation ({amod}, action: {verb})"); return "simulation"
         log(f"  {v['id']}: simulation {amod} had no usable data")

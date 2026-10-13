@@ -45,10 +45,17 @@ AIRLINES = {
 }
 
 
-def pick(text):
-    """-> {"key", ...colours} for the airline named in text (narration + subject name), or None (generic airliner)."""
-    t = text or ""
-    for key, lv in AIRLINES.items():
-        if re.search(r"\b(" + lv["names"] + r")", t, re.I):
-            return {"key": key, **{k: v for k, v in lv.items() if k != "names"}}
+def pick(*texts):
+    """-> {"key", ...colours} for the airline named in the first text that names one, or None (generic airliner).
+    Callers pass, in order: the narration, the beat's subject (name + brand), the story's entities - so "the aircraft dropped" in
+    a flydubai story is drawn as flydubai, while a beat that names another airline gets that one."""
+    for t in texts:
+        for key, lv in AIRLINES.items():
+            if re.search(r"\b(" + lv["names"] + r")", t or "", re.I):
+                return {"key": key, **{k: v for k, v in lv.items() if k != "names"}}
     return None
+
+
+def story_text(ents):
+    """The story's named things (coherence entities) as one string for pick()'s last fallback."""
+    return " ".join(f"{e.get('name', '')} {e.get('brand', '')}" for e in (ents or []) if isinstance(e, dict))

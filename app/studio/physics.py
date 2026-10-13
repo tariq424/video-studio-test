@@ -282,7 +282,8 @@ def action(sec, text=None):
     animate it (aircraft_flight / submarine_descent / weather_event / ship_route), or None (no module fits)."""
     vo = text if text is not None else sec.get("vo", "")
     m = next((x for x in re.finditer(ACTION, vo, re.I)   # "tried to crash", "nearly sank", "could explode": not an action that happened
-              if not re.search(r"\b(tried|attempt\w*|threaten\w*|nearly|almost|would|could|might|may|plan\w*|want\w*|feared|risk\w*)( to)?\s+(\w+\s+)?$",
+              if not re.search(r"\b(tried|attempt\w*|threaten\w*|nearly|almost|would|could|might|may|plan\w*|want\w*|feared|risk\w*|"
+                               r"thought|believed|expected|stopped|prevent\w*|avert\w*|avoid\w*|no)( to)?\s+(\w+\s+)?$",
                                vo[max(0, x.start() - 30):x.start()], re.I)), None)
     mod = route({**sec, "vo": vo})
     if mod == "aircraft_flight" and not m: mod = None   # "feet" / "altitude" talk alone isn't an action to animate
@@ -323,10 +324,16 @@ def fill(cfg, mod, sec, log):
     p = _fill(cfg, mod, sec, log)
     if mod == "aircraft_flight":
         from . import liveries
-        p["livery"] = liveries.pick(sec.get("vo", "") + " " + str((sec.get("subject") or {}).get("name", "")))
-        if not p.get("drop_ft") and not p.get("start_alt_ft"):   # no model: "descended 15,000 / fifteen thousand feet" from the narration
-            ft = _feet(sec.get("vo", ""))
-            if ft: p["drop_ft"] = ft
+        sj = sec.get("subject") or {}
+        p["livery"] = liveries.pick(sec.get("vo", ""), f"{sj.get('name', '')} {sj.get('brand', '')}", sec.get("_story", ""))
+        if not p.get("drop_ft") and not p.get("start_alt_ft"):   # no model: "from 30,000 feet to 15,000 feet" / "descended 15,000 feet"
+            vo = sec.get("vo", "")
+            m = re.search(r"\bfrom\b(.{1,60}?\b(?:feet|ft))\s+(?:down |up )?to\b(.{1,60}?\b(?:feet|ft))", vo, re.I)
+            a, b = (_feet(m.group(1)), _feet(m.group(2))) if m else (None, None)
+            if a and b is not None: p["start_alt_ft"], p["end_alt_ft"] = a, b
+            else:
+                ft = _feet(vo)
+                if ft: p["drop_ft"] = ft
     return p
 
 

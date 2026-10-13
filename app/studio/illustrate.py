@@ -89,9 +89,9 @@ def aircraft_for(sec, pos=None):
     ments = [(m.start(), "fighter", m.group(0)) for m in re.finditer(FIGHTER, vo, re.I)]
     ments += [(m.start(), "airliner", m.group(0)) for m in re.finditer(AIRLINER, vo, re.I)
               if not any(abs(m.start() - p) < 3 for p, _, _ in ments)]
-    if sub:   # "the jet", "the plane", "cockpit" with no type: the beat's own aircraft
-        ments += [(m.start(), sub, m.group(0)) for m in re.finditer(AIRCRAFT, vo, re.I)
-                  if not any(abs(m.start() - p) < 6 for p, _, _ in ments)]
+    # "the jet", "the plane", "the aircraft" with no type: the beat's own aircraft, or an airliner (fighters are always named)
+    ments += [(m.start(), sub or "airliner", m.group(0)) for m in re.finditer(AIRCRAFT, vo, re.I)
+              if not re.match(r"cockpit", m.group(0), re.I) and not any(abs(m.start() - p) < 6 for p, _, _ in ments)]
     ments.sort()
     if not ments: return {"type": sub, "count": 1, "attitude": None} if sub else None
     if pos is None or not pos[1]:
@@ -141,7 +141,7 @@ def options(sec, ents, moment=None, k=0, pos=None):
             g["aircraft"] = ac["type"]; g["count"] = ac["count"]
             if ac["type"] == "airliner":   # the airline the beat names / is about wears its livery (liveries.py)
                 from . import liveries
-                lv = liveries.pick(vo + " " + str((subject or {}).get("name", "")))
+                lv = liveries.pick(vo, f"{(subject or {}).get('name', '')} {(subject or {}).get('brand', '')}", liveries.story_text(ents))
                 if lv: g["livery"] = lv
         out.append({"type": "graphic", "g": g, "rung": "illustration", "tag": "ILLUSTRATION"})
     if ac and ac["type"] == "fighter":   # a fighter slot: the fighter in the sky first (a cockpit / radar scene would hide it)

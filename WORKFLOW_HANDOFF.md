@@ -86,6 +86,11 @@ tail split blue / orange, orange engines and winglets; also Emirates, Qatar, El 
 Delta, Southwest, Turkish, Air India (colour / tail approximations, no logos or text). `physics.fill` attaches it to aircraft_flight;
 flat illustrations of an airliner wear it too (`illustrate.options`). No airline named -> the generic airliner.
 `remotion/src/Aircraft.tsx` (LiveryAirliner) draws it for both. Add an airline: one entry in AIRLINES.
+Fixes from smoke job 20261013_081424: the Short's script tagged the descent beats with the subject "Cockpit" (brand flydubai), so
+the simulation drew the generic jet. `liveries.pick(*texts)` now tries the narration, then the subject's name + brand, then the
+story's entities (`story_text(ents)`): "the aircraft dropped" in a flydubai story is drawn as flydubai. A generic "plane / jet /
+aircraft" with no aircraft subject is an airliner (fighters are always named). Actions that didn't happen don't count ("stopped
+the crash", "thought a crash was imminent"). No-model fallback reads "from 30,000 feet to 15,000 feet" as start / end.
 
 ## Audience, script length gate, timeline scrubber (2026-10-13)
 **Audience (per job, both Shorts and explainers).** Job form "Audience" (next to Narration): Settings default / Common / Informed /

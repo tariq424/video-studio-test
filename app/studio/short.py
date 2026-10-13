@@ -482,7 +482,8 @@ def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill,
     verb, amod = physics.action(s, physics.slot_text(s.get("vo", ""), pos)) if cfg.get("physics_auto", True) else ("", None)
     if amod and not vb["p"]:   # action beat (item 5, 2026-10-13): the matching physics module before graphics - it shows the action itself
         vb["p"] = True
-        g6 = physics.run(amod, physics.fill(cfg, amod, s, log), cfg)
+        from . import liveries
+        g6 = physics.run(amod, physics.fill(cfg, amod, {**s, "_story": liveries.story_text(ents)}, log), cfg)
         chain.append(f"simulation ({amod}, action: {verb})")
         if g6: vb["pok"] = True; return {"type": "graphic", "g": g6, "tag": "SIMULATION", "rung": "simulation"}
         why.append(f"simulation: {amod} had no usable data"); failed.append("simulation")
@@ -500,7 +501,8 @@ def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill,
         vb["p"] = True                                   # (whole-beat matching drew the beat's airliner over "...scrambled F-35s")
         mod = amod
         if mod:
-            g6 = physics.run(mod, physics.fill(cfg, mod, s, log), cfg)
+            from . import liveries
+            g6 = physics.run(mod, physics.fill(cfg, mod, {**s, "_story": liveries.story_text(ents)}, log), cfg)
             chain.append(f"simulation ({mod})")
             if g6: vb["pok"] = True; return {"type": "graphic", "g": g6, "tag": "SIMULATION", "rung": "simulation"}
             why.append(f"simulation: {mod} had no usable data"); failed.append("simulation")
