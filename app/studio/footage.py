@@ -508,6 +508,9 @@ def long_broll(job, plan, cfg, log, stop):
                     v["stock"] = str(out.relative_to(job)).replace("\\", "/"); v["stock_src"] = pc["src"]; v["credit"] = photos.credit(pc)
                     used.add(pc["id"]); n += 1; continue
                 except Exception as e: log(f"  photo clip for {v['id']} failed ({str(e)[:100]})")
+            if cfg.get("ladder_v2"):   # v2 has no 3D reconstruction (no generic spinning shapes): graphics -> physics -> illustration -> headline
+                from . import render
+                v["v2"] = render.v2_after_wangp(cfg, job, v, render.vo_slice(plan, s, v), log); n += 1; continue
             g = coherence.recon(v["subject"], ents, s["vo"], i, moment=phases.get(s["id"], ""))
             out = d / "recon" / f"{v['id']}.mp4"
             if g.get("kind") == "headline":   # no 3D model for this kind of subject (e.g. a fighter jet): a drawn card
@@ -523,9 +526,14 @@ def long_broll(job, plan, cfg, log, stop):
                 out = d / "cards" / f"{v['id']}.mp4"
                 photos.headline_clip(text, v["subject"]["name"][:30], out, 9.0)   # if even this fails the job stops: no AI fallback
                 v["stock"] = str(out.relative_to(job)).replace("\\", "/"); v["stock_src"] = "headline"; n += 1
+        v2n = {}
+        for _, v in miss:
+            if v.get("v2"): v2n[v["v2"]] = v2n.get(v["v2"], 0) + 1
         log(f"  locked shots without footage: {sum(1 for _, v in miss if v.get('credit'))} real photo(s), "
-            f"{sum(1 for _, v in miss if v.get('stock_src') == 'reconstruction')} 3D reconstruction(s), "
+            + (f"ladder v2: {', '.join(f'{k} {c}' for k, c in v2n.items())}, " if v2n else "")
+            + f"{sum(1 for _, v in miss if v.get('stock_src') == 'reconstruction')} 3D reconstruction(s), "
             f"{sum(1 for _, v in miss if v.get('stock_src') == 'headline')} headline card(s)")
-    bad = [v["id"] for _, v in vis if v.get("subject") and not v.get("stock")]
+    bad = [v["id"] for _, v in vis if v.get("subject") and not v.get("stock") and not v.get("v2")]
     if bad: raise RuntimeError(f"subject-locked shots {', '.join(bad[:5])} have no visual; refusing to let the AI image model draw them")
-    log(f"B-roll: {n} of {len(vis)} AI visuals replaced with real footage or reconstructions; {len(vis) - n} will be AI-rendered")
+    log(f"B-roll: {n} of {len(vis)} AI visuals replaced with real footage, " + ("v2 graphics / illustrations" if cfg.get("ladder_v2") else "reconstructions")
+        + f"; {len(vis) - n} will be AI-rendered")

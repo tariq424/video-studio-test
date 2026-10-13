@@ -191,6 +191,19 @@ def _ws(job):
     (ws / "space.json").write_text(json.dumps({"orient": "landscape", "still_res": "1920x1088", "i2v_res": "1280x720", "w": 1920, "h": 1080}), encoding="utf-8")
     return ws
 
+def vo_slice(plan, s, v, pad=6):
+    """The narration this visual plays over: explainer visuals get equal time slots across the section (explainer._bounds; the
+    first section's slot 0 is the title card), so visual i of n covers about the i-th n-th of the words, padded a few words
+    each side for context. Gives each visual its own graphic / illustration instead of n copies of one for the whole section."""
+    words = s.get("vo", "").split()
+    vis = list(s.get("visuals") or []); first = bool(plan.get("sections")) and plan["sections"][0] is s
+    try: i = vis.index(v)
+    except ValueError: return s.get("vo", "")
+    n = len(vis) + (1 if first else 0); i += 1 if first else 0
+    if not words or n <= 1: return s.get("vo", "")
+    a, b = int(len(words) * i / n), int(len(words) * (i + 1) / n)
+    return " ".join(words[max(0, a - pad):min(len(words), b + pad)])
+
 def v2_after_wangp(cfg, job, v, vo, log):
     """Visual ladder v2 for an explainer visual that the cloud and WanGP didn't cover (WanGP draws atmospheric beats only):
     5 Remotion graphics (motion/<id>.mp4, GRAPHICS burned in) -> 6 physics module (drawn live by the explainer, SIMULATION) ->
@@ -219,7 +232,7 @@ def do_motion(job, plan, cfg, wg, log, stop):
     d = job / "motion"; d.mkdir(exist_ok=True); seed = 3000
     for s in plan["sections"]:
         for v in s["visuals"]:
-            if v["type"] != "motion" or v.get("stock"): continue
+            if v["type"] != "motion" or v.get("stock") or v.get("g") or v.get("v2"): continue   # g / v2: drawn live or decided in B-roll
             seed += 1; out = d / f"{v['id']}.mp4"
             if media.ok(out): continue
             if (job / "stills" / f"{v['id']}.jpg").exists() or cloud_still(cfg, job, v, s.get("vo", ""), log):   # cloud still

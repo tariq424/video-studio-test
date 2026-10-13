@@ -62,6 +62,16 @@ v2 order per beat (Shorts: `short.do_fallback` -> `short._v2_rungs`; explainers:
   VectCutAPI, set `capcut_api_dir`, `"capcut_fallback": true`; first run with CapCut open and watch it. (3) Optional AIS:
   `pip install websocket-client`, `aisstream_api_key` (free at aisstream.io; stored in the vault).
 
+## Explainer B-roll under ladder v2: no 3D reconstruction (2026-10-13)
+- **Why:** overnight job 20261013_002153 (v2 on) still got 18 reconstructions in the explainer: B-roll (`footage.long_broll`) gives
+  subject-locked shots real photos, else `coherence.recon` - 12 of them the generic "object" scene (an icosahedron on a pedestal
+  labelled RTL-SDR / HURRICANE RACHEL / FLOCK SAFETY ALPR CAMERA), and s5 replayed the same 3 clips 8 times. v2 had removed
+  reconstruction from Shorts and explainer stills/motion, not from B-roll.
+- **Fix:** with `ladder_v2`, a locked shot with no real photo goes to `render.v2_after_wangp` (graphics -> physics -> illustration /
+  silhouette -> headline card) instead of a reconstruction, with `render.vo_slice()` - the words its slot plays over (visual i of n
+  ~ the i-th n-th of the section, +6 words context) - so each visual gets its own graphic, not n copies of one for the section.
+  Marked `v["v2"]`; `do_motion` skips decided visuals. v1 unchanged.
+
 ## Aircraft type in illustrations (2026-10-13)
 - **Why:** smoke job 20261012_192051, beat b1 ("...tried to crash the jet. Netanyahu scrambled F-35 fighters...") drew a diving
   passenger jet over the F-35 line. Chain: `photo -> illustration (WanGP skipped: aircraft beat)`. Graphics (rung 5) runs once per beat
