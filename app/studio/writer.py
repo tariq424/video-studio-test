@@ -75,8 +75,11 @@ Chart specs (object in "chart"), one of:
  {{"kind":"quote","text":"short paraphrased key claim","who":"speaker name"}}
 Chart numbers must come from the points; if a chart shows an illustrative shape, put "Illustrative" in its note. Keep chart text short.
 
+COVERAGE: if you have used every point above and more words would only be padding or repetition, stop short of the word count
+and set "covered": true. Otherwise write the full word count and set "covered": false. Never pad.
+
 Reply with ONLY JSON:
-{{"vo":"the narration","visuals":[{{"type":"still","prompt":"..."}},{{"type":"chart","chart":{{...}}}},{{"type":"motion","prompt":"..."}}]}}"""
+{{"vo":"the narration","covered":false,"visuals":[{{"type":"still","prompt":"..."}},{{"type":"chart","chart":{{...}}}},{{"type":"motion","prompt":"..."}}]}}"""
 
 
 FACTCHECK = """You are the fact-checker and copy editor for an explainer video that condenses "{title}" by {channel}.
@@ -232,6 +235,7 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
                 if not isinstance(j.get("vo"), str): raise ValueError("narration missing")
                 if not j.get("visuals"): raise ValueError("no visuals")
                 n = _nw(j["vo"]); tries.append((abs(n - s["words"]), j))
+                if j.get("covered") is True and n >= s["words"] * COVER_FLOOR: return   # thin topic: the AI says it's all covered - don't pad
                 if n < s["words"] * LEN_LO: raise ValueError(f"narration is {n} words but must be {s['words']} words (+/-10%); expand it with more of the section's points, examples and context")
                 if n > s["words"] * LEN_HI: raise ValueError(f"narration is {n} words but must be {s['words']} words (+/-10%); cut the weakest sentences")
             log(f"  section {k}/{len(secs)}: {s['title']}")
@@ -253,7 +257,9 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
                 for v in vis:
                     if v.get("type") == "motion": v["type"] = "still"
             motion_left -= sum(1 for v in vis if v.get("type") == "motion")
-            plan["sections"].append({"title": s["title"], "vo": j["vo"], "visuals": vis})
+            cov = j.get("covered") is True and _nw(j["vo"]) < s["words"] * LEN_LO
+            if cov: log(f"  section {k}: points fully covered at {_nw(j['vo'])} of {s['words']} words; kept short (no padding)")
+            plan["sections"].append({"title": s["title"], "vo": j["vo"], "visuals": vis, **({"covered": True} if cov else {})})
         plan = normalize(plan)
         fit_length(llm, plan, secs, words, cfg, log, stop)
         log("Checking the script against the transcript (names, attributions, claims)...")
@@ -267,6 +273,8 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
 
 LEN_LO, LEN_HI = 0.9, 1.1   # per-section band (explainer); the whole script must land within +/-TOTAL_TOL of its target
 TOTAL_TOL = 0.06
+COVER_FLOOR = 0.6   # "covered": the script AI says the section's points are used up -> accepted down to 60% of its budget
+                    # (below that it's a shortfall, not a thin topic) and never expanded by fit_length
 
 RESIZE = """Rewrite this narration for section "{stitle}" of an explainer video to EXACTLY {words} words (count them; +/-8%).
 It is {n} words now. {how}
@@ -291,7 +299,8 @@ def fit_length(llm, plan, secs, words, cfg, log, stop=None):
     while abs(tot() - words) > words * TOTAL_TOL and len(done) < len(plan["sections"]):
         if stop and stop(): raise RuntimeError("stopped")
         short = tot() < words
-        cand = [(i, (b["words"] - _nw(x["vo"])) / b["words"]) for i, (x, b) in enumerate(zip(plan["sections"], secs)) if i not in done]
+        cand = [(i, (b["words"] - _nw(x["vo"])) / b["words"]) for i, (x, b) in enumerate(zip(plan["sections"], secs))
+                if i not in done and not (short and x.get("covered"))]   # a covered (thin) section is never padded
         cand = [c for c in cand if (c[1] > 0) == short and abs(c[1]) > 0.04] or [c for c in cand if (c[1] > 0) == short]
         if not cand: break
         i = max(cand, key=lambda c: abs(c[1]))[0]; done.add(i)
@@ -300,7 +309,7 @@ def fit_length(llm, plan, secs, words, cfg, log, stop=None):
             if not isinstance(j.get("vo"), str): raise ValueError("narration missing")
             m = _nw(j["vo"]); tries.append((abs(m - b["words"]), j["vo"]))
             if not 0.92 * b["words"] <= m <= 1.08 * b["words"]: raise ValueError(f"narration is {m} words but must be {b['words']} (+/-8%)")
-        how = ("Expand it with more detail, examples and context from the facts below." if n < b["words"]
+        how = ("Expand it with more detail, examples and context from the facts below (only real content from them, never padding)." if n < b["words"]
                else "Shorten it: cut the weakest sentences and any repetition.")
         try: new = llm.chat_json(SYSTEM, RESIZE.format(stitle=x["title"], words=b["words"], n=n, how=how, points="\n".join("- " + p for p in b.get("points", [])),
                                                        audience=audience_line(cfg), vo=x["vo"]), max_tokens=3000, check=chk)["vo"]
@@ -312,7 +321,11 @@ def fit_length(llm, plan, secs, words, cfg, log, stop=None):
             if len(x["visuals"]) > want: x["visuals"] = x["visuals"][:want]
             log(f"  length: section {i + 1} {n} -> {_nw(x['vo'])} words (budget {b['words']}); script now {tot()} of {words}")
     w = tot()
-    if abs(w - words) > words * TOTAL_TOL: log(f"  length: script is {w} words, {100 * (w - words) / words:+.0f}% off the {words}-word target after the length pass")
+    thin = [i + 1 for i, x in enumerate(plan["sections"]) if x.get("covered")]
+    if w < words * (1 - TOTAL_TOL) and thin:
+        log(f"  length: script is {w} words, {100 * (w - words) / words:+.0f}% of the {words}-word target: section(s) {', '.join(map(str, thin))} "
+            f"cover all their source points (thin topic, not padded)")
+    elif abs(w - words) > words * TOTAL_TOL: log(f"  length: script is {w} words, {100 * (w - words) / words:+.0f}% off the {words}-word target after the length pass")
     else: log(f"  length: {w} words, within {TOTAL_TOL:.0%} of the {words}-word target")
     return plan
 

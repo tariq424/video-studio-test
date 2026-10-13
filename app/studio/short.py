@@ -5,7 +5,7 @@ from pathlib import Path
 import requests
 from . import config, media, tts
 from .llm import LLM, parse_json
-from .writer import SYSTEM, make_notes, fact_check, audience_line
+from .writer import SYSTEM, make_notes, fact_check, audience_line, COVER_FLOOR
 
 GAP, TAIL, MAX_SECS = 0.35, 2.2, 176.0   # YouTube Shorts allow up to 180 s; keep a margin
 SMOKE_WORDS = 58   # smoke-test Short: 2 beats of narration (the model runs ~10% long); with the ~12-word closing line about 75 words (~30 s)
@@ -72,12 +72,14 @@ For each beat also give:
   and colours only (e.g. "a white single-aisle passenger jet with a plain dark blue tail, descending steeply through clouds").
 - "motion": 8-15 words for animating that image for 7 seconds: what moves and how the camera moves
   (e.g. "the jet banks and descends through clouds, camera tracks alongside"). Slow, physically plausible motion.
+COVERAGE: if the notes run out of substantive points before {words} words, stop there and set "covered": true (a shorter Short
+beats padding); otherwise write the full length and set "covered": false.
 Also give "title" (max 60 chars, YouTube title), "tag" (max 28 chars, small label shown at the top, e.g. "MOONSHOTS #293 · CONDENSED"),
 "description" (2-3 sentences for YouTube that credit {channel} and the original), and "source_spoken": how a narrator would
 name the source in a sentence, e.g. "the Moonshots podcast, episode two ninety-three" or "a NotebookLM briefing on battery recycling".
 
 Reply with ONLY JSON:
-{{"title":"...","tag":"...","description":"...","source_spoken":"...","beats":[{{"vo":"...","graphics":[{{"at":null,"g":{{...}}}},{{"at":"word","g":{{...}}}}],"queries":["...","..."],"subject":null,"backdrop":{{...}},"still_prompt":"...","motion":"..."}}]}}"""
+{{"title":"...","tag":"...","description":"...","source_spoken":"...","covered":false,"beats":[{{"vo":"...","graphics":[{{"at":null,"g":{{...}}}},{{"at":"word","g":{{...}}}}],"queries":["...","..."],"subject":null,"backdrop":{{...}},"still_prompt":"...","motion":"..."}}]}}"""
 
 def _log_none(m): pass
 
@@ -148,6 +150,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                 if not isinstance(x.get("vo"), str) or not x.get("queries"): raise ValueError("beat missing vo or queries")
             n = sum(len(x["vo"].split()) for x in b)
             tries.append((abs(n - words), j))
+            if j.get("covered") is True and n >= words * COVER_FLOOR: return   # the notes are used up: shorter, not padded
             if n < words * lo: raise ValueError(f"narration is {n} words in total but must be about {words}; add detail from the notes")
             if n > words * hi: raise ValueError(f"narration is {n} words in total but must be at most {int(words * 1.05)}; cut weaker points")
         prompt = SHORT.format(secs=int(secs), words=words, title=title, channel=channel, notes=notes[:24000], nb=nb, audience=audience_line(cfg),
@@ -160,6 +163,8 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             else:
                 log("  no usable script after 3 tries; asking once more without the length check")
                 j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=lambda x: None if x.get("beats") else (_ for _ in ()).throw(ValueError("no beats")))
+        nw0 = sum(len(x["vo"].split()) for x in j["beats"])
+        if j.get("covered") is True and nw0 < words * lo: log(f"  the AI says the source is fully covered at {nw0} of {words} words; kept short (no padding)")
         if smoke: j["beats"] = j["beats"][:2]   # a smoke test stays ~30 s even if the length check gave up
         else:   # hard cut: still more than 10% long -> drop whole middle beats (keep the hook and the payoff)
             while len(j["beats"]) > minb and sum(len(x["vo"].split()) for x in j["beats"]) > words * 1.1:

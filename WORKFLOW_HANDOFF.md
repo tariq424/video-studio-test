@@ -113,6 +113,15 @@ Fix (picked: measure and correct, the Short's pattern; not a looser target, whic
   Sandbox-tested with a fake model (20% short -> within 6% in 8 calls; 18% long -> +4.5%; a model that never complies -> unchanged + warning).
   Not changed: the word target still uses settings `wpm` (155; Kokoro measured ~150 on the overnight explainer).
   Not tested on the PC yet: the next real explainer is the test.
+  **Refinement (2026-10-13): don't pad thin topics.** The section prompt (and the Short prompt) ask the script AI for
+  `"covered": true` when it has used every point and more words would only be padding. Two cases:
+    - "AI wrote short" (not flagged): as before - +/-10% check, closest of 3 kept, then fit_length expands it toward its budget.
+    - "topic is thin" (flagged): accepted down to `COVER_FLOOR` = 60% of the budget (below that it's a shortfall, retried as usual),
+      marked `"covered"` in the plan, and fit_length never expands it (it may still trim a long section). Log: `section k: points
+      fully covered at n of b words; kept short (no padding)`, and a short total says which sections are content-limited.
+  Shorts: the whole-script `"covered"` flag accepts down to 60% of the target words (`the AI says the source is fully covered ...`).
+  Choice: the floor stops "covered" from becoming an excuse for a lazy 30% section; the 85%-cap alternative was not used because
+  it would still pad a topic that has only 70% worth of material.
 
 **Timeline scrubber (job page, any finished job).** Panel above the edit bar: Video selector Short / Explainer (uses `edit/target`;
 the other button is disabled when the job has only one), range scrubber, a beat strip under it (click a beat to jump; title / end
