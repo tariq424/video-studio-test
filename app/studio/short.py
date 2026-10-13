@@ -485,6 +485,11 @@ def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill,
     failed. vb carries per-beat state: graphics and physics run once per beat (a second slot of the same beat goes on down)."""
     from . import graphics, physics, capcut, illustrate
     verb, amod = physics.action(s, physics.slot_text(s.get("vo", ""), pos)) if cfg.get("physics_auto", True) else ("", None)
+    if not amod and not vb["p"] and cfg.get("physics_auto", True):
+        # the beat's action may sit in a part of the narration no generated slot covers (a map backdrop takes slot 0, so slot 1 of 3
+        # reads the middle third and misses "dropped" in the first): the first slot to get here animates the beat-level action.
+        # Non-events ("tried to crash") are already filtered by physics.action, so this can't put the beat's airliner over "...scrambled F-35s".
+        verb, amod = physics.action(s)
     if amod and not vb["p"]:   # action beat (item 5, 2026-10-13): the matching physics module before graphics - it shows the action itself
         vb["p"] = True
         from . import liveries
