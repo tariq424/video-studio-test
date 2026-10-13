@@ -277,7 +277,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
     Also writes short/fallback/chains.json (every beat's decision chain: stock found, what was tried and why it failed, what is used)
     for the debugger and the trace. dbg (debug.Debugger): safe points for 'Pause now'; with breakpoints on, beats run one at a time
     and each is checked after its visuals are decided (normal runs keep the batched GPU order)."""
-    from . import depth, coherence, photos, ladder, cloudgen, illustrate
+    from . import depth, coherence, photos, ladder, cloudgen, illustrate, physics
     v2 = bool(cfg.get("ladder_v2"))   # visual ladder v2 (graphics / physics / CapCut); off = the ladder below, unchanged
     sd = job / "short"; fd = sd / "fallback"; fd.mkdir(parents=True, exist_ok=True)
     tm = json.loads((sd / "timings.json").read_text(encoding="utf-8"))
@@ -322,7 +322,9 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         have = len(pick.get(s["id"], []))
         why1 = f"only {have} coherent stock clip(s)" if have else "no coherent stock"
         if s["id"] not in base_needs: why1 = ""   # stock covers this beat; the other treatments are made for the review menu
-        if s.get("subject"):   # step 1 for a subject beat: real licensed photos of it (FILE), only where a photo can show this moment
+        act = physics.action(s)[0] if v2 else ""   # v2: a beat describing an action is animated (physics / graphics / illustration), never a still
+        if s.get("subject") and act: why1 = f"action beat ({act}): a still photo can't show it"
+        elif s.get("subject"):   # step 1 for a subject beat: real licensed photos of it (FILE), only where a photo can show this moment
             inside = s["subject"].get("interior") or re.search(r"\b(cockpit|flight deck|pilots?|captain)\b", " ".join(s["queries"]), re.I)
             bp = phases.get(s["id"], ""); pics = []
             if inside: why1 = "inside the aircraft: no real photo of it"
@@ -351,7 +353,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         # covers, and never aircraft, vehicles, specific buildings or real people (it hallucinates their anatomy)
         locked = illustrate.wangp_lock(s, ents, phases.get(s["id"]))
         opts = illustrate.options(s, ents, phases.get(s["id"]))
-        wan_why = locked or ("an illustration fits" if opts and not v2 else "")   # v2: illustrations are rung 9, WanGP draws atmospheric beats
+        wan_why = locked or ("an illustration fits" if opts and not v2 else "") or (f"action beat ({act}): animation first" if act else "")   # v2: illustrations are rung 9, WanGP draws atmospheric beats
         for k in range(n - len(items)):
             slots.append({"key": f"{s['id']}_{k}", "beat": s["id"], "vo": s["vo"], "still_prompt": s.get("still_prompt", ""),
                           "motion": s.get("motion", ""), "subject": s.get("subject"), "rotate": rot,
@@ -477,6 +479,13 @@ def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill,
     """Visual ladder v2, rungs 5-10 for one slot whose cloud / WanGP still didn't pass. -> the bg item. Appends to chain / why /
     failed. vb carries per-beat state: graphics and physics run once per beat (a second slot of the same beat goes on down)."""
     from . import graphics, physics, capcut, illustrate
+    verb, amod = physics.action(s, physics.slot_text(s.get("vo", ""), pos)) if cfg.get("physics_auto", True) else ("", None)
+    if amod and not vb["p"]:   # action beat (item 5, 2026-10-13): the matching physics module before graphics - it shows the action itself
+        vb["p"] = True
+        g6 = physics.run(amod, physics.fill(cfg, amod, s, log), cfg)
+        chain.append(f"simulation ({amod}, action: {verb})")
+        if g6: vb["pok"] = True; return {"type": "graphic", "g": g6, "tag": "SIMULATION", "rung": "simulation"}
+        why.append(f"simulation: {amod} had no usable data"); failed.append("simulation")
     if not vb["g"]:   # 5. Remotion graphics (template, else Claude-generated)
         vb["g"] = True
         try: g5 = graphics.make(cfg, sd, s, sl["key"], log)
@@ -487,9 +496,9 @@ def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill,
             return {"type": "video", "src": _rel_sd(g5["path"], sd), "secs": secs, "rate": 1.0, "freeze": True, "textbg": True,
                     "tag": "GRAPHICS", "rung": "graphics"}
         chain.append("graphics"); why.append(f"graphics: {g5['why']}"); failed.append("graphics"); vb["hard"] = bool(g5.get("hard"))
-    if cfg.get("physics_auto", True) and not vb["p"]:   # 6. physics module, only when the subject matches one
-        vb["p"] = True
-        mod = physics.route(s)
+    if cfg.get("physics_auto", True) and not vb["p"]:   # 6. physics module, only when THIS slot's narration has an action it can show
+        vb["p"] = True                                   # (whole-beat matching drew the beat's airliner over "...scrambled F-35s")
+        mod = amod
         if mod:
             g6 = physics.run(mod, physics.fill(cfg, mod, s, log), cfg)
             chain.append(f"simulation ({mod})")

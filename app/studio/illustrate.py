@@ -137,7 +137,12 @@ def options(sec, ents, moment=None, k=0, pos=None):
         g = {"kind": "illustration", "scene": s, "time": tod, "attitude": "landing" if s == "airport" and ph == "landing" else att,
              "ground": gr, "seed": seed}
         if s == "cockpit": g["alarm"] = bool(re.search(r"\b(alarm\w*|warning|emergency|fight\w*|fought|struggl\w*|hijack\w*|attack\w*)\b", vo, re.I))
-        if ac and s in ("sky", "airport"): g["aircraft"] = ac["type"]; g["count"] = ac["count"]
+        if ac and s in ("sky", "airport"):
+            g["aircraft"] = ac["type"]; g["count"] = ac["count"]
+            if ac["type"] == "airliner":   # the airline the beat names / is about wears its livery (liveries.py)
+                from . import liveries
+                lv = liveries.pick(vo + " " + str((subject or {}).get("name", "")))
+                if lv: g["livery"] = lv
         out.append({"type": "graphic", "g": g, "rung": "illustration", "tag": "ILLUSTRATION"})
     if ac and ac["type"] == "fighter":   # a fighter slot: the fighter in the sky first (a cockpit / radar scene would hide it)
         out.sort(key=lambda o: o["g"].get("scene") != "sky")

@@ -499,7 +499,12 @@ def long_broll(job, plan, cfg, log, stop):
                 try: pics[nm] = photos.find(cfg, v["subject"], d / "photos", log, want=10)
                 except Exception as e: log(f"  photo search failed ({str(e)[:100]})"); pics[nm] = []
             bp = phases.get(s["id"], "")
-            pc = None if v["subject"].get("interior") or bp == "air" else \
+            act = ""
+            if cfg.get("ladder_v2"):   # an action shot ("the jet descended...") is animated, never a zoom-pan of a photo
+                from . import physics, render
+                act = physics.action({"vo": "", "subject": v["subject"]}, render.vo_slice(plan, s, v))[0]
+                if act: log(f"  {v['id']}: action ({act}): no still photo, animation first")
+            pc = None if act or v["subject"].get("interior") or bp == "air" else \
                  next((p for p in pics[nm] if p["id"] not in used and coherence.phase_ok(bp, p.get("phase"))), None)
             if pc:   # a real, openly licensed photo of the subject, slowly zoomed/panned
                 out = d / "photo_clips" / f"{v['id']}.mp4"; out.parent.mkdir(exist_ok=True)

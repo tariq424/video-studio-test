@@ -62,6 +62,31 @@ v2 order per beat (Shorts: `short.do_fallback` -> `short._v2_rungs`; explainers:
   VectCutAPI, set `capcut_api_dir`, `"capcut_fallback": true`; first run with CapCut open and watch it. (3) Optional AIS:
   `pip install websocket-client`, `aisstream_api_key` (free at aisstream.io; stored in the vault).
 
+## Action beats animated first + airline liveries (2026-10-13)
+**Action coherence (ladder v2, Shorts and explainers).** `physics.action(sec, text)` -> (verb, module): a physical action verb
+(descend / dive / plunge / drop / climb / take off / crash / sink / implode / explode / swerve / roll / bank / capsize / collide ...)
+in THE SLOT'S OWN narration (`physics.slot_text`, slot i of n ~ the i-th n-th of the words; explainers: `render.vo_slice`) ->
+module: aircraft_flight (aircraft + action), submarine_descent (sub + depth / sink), weather_event (storm words: a track is motion
+by itself), ship_route (vessel + voyage words), else None. Attempts / hypotheticals don't count ("tried to crash", "nearly sank",
+"could explode"); "feet" / "altitude" talk without an action verb doesn't either.
+  - Shorts: an action beat skips the real-photo rung and the WanGP still ("action beat (descended): a still photo can't show it");
+    in `_v2_rungs` the matching module runs FIRST (before graphics), once per beat; other slots go graphics -> illustration
+    (animated: the aircraft at the verb's attitude) -> headline. No module -> graphics / animated illustration, never a still.
+  - Explainers: B-roll skips the Ken Burns photo for an action shot; stills / motion treat an action visual like a WanGP-locked one;
+    `v2_after_wangp` runs the module first.
+  - Rung 6 (physics after graphics) now also uses the slot's action, not the whole beat: whole-beat matching ("tried to crash the
+    jet") had put the flydubai simulation over "...scrambled F-35s" (caught in the sandbox test before shipping).
+  - aircraft_flight fixes: a descent with no stated end altitude no longer defaults to 0 ft (it looked like a crash); spelled-out
+    altitudes ("fifteen thousand feet") parse without a model; take-off starts / crash ends at 0 only when the narration says so.
+  - Sim.tsx aircraft_flight: side-view airliner riding the altitude curve (nose follows the curve, pitch capped at 28 deg) + an
+    altimeter dial (hundreds / thousands / ten-thousands needles + drum) driven by the simulated altitude every frame.
+**Airline liveries.** `studio/liveries.py`: one entry per airline (body, belly, cheatline, tail colours + tail design: solid / split
+/ band / arc / flag, engines, winglets), matched by name in narration + subject. flydubai: white body, blue belly, orange cheatline,
+tail split blue / orange, orange engines and winglets; also Emirates, Qatar, El Al, Ryanair, easyJet, Lufthansa, United, American,
+Delta, Southwest, Turkish, Air India (colour / tail approximations, no logos or text). `physics.fill` attaches it to aircraft_flight;
+flat illustrations of an airliner wear it too (`illustrate.options`). No airline named -> the generic airliner.
+`remotion/src/Aircraft.tsx` (LiveryAirliner) draws it for both. Add an airline: one entry in AIRLINES.
+
 ## Audience, script length gate, timeline scrubber (2026-10-13)
 **Audience (per job, both Shorts and explainers).** Job form "Audience" (next to Narration): Settings default / Common / Informed /
 Expert -> state `audience`; global default `"audience": "common"` in settings.json. The only pipeline change is one line in the

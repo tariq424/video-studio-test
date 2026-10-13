@@ -212,15 +212,22 @@ def v2_after_wangp(cfg, job, v, vo, log):
     from . import graphics, physics
     sec = {"id": v["id"], "vo": vo, "still_prompt": v.get("prompt", ""), "visuals": [x for x in [v.get("chart") and {"chart": v["chart"]}] if x]}
     md = job / "motion"; md.mkdir(exist_ok=True)
+    sec["subject"] = v.get("subject")
+    verb, amod = physics.action(sec) if cfg.get("physics_auto", True) else ("", None)
+    if amod:   # action (2026-10-13): the module that animates it before graphics
+        g6 = physics.run(amod, physics.fill(cfg, amod, sec, log), cfg)
+        if g6:
+            v["type"] = "motion"; v["g"] = g6; v["tag"] = "SIMULATION"; log(f"  {v['id']}: simulation ({amod}, action: {verb})"); return "simulation"
+        log(f"  {v['id']}: simulation {amod} had no usable data")
     try: g5 = graphics.make(cfg, _ws(job), sec, v["id"], log, tag="GRAPHICS")
     except Exception as e: g5 = {"ok": False, "why": f"crash ({str(e)[:100]})"}
     if g5.get("ok"):
         shutil.copy(g5["path"], md / f"{v['id']}.mp4"); v["type"] = "motion"; v["graphics"] = g5.get("how"); v.pop("g", None)
         log(f"  {v['id']}: graphics ({g5.get('how')})"); return "graphics"
     log(f"  {v['id']}: graphics failed ({str(g5.get('why'))[:100]})")
-    if cfg.get("physics_auto", True):
-        mod = physics.route(sec)
-        g6 = physics.run(mod, physics.fill(cfg, mod, sec, log), cfg) if mod else None
+    if cfg.get("physics_auto", True) and not amod:   # (amod was already tried above; no other module fits this visual's narration)
+        mod = None
+        g6 = None
         if g6:
             v["type"] = "motion"; v["g"] = g6; v["tag"] = "SIMULATION"; log(f"  {v['id']}: simulation ({mod})"); return "simulation"
     rung = illustration_still(cfg, job, v, vo, log)
@@ -239,8 +246,11 @@ def do_motion(job, plan, cfg, wg, log, stop):
                 v["type"] = "still"; log(f"Motion {v['id']}: cloud still instead of WanGP motion"); continue
             if cfg.get("ladder_v2"):   # v2: WanGP motion only for atmospheric beats; everything else goes down the v2 ladder
                 from . import illustrate
-                lock = illustrate.wangp_lock({"id": v["id"], "vo": s.get("vo", ""), "still_prompt": v.get("prompt", "")}, _ents(job))
-                if lock: v2_after_wangp(cfg, job, v, s.get("vo", ""), log); continue
+                vs = vo_slice(plan, s, v)
+                from . import physics
+                lock = illustrate.wangp_lock({"id": v["id"], "vo": s.get("vo", ""), "still_prompt": v.get("prompt", "")}, _ents(job)) \
+                    or ("action" if physics.action({"vo": vs, "subject": v.get("subject")})[0] else "")
+                if lock: v2_after_wangp(cfg, job, v, vs, log); continue
             elif illustration_still(cfg, job, v, s.get("vo", ""), log): continue   # animated illustration clip (motion/<id>.mp4)
             ok = False
             for t in range(2):
@@ -259,7 +269,7 @@ def do_motion(job, plan, cfg, wg, log, stop):
 
 def do_stills(job, plan, cfg, wg, log, stop):
     d = job / "stills"; d.mkdir(exist_ok=True); seed = 1000; n = 0
-    todo = [(v, s.get("vo", "")) for s in plan["sections"] for v in s["visuals"] if v["type"] == "still" and not v.get("stock")]
+    todo = [(v, vo_slice(plan, s, v) if cfg.get("ladder_v2") else s.get("vo", "")) for s in plan["sections"] for v in s["visuals"] if v["type"] == "still" and not v.get("stock")]
     from .pipeline import progress
     for i, (v, vo) in enumerate(todo):
         progress(job, i + 1, len(todo))
@@ -270,6 +280,8 @@ def do_stills(job, plan, cfg, wg, log, stop):
         if cfg.get("ladder_v2"):   # v2: WanGP still for atmospheric beats, then graphics -> physics -> illustration -> headline
             from . import illustrate
             lock = illustrate.wangp_lock({"id": v["id"], "vo": vo, "still_prompt": v.get("prompt", "")}, _ents(job))
+            from . import physics
+            if not lock and physics.action({"vo": vo, "subject": v.get("subject")})[0]: lock = "action"   # animate an action, no still
             if lock or not wg.alive() or not _still(cfg, wg, log, v["prompt"], out, seed, stop, f"still {v['id']}"):
                 v2_after_wangp(cfg, job, v, vo, log)
             n += 1; continue

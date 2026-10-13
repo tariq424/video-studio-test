@@ -39,12 +39,13 @@ def _down(series, n=240):
 
 def aircraft_flight(p):
     drop = float(p.get("drop_ft") or 0); assumed = ""
-    start = float(p.get("start_alt_ft") or 0); end = float(p.get("end_alt_ft") or 0)
+    start = float(p.get("start_alt_ft") or 0)
+    end = None if p.get("end_alt_ft") in (None, "") else float(p["end_alt_ft"])   # 0 only when given (a crash / landing)
     if drop:   # "lost 12,000 feet": the narration often gives the drop, not the altitudes
-        if start and not end: end = start - drop
-        elif end and not start: start = end + drop
+        if start and end is None: end = start - drop
+        elif end is not None and not start: start = end + drop
         elif not start: start = 35000.0; end = start - drop; assumed = "start assumed at a 35,000 ft cruise; "
-    start = start or 35000.0; end = end if end or end == 0 else 10000.0
+    start = start or 35000.0; end = end if end is not None else 10000.0
     dur = float(p.get("descent_secs") or 0)
     rate = float(p.get("rate_fpm") or 0)   # feet per minute
     if not dur: dur = abs(start - end) / (rate or 6000) * 60
@@ -58,7 +59,7 @@ def aircraft_flight(p):
         else: alt = end
         series.append([round(t, 2), round(alt)]); t += step
     fpm = abs(start - end) / dur * 60 if dur else 0
-    return {"title": p.get("title") or "Altitude", "unit": "ft", "series": _down(series), "icon": "plane",
+    return {"title": p.get("title") or "Altitude", "unit": "ft", "series": _down(series), "icon": "plane", "livery": p.get("livery"),
             "label": p.get("label") or f"{start:,.0f} ft -> {end:,.0f} ft in {dur:.0f} s", "notes": f"{assumed}average {'descent' if end < start else 'climb'} {fpm:,.0f} ft/min",
             "marks": [{"t": cruise, "text": "descent begins"}, {"t": cruise + dur, "text": "levels off"}]}
 
@@ -245,7 +246,7 @@ def _not_built(name):
 
 
 MODULES = {
-    "aircraft_flight": (aircraft_flight, "plane altitude / descent / climb profile. params: drop_ft (feet lost, when the narration says 'lost/dropped N feet'), start_alt_ft and end_alt_ft (only altitudes the narration states), descent_secs (how long it took), rate_fpm, title, label"),
+    "aircraft_flight": (aircraft_flight, "plane altitude / descent / climb profile. params: drop_ft (feet lost, when the narration says 'lost/dropped/descended N feet'), start_alt_ft and end_alt_ft (only altitudes the narration states; a take-off starts at 0, a crash ends at 0), descent_secs (how long it took), rate_fpm, title (2-4 words, e.g. 'Sudden descent'), label"),
     "submarine_descent": (submarine_descent, "submarine dive to depth with pressure. params: max_depth_m, sink_mps, crush_depth_m, title, label"),
     "vehicle_crash": (_not_built("vehicle_crash"), "car crash (not built yet)"),
     "structural_collapse": (_not_built("structural_collapse"), "building collapse (not built yet)"),
@@ -258,11 +259,42 @@ MODULES = {
 ROUTES = [
     ("weather_event", r"\b(hurricanes?|typhoons?|cyclones?|tropical (storm|depression)s?|storm surge|landfall|eye ?wall)\b", None),
     ("submarine_descent", r"\b(submarines?|submersibles?|sub)\b", r"\b(depth|deep|feet|metres?|meters?|dive|dived|descen\w*|sank|sinking|implo\w*|crush\w*)\b"),
-    ("aircraft_flight", None, r"\b(feet|altitude|descen\w*|dropp?\w*|plung\w*|dive|diving|climb\w*|lost height|nosedive\w*)\b"),
+    ("aircraft_flight", None, r"\b(feet|altitude|descen\w*|dropp?\w*|plung\w*|plummet\w*|dive|dove|diving|climb\w*|lost height|nosedive\w*|"
+                              r"took off|taking off|takes? off|crash(ed|es|ing)?)\b"),
     ("ship_route", r"\b(ships?|vessels?|tankers?|freighters?|cargo ship|container ship|bulk carrier|ferr(y|ies)|warships?|frigates?|destroyers?|"
                    r"aircraft carriers?|cruise ships?|supertankers?|LNG carrier)\b", r"\b(sail\w*|route|voyage|strait|canal|port|harbou?r|bound for|"
                    r"heading|en route|diverted|transit\w*|crossed|shipping lane|seized|hijack\w*|anchored|docked)\b"),
 ]
+
+
+# ---------------------------------------------------------------- action beats (ladder v2: animation before stills)
+# A beat that describes an ACTION (something moving / changing) must be shown moving: a still photo of the subject with a slow zoom
+# contradicts "the plane plunged 15,000 feet". action(sec) -> (verb, module or None). The verb list is deliberately physical;
+# "the market crashed" has no aircraft / vessel and gets no module (it still counts as action: graphics / animated illustration).
+ACTION = (r"\b(descen(d|ds|ded|ding|t)|dove|dive[ds]?|diving|nose-?div\w*|plung\w*|plummet\w*|dropp(ed|ing)|fell|falling|"
+          r"climb(ed|s|ing)?|took off|takes? off|taking off|lift(ed)? off|crash(ed|es|ing)?|sank|sinks?|sinking|implod\w*|"
+          r"explod\w*|blew up|swerv\w*|roll(ed|ing)|bank(ed|ing)|veer\w*|spiral\w*|lost (altitude|height|\d[\d,]* feet)|"
+          r"capsiz\w*|collid\w*|slammed|tumbl\w*)\b")
+
+
+def action(sec, text=None):
+    """-> (verb, module) for a beat whose narration describes an action, else ("", None). module: the physics module that can
+    animate it (aircraft_flight / submarine_descent / weather_event / ship_route), or None (no module fits)."""
+    vo = text if text is not None else sec.get("vo", "")
+    m = next((x for x in re.finditer(ACTION, vo, re.I)   # "tried to crash", "nearly sank", "could explode": not an action that happened
+              if not re.search(r"\b(tried|attempt\w*|threaten\w*|nearly|almost|would|could|might|may|plan\w*|want\w*|feared|risk\w*)( to)?\s+(\w+\s+)?$",
+                               vo[max(0, x.start() - 30):x.start()], re.I)), None)
+    mod = route({**sec, "vo": vo})
+    if mod == "aircraft_flight" and not m: mod = None   # "feet" / "altitude" talk alone isn't an action to animate
+    if not m and mod not in ("weather_event", "ship_route"): return "", None   # a storm track / voyage is motion by itself
+    return (m.group(0) if m else mod), mod
+
+
+def slot_text(vo, pos, pad=6):
+    """The words visual slot i of n plays over (slots split the narration about evenly), +pad words of context; pos None -> all."""
+    if not pos or not pos[1] or pos[1] <= 1: return vo
+    w = vo.split(); i, n = pos; a, b = int(len(w) * i / n), int(len(w) * (i + 1) / n)
+    return " ".join(w[max(0, a - pad):min(len(w), b + pad)])
 
 
 def route(sec):
@@ -286,7 +318,37 @@ Leave out anything not given. Numbers as plain numbers. Reply with ONLY JSON: {{
 
 
 def fill(cfg, mod, sec, log):
-    """Parameters for module `mod` from the narration: one small JSON call (script provider); regex defaults without a model."""
+    """Parameters for module `mod` from the narration: one small JSON call (script provider); regex defaults without a model.
+    aircraft_flight also gets the airline livery the narration / subject names (liveries.pick; None = generic airliner)."""
+    p = _fill(cfg, mod, sec, log)
+    if mod == "aircraft_flight":
+        from . import liveries
+        p["livery"] = liveries.pick(sec.get("vo", "") + " " + str((sec.get("subject") or {}).get("name", "")))
+        if not p.get("drop_ft") and not p.get("start_alt_ft"):   # no model: "descended 15,000 / fifteen thousand feet" from the narration
+            ft = _feet(sec.get("vo", ""))
+            if ft: p["drop_ft"] = ft
+    return p
+
+
+_NUM = {w: i for i, w in enumerate("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
+                                       "sixteen seventeen eighteen nineteen".split())}
+_NUM.update({w: 10 * (i + 2) for i, w in enumerate("twenty thirty forty fifty sixty seventy eighty ninety".split())})
+
+def _feet(vo):
+    """First "N feet" in the narration, digits or words ("fifteen thousand feet", "twelve thousand five hundred feet") -> float."""
+    m = re.search(r"([\d,]{3,7})\s*(feet|ft)\b", vo, re.I)
+    if m: return float(m.group(1).replace(",", ""))
+    m = re.search(r"((?:(?:%s|hundred|thousand|and)[\s-]+)+)(feet|ft)\b" % "|".join(_NUM), vo, re.I)
+    if not m: return None
+    total = cur = 0
+    for w in re.split(r"[\s-]+", m.group(1).lower().strip()):
+        if w in _NUM: cur += _NUM[w]
+        elif w == "hundred": cur *= 100
+        elif w == "thousand": total += cur * 1000; cur = 0
+    return float(total + cur) or None
+
+
+def _fill(cfg, mod, sec, log):
     from .llm import LLM
     c = dict(cfg)
     if c.get("script_provider") == "claude" and not c.get("anthropic_api_key"): c["script_provider"] = "deepseek" if c.get("deepseek_api_key") else "local"

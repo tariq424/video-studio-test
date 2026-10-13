@@ -4,6 +4,7 @@
 import React from "react";
 import { AbsoluteFill, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
 import { HEAD } from "./theme";
+import { LiveryAirliner, Livery } from "./Aircraft";
 
 export type Illustration = {
   kind: "illustration";
@@ -14,6 +15,7 @@ export type Illustration = {
   alarm?: boolean;
   aircraft?: "airliner" | "fighter";   // which aircraft the sky / airport scene draws (illustrate.aircraft_for); default airliner
   count?: number;                       // fighters: 2 = a pair in formation (lead + wingman)
+  livery?: Livery | null;               // airliner in an airline's simplified livery (liveries.py); none = the generic flat airliner
   seed?: number;
 };
 export type Silhouette = {
@@ -179,7 +181,7 @@ export const IllustrationBackdrop: React.FC<{ g: Illustration; dur: number }> = 
       <path d={`M0,${H * 0.9} C${W * 0.3},${H * 0.86} ${W * 0.7},${H * 0.93} ${W},${H * 0.88} L${W},${H} L0,${H} Z`} fill="#000" opacity={0.18} /></g>
       <g transform={cam(1.2)}>
         {pair ? <g transform={`translate(${W / 2 - 200 * k + dx - 70 * k},${H * 0.42 + dy - (tall ? 0 : H * 0.06) + 135 * k}) scale(${k * 0.78}) rotate(${ang} 200 60)`}><Fighter f={f + 7} burner={burner} night={time === "night"} /></g> : null}
-        <g transform={`translate(${W / 2 - 200 * k + dx},${H * 0.42 + dy - (pair && !tall ? H * 0.06 : 0)}) scale(${k}) rotate(${ang} 200 60) translate(0,${60 * (1 - sy)}) scale(1,${sy})`}>{fighter ? <Fighter f={f} burner={burner} night={time === "night"} /> : <Airliner flat night={time === "night"} f={f} />}</g></g>
+        <g transform={`translate(${W / 2 - 200 * k + dx},${H * 0.42 + dy - (pair && !tall ? H * 0.06 : 0)}) scale(${k}) rotate(${ang} 200 60) translate(0,${60 * (1 - sy)}) scale(1,${sy})`}>{fighter ? <Fighter f={f} burner={burner} night={time === "night"} /> : g.livery ? <LiveryAirliner lv={g.livery} night={time === "night"} f={f} id={`il${seed}`} /> : <Airliner flat night={time === "night"} f={f} />}</g></g>
       {time === "storm" && Math.floor(t * 2.3) % 7 === 3 ? <rect width={W} height={H} fill="#fff" opacity={0.18} /> : null}
     </>);
   } else if (g.scene === "airport") {
@@ -202,7 +204,7 @@ export const IllustrationBackdrop: React.FC<{ g: Illustration; dur: number }> = 
         return <path key={i} d={`M${W * 0.5 - 2 - a * 10},${y1} L${W * 0.5 + 2 + a * 10},${y1} L${W * 0.5 + 2 + b * 10},${y2} L${W * 0.5 - 2 - b * 10},${y2} Z`} fill="#f1f1ea" />; })}
       {Array.from({ length: 10 }, (_, i) => { const a = (i + 1) / 11, y = hz + (H - hz) * a * a, on = Math.floor(f / 10 + i) % 10 === 0;
         return <g key={i}><circle cx={W * 0.44 - a * W * 0.54} cy={y} r={3 + a * 6} fill={on ? "#fff" : "#ffcf6b"} /><circle cx={W * 0.56 + a * W * 0.54} cy={y} r={3 + a * 6} fill={on ? "#fff" : "#ffcf6b"} /></g>; })}
-      <g transform={cam(1.2)}><g transform={`translate(${px},${py}) scale(${k}) rotate(${landing ? -4 : 0} 200 60)`}>{fighter ? <Fighter f={f} gear night={time === "night"} /> : <Airliner flat gear night={time === "night"} f={f} />}</g></g>
+      <g transform={cam(1.2)}><g transform={`translate(${px},${py}) scale(${k}) rotate(${landing ? -4 : 0} 200 60)`}>{fighter ? <Fighter f={f} gear night={time === "night"} /> : g.livery ? <LiveryAirliner lv={g.livery} gear night={time === "night"} f={f} id={`ia${seed}`} /> : <Airliner flat gear night={time === "night"} f={f} />}</g></g>
     </>);
   } else if (g.scene === "city") {
     const base = H * (tall ? 0.78 : 0.82);
