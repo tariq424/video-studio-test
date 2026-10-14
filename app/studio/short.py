@@ -7,7 +7,8 @@ from . import config, media, tts
 from .llm import LLM, parse_json
 from .writer import SYSTEM, make_notes, fact_check, audience_line, audience_key, log_audience, jargon_check, COVER_FLOOR
 
-GAP, TAIL, MAX_SECS = 0.35, 2.2, 176.0   # YouTube Shorts allow up to 180 s; keep a margin
+GAP, TAIL, MAX_SECS = 0.35, 2.2, 179.0   # YouTube Shorts allow up to 180 s (the hard maximum; a second of margin)
+SHORT_MAX = 180.0   # length policy (2026-10-14): target the requested length, accept anything up to 3:00, trim only beyond it
 SMOKE_WORDS = 58   # smoke-test Short: 2 beats of narration (the model runs ~10% long); with the ~12-word closing line about 75 words (~30 s)
 KINDS = {"hook", "quote", "stat", "compare", "icons", "timeline"}
 
@@ -20,8 +21,9 @@ People in the source (use these full names and spellings; captions often mishear
 NOTES ON THE SOURCE (use only these facts):
 {notes}
 
-Write {nb} beats that tell one story. Each beat is 30-48 words (about 11-17 seconds spoken). The total must be {words} words (+/- 5%);
-YouTube Shorts are cut off at 3 minutes, so do not go over.
+Write {nb} beats that tell one story. Each beat is 30-48 words (about 11-17 seconds spoken). Aim for about {words} words in total.
+That is a target, not a cap: going over is fine when the audience needs a term explained - never cut an explanation to hit it.
+Hard limit: {wmax} words (YouTube Shorts are cut off at 3 minutes). If the notes run out sooner, stop sooner; never pad.
 - Beat 1 is the hook: one short line framing what this is (who is talking, about what), then the most surprising claim or number,
   in plain words (no jargon in the first sentence). No greetings, no "in this video".
 - Tell events in the order they happened. Once the story has moved on (e.g. the plane has landed), don't go back to an earlier
@@ -135,6 +137,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
     wpm = tts.wpm(cfg)
     # target = narration + a pause after each beat + the end tail + the closing line (~16 words); size the story to fill the rest
     words = int((secs - TAIL - GAP * 9 - 16 / wpm * 60) * wpm / 60)
+    wmax = int((SHORT_MAX - TAIL - GAP * 9 - 16 / wpm * 60) * wpm / 60)   # what still fits in 3:00
     nb = max(7, min(12, round(words / 38)))
     minb, lo, hi = 6, 0.95, 1.05
     if smoke: words, nb, minb, lo, hi = SMOKE_WORDS, 2, 2, 0.8, 1.2   # smoke test: ~75 words in all with the closing line (~30 s spoken)
@@ -143,7 +146,6 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
         llm.trace_dir = Path(srcdir).parent / "prompts"
         log(f"Writing the Short with {llm.name} (~{secs:.0f}s, {words} words, {nb} beats)...")
         log_audience(cfg, log)
-        if audience_key(cfg) == "common" and not smoke: hi = 1.12   # room for the plain-language explainers
         notes = make_notes(llm, meta, transcript, max(words, 1500), log, stop, srcdir)
         tries = []   # every parsed attempt, so a near miss can be kept instead of an unchecked re-ask
         def chk(j):
@@ -153,10 +155,12 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                 if not isinstance(x.get("vo"), str) or not x.get("queries"): raise ValueError("beat missing vo or queries")
             n = sum(len(x["vo"].split()) for x in b)
             tries.append((abs(n - words), j))
-            if j.get("covered") is True and n >= words * COVER_FLOOR: return   # the notes are used up: shorter, not padded
-            if n < words * lo: raise ValueError(f"narration is {n} words in total but must be about {words}; add detail from the notes")
-            if n > words * hi: raise ValueError(f"narration is {n} words in total but must be at most {int(words * hi)}; cut weaker points (keep the short explanations of terms)")
-        prompt = SHORT.format(secs=int(secs), words=words, title=title, channel=channel, notes=notes[:24000], nb=nb, audience=audience_line(cfg),
+            if smoke:   # the smoke test keeps its tight ~30 s band
+                if n < words * lo: raise ValueError(f"narration is {n} words in total but must be about {words}; add detail from the notes")
+                if n > words * hi: raise ValueError(f"narration is {n} words in total but must be at most {int(words * hi)}")
+            elif n > wmax: raise ValueError(f"narration is {n} words in total; the hard limit is {wmax} (YouTube's 3:00): cut the weakest point, keep the explanations of terms")
+            # shorter than the target, or longer but within 3:00: accepted as written (no padding, no trimming)
+        prompt = SHORT.format(secs=int(secs), words=words, wmax=wmax if not smoke else int(words * hi), title=title, channel=channel, notes=notes[:24000], nb=nb, audience=audience_line(cfg),
                               people=(meta.get("description") or "")[:1200] or "(see notes)")
         try: j = llm.trace("short script").chat_json(SYSTEM, prompt, max_tokens=8000, check=chk)
         except RuntimeError:
@@ -168,9 +172,10 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                 j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=lambda x: None if x.get("beats") else (_ for _ in ()).throw(ValueError("no beats")))
         nw0 = sum(len(x["vo"].split()) for x in j["beats"])
         if j.get("covered") is True and nw0 < words * lo: log(f"  the AI says the source is fully covered at {nw0} of {words} words; kept short (no padding)")
+        if not smoke: log(f"  script: {nw0} words (target {words}, hard limit {wmax} = 3:00){'; over the target, accepted' if nw0 > words * 1.05 else ''}")
         if smoke: j["beats"] = j["beats"][:2]   # a smoke test stays ~30 s even if the length check gave up
         else:   # hard cut: still more than 10% long -> drop whole middle beats (keep the hook and the payoff)
-            while len(j["beats"]) > minb and sum(len(x["vo"].split()) for x in j["beats"]) > words * (hi + 0.05):
+            while len(j["beats"]) > minb and sum(len(x["vo"].split()) for x in j["beats"]) > wmax:
                 cut = j["beats"].pop(-2); log(f"  script too long; dropped a middle beat ({len(cut['vo'].split())} words)")
         plan = {"target_secs": float(secs), "title": (j.get("title") or title)[:90], "tag": (j.get("tag") or "CONDENSED")[:32].upper(),
                 "source_spoken": (j.get("source_spoken") or title)[:120],
@@ -205,11 +210,11 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
         if nl: log(f"  {nl} beat(s) locked to a story subject")
     plan = verify_quotes(plan, transcript, log)
     if not smoke:   # the fact-check can lengthen the script after it passed the length check: cut again (render pace covers the last few %)
-        while len(plan["sections"]) > minb and sum(len(x["vo"].split()) for x in plan["sections"]) > words * 1.06:
-            cut = plan["sections"].pop(-2); log(f"  script grew in the fact-check; dropped a middle beat ({len(cut['vo'].split())} words)")
+        while len(plan["sections"]) > minb and sum(len(x["vo"].split()) for x in plan["sections"]) > wmax:   # only past 3:00
+            cut = plan["sections"].pop(-2); log(f"  script grew past the 3:00 limit in the fact-check; dropped a middle beat ({len(cut['vo'].split())} words)")
         for i, x in enumerate(plan["sections"]): x["id"], x["title"] = f"b{i}", f"Beat {i + 1}"
     n = sum(len(x["vo"].split()) for x in plan["sections"])
-    if n > words * 1.12: log(f"  NOTE: script is {n} words (target {words}); trim it in review or it will be sped up to fit {f'{secs:.0f} s' if secs < 60 else f'{int(secs) // 60}:{int(secs) % 60:02d}'}")
+    if not smoke and n > wmax: log(f"  NOTE: script is {n} words (target {words}); past the 3:00 limit; it will be sped up to fit")
     # closing call-to-action beat
     src_name = plan.get("source_spoken") or title
     if mode == "both":
@@ -691,9 +696,8 @@ def build(job, plan, cfg, log):
     raw_total = sum(tm[s["id"]]["dur"] + GAP for s in secs) - GAP + TAIL
     speed = 1.0
     tgt = plan.get("target_secs")
-    if tgt and abs(raw_total - tgt) > 3:   # land within a few seconds of the chosen length: nudge the narration pace, at most 7% either way
-        speed = max(0.93, min(1.07, raw_total / tgt))
-        log(f"  narration {raw_total:.0f}s vs target {tgt:.0f}s; pace x{speed:.3f} -> {raw_total / speed:.0f}s")
+    if tgt and abs(raw_total - tgt) > 3:   # length policy (2026-10-14): the narration keeps its natural pace; only past 3:00 is it sped up
+        log(f"  narration {raw_total:.0f}s vs target {tgt:.0f}s; natural pace kept")
     if raw_total / speed > MAX_SECS:
         speed = raw_total / (MAX_SECS - 1)
         if speed > 1.12: log(f"  WARNING: narration is {raw_total:.0f}s; even sped up it would exceed 3 minutes. Shorten the script."); speed = 1.12

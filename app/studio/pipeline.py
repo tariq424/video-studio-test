@@ -23,10 +23,13 @@ def _length_check(j, out, target, what, log):
         if target <= 0: return
         off = (got - target) / target
         warns = [w for w in (j.state.get("length_warnings") or []) if not w.startswith(what + ":")]
-        if abs(off) > LENGTH_TOL:
-            w = f"{what}: {got:.0f}s vs {target:.0f}s requested ({off:+.0%})"
-            log(f"WARNING: length miss. {w}"); warns.append(w)
-        else: log(f"Length check: {what} {got:.0f}s vs {target:.0f}s requested ({off:+.0%}), OK")
+        # length policy (2026-10-14): shorter or longer than requested is fine; only a Short past 3:00 or an explainer past the
+        # sanity ceiling (25 min for 15, x1.67) is an anomaly
+        ceil = 180.0 if what == "Short" else target * 25 / 15
+        if got > ceil + 0.5:
+            w = f"{what}: {got:.0f}s vs {target:.0f}s requested ({off:+.0%}); over the {ceil:.0f}s maximum"
+            log(f"WARNING: length anomaly. {w}"); warns.append(w)
+        else: log(f"Length check: {what} {got:.0f}s vs {target:.0f}s requested ({off:+.0%}); within the {ceil:.0f}s maximum, OK")
         j.save(length_warnings=warns)
     except Exception as e: log(f"  length check skipped ({str(e)[:120]})")
 

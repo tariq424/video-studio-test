@@ -864,3 +864,12 @@ Back to the old behaviour: pick "Auto" on the form, or `"visual_review_default":
 - /make: visuals "never" is a third mode and the default; "never pause", "decide everything", "no stops", "end to end",
   "make the best call", "don't ask/stop/pause" -> never; "pause when unsure"/"auto mode" -> auto; review phrases -> review.
   Summary: "Visuals: Decide everything (never pauses)". make.html maps never -> the form's never option.
+
+## Length policy (2026-10-14): targets, not caps
+- Shorts: target = requested length (165 s default); hard maximum 3:00. The script AI gets "about N words" plus a hard limit
+  = what fits in 3:00 (~387 words at Kokoro's 140 wpm). Under 3:00 the script is accepted as written: no "cut weaker points"
+  retry, no "add detail" retry, no dropped beats, no pace nudge. Past 3:00: retry / drop a middle beat / speed-up as before.
+  Smoke tests keep their tight ~30 s band.
+- Explainers: target = requested minutes; no length retries per section; fit_length neither pads nor trims unless the whole
+  script is past the sanity ceiling (25 min for 15, x1.67), then the longest sections are cut back.
+- Length check after render: always logs actual vs requested; flags an anomaly only past 3:00 (Short) or x1.67 (explainer).

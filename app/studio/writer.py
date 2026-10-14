@@ -51,7 +51,7 @@ THIS SECTION: "{stitle}"{role}
 Must cover these points (use only these facts; never invent numbers, quotes or names):
 {points}
 
-NARRATION: {words} words (count them; stay within +/-10%). Longer sections should add detail, examples and context from the points, never padding. Calm, clear documentary voice-over. Short sentences, plain words.
+NARRATION: about {words} words. That is a target, not a cap: take the room plain explanations need, and stop when the points are covered. Longer sections should add detail, examples and context from the points, never padding. Calm, clear documentary voice-over. Short sentences, plain words.
 AUDIENCE: {audience}
 Attribute opinions and predictions to the speaker ("Diamandis argues...", "his guest predicts..."); present predictions
 as predictions. Write numbers as spoken ("four point seven percent", "twenty thirty", "ten billion dollars").
@@ -264,8 +264,8 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
                 if not j.get("visuals"): raise ValueError("no visuals")
                 n = _nw(j["vo"]); tries.append((abs(n - s["words"]), j))
                 if j.get("covered") is True and n >= s["words"] * COVER_FLOOR: return   # thin topic: the AI says it's all covered - don't pad
-                if n < s["words"] * LEN_LO: raise ValueError(f"narration is {n} words but must be {s['words']} words (+/-10%); expand it with more of the section's points, examples and context")
-                if n > s["words"] * LEN_HI: raise ValueError(f"narration is {n} words but must be {s['words']} words (+/-10%); cut the weakest sentences")
+                if n > s["words"] * SANITY: raise ValueError(f"narration is {n} words for a {s['words']}-word section; that is far too long: cut repetition and the weakest points (keep explanations of terms)")
+                # shorter (thin points) or longer within the sanity ceiling: accepted as written (length policy 2026-10-14)
             log(f"  section {k}/{len(secs)}: {s['title']}")
             sec_prompt = SECTION.format(k=k, n=len(secs), title=title, channel=channel, outline=outline_str,
                     stitle=s["title"], role=role, points="\n".join("- " + p for p in s["points"]), words=s["words"],
@@ -354,6 +354,7 @@ def jargon_check(llm, plan, cfg, log):
     if left: log(f"  still possibly unexplained acronyms: {', '.join(left)[:200]}")
     return plan
 
+SANITY = 25 / 15   # length policy (2026-10-14): explainers aren't trimmed for length below 25 min for a 15-min target (x1.67)
 LEN_LO, LEN_HI = 0.9, 1.1   # per-section band (explainer); the whole script must land within +/-TOTAL_TOL of its target
 TOTAL_TOL = 0.06
 COVER_FLOOR = 0.6   # "covered": the script AI says the section's points are used up -> accepted down to 60% of its budget
@@ -379,9 +380,16 @@ def fit_length(llm, plan, secs, words, cfg, log, stop=None):
     spv = cfg["seconds_per_visual"]
     tot = lambda: sum(_nw(x["vo"]) for x in plan["sections"])
     done = set()
-    while abs(tot() - words) > words * TOTAL_TOL and len(done) < len(plan["sections"]):
+    # length policy (2026-10-14): no padding and no trimming for length, unless the script is past the sanity ceiling
+    # (25 min for a 15-min target); then the longest sections are cut back towards their budgets until it fits
+    w0 = tot()
+    if w0 <= words * SANITY:
+        log(f"  length: {w0} words ({100 * (w0 - words) / words:+.0f}% of the {words}-word target); accepted as written (no padding, no trimming)")
+        return plan
+    log(f"  length: {w0} words is past the sanity ceiling ({int(words * SANITY)} words, x{SANITY:.2f} the target): trimming the longest sections")
+    while tot() > words * SANITY and len(done) < len(plan["sections"]):
         if stop and stop(): raise RuntimeError("stopped")
-        short = tot() < words
+        short = False
         cand = [(i, (b["words"] - _nw(x["vo"])) / b["words"]) for i, (x, b) in enumerate(zip(plan["sections"], secs))
                 if i not in done and not (short and x.get("covered"))]   # a covered (thin) section is never padded
         cand = [c for c in cand if (c[1] > 0) == short and abs(c[1]) > 0.04] or [c for c in cand if (c[1] > 0) == short]
