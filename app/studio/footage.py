@@ -427,10 +427,20 @@ def fill(cfg, slots, orient, need, out_dir, log, stop, want_long_side, max_secs,
         unload_vet_model(cfg)
     # download (only the seconds we need)
     (out_dir / "clips").mkdir(exist_ok=True)
-    for v in st["picked"].values():
-        for c in v:
+    dropped = False
+    for sid, v in st["picked"].items():
+        for c in list(v):
             if stop(): raise RuntimeError("cancelled")
-            fetch(c, out_dir / "clips" / f"{c['id']}.mp4", max_secs)
+            out = out_dir / "clips" / f"{c['id']}.mp4"
+            try: fetch(c, out, max_secs)
+            except Exception as e:   # one clip that won't download (network, gone from the site) is dropped, not the whole job
+                try: out.unlink(missing_ok=True)   # never leave a 0-byte file that later stages read as a clip
+                except Exception: pass
+                v.remove(c); dropped = True
+                log(f"  {sid}: clip {c['id']} dropped ({str(e)[:120]}); the beat falls back to the visual ladder if it needs to")
+    if dropped:
+        try: state_file.write_text(json.dumps(st, indent=1), encoding="utf-8")
+        except Exception: pass
     return st["picked"]
 
 # ------------------------------------------------------------------ long videos: stock B-roll instead of GPU stills/motion

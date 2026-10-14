@@ -296,6 +296,14 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
     sd = job / "short"; fd = sd / "fallback"; fd.mkdir(parents=True, exist_ok=True)
     tm = json.loads((sd / "timings.json").read_text(encoding="utf-8"))
     pick = json.loads((sd / "stock" / "pick.json").read_text(encoding="utf-8"))
+    for bid, cs in list(pick.items()):   # a clip whose file is missing or broken (failed download) is not footage
+        ok = [c for c in cs if media.ok(sd / "stock" / "clips" / f"{c['id']}.mp4", 0.3)]
+        if len(ok) != len(cs):
+            log(f"  {bid}: {len(cs) - len(ok)} stock clip(s) missing or unreadable; not used")
+            for c in cs:
+                if c not in ok: (sd / "stock" / "clips" / f"{c['id']}.mp4").unlink(missing_ok=True)
+            pick[bid] = ok
+    (sd / "stock" / "pick.json").write_text(json.dumps(pick, indent=1), encoding="utf-8")
     fsf = sd / "stock" / "footage.json"; fst = json.loads(fsf.read_text(encoding="utf-8")) if fsf.exists() else {}
     ff = sd / "fallback.json"; out = json.loads(ff.read_text(encoding="utf-8")) if ff.exists() else {}
     cf = fd / "chains.json"; chs = json.loads(cf.read_text(encoding="utf-8")) if cf.exists() else {}
