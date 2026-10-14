@@ -229,7 +229,9 @@ def edit_all(jid, action):
     j = studio.job(jid)
     try:
         if action == "undo": edit.undo(j.dir, j.log)
-        elif action == "rerender": studio.rerender(jid)
+        elif action == "rerender":
+            b = request.get_json(silent=True) or {}
+            studio.rerender(jid, str(b.get("target") or ""), bool(b.get("refresh_fallbacks")))
         elif action == "cleanup":
             review.prune(j.dir, j.log, full=True)
             if (j.dir / "longedit").exists(): review.prune(j.dir / "longedit", j.log, full=True)

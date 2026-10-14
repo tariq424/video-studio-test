@@ -845,3 +845,8 @@ Back to the old behaviour: pick "Auto" on the form, or `"visual_review_default":
 - Smoke test fix (20261014_000419): Remotion's compositor failed on a supplied clip ("No frame found at position ...") -
   supplied videos (and your clips) are now encoded without B-frames and with a keyframe every second, and fit-and-render
   footage holds its last frame instead of running past it under the next shot's 0.4 s overlap.
+- Full re-render (2026-10-14): a job with both outputs used to re-render only the Short. It now re-renders the output being
+  edited (edit_target) or `target` ("short" | "long") from POST /api/jobs/<id>/edit_all/rerender {"target", "refresh_fallbacks"}.
+  refresh_fallbacks (explainer): shots that ended on the headline text card go down the v2 ladder again (graphics ->
+  simulation -> illustration -> headline) and caption groups with no emoji are picked again, then the explainer is rendered
+  (render.refresh_fallbacks). Made for 20261014_011407, where DeepSeek ran out of credit mid-job (17 text cards, no emoji).

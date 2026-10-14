@@ -241,6 +241,26 @@ def v2_after_wangp(cfg, job, v, vo, log):
     v["type"] = "motion"; v["g"] = {"kind": "headline", "kicker": "", "text": " ".join(vo.split()[:12]), "sub": ""}
     log(f"  {v['id']}: headline card"); return "headline"
 
+def refresh_fallbacks(job, plan, cfg, log, stop=lambda: False):
+    """Explainer shots that ended on the headline text card (the floor of the ladder, e.g. while the script AI was out of credit)
+    go down the v2 ladder again; shots replaced in the editor (edit_bgs) are left alone. Caption groups whose emoji pick failed
+    (icons_<sec>.json without a single emoji) are picked again by the explainer render. -> {rung: count}"""
+    out = {}; n = 0
+    for s in plan["sections"]:
+        for v in s["visuals"]:
+            if not isinstance(v, dict) or v.get("edit_bgs") or (v.get("g") or {}).get("kind") != "headline": continue
+            if stop(): raise RuntimeError("cancelled")
+            n += 1; v.pop("g", None)
+            (job / "motion" / f"{v['id']}.mp4").unlink(missing_ok=True)
+            r = v2_after_wangp(cfg, job, v, vo_slice(plan, s, v), log); out[r] = out.get(r, 0) + 1
+    icons = 0
+    for f in (job / "captions").glob("icons_*.json"):
+        try:
+            if not any(g.get("emoji") for g in json.loads(f.read_text(encoding="utf-8"))): f.unlink(); icons += 1
+        except Exception: pass
+    log(f"Rebuilt {n} text-card shot(s): " + (", ".join(f"{k} {c}" for k, c in sorted(out.items())) or "none") + f"; emoji re-picked for {icons} section(s)")
+    return out
+
 def do_motion(job, plan, cfg, wg, log, stop):
     d = job / "motion"; d.mkdir(exist_ok=True); seed = 3000
     for s in plan["sections"]:

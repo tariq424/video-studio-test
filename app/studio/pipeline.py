@@ -139,9 +139,16 @@ class Studio:
         if "short_review" not in d: d.append("short_review")
         j.save(done=d, status="queued"); j.log("Visual review done; rendering"); self.q.put(jid)
 
-    def rerender(self, jid):
-        """Full re-render on request (post-render edits are kept: Shorts from the review decisions, long videos from edit_clip)."""
-        j = self.job(jid); st = "short_render" if j.state.get("short_output") else "assemble"
+    def rerender(self, jid, target="", refresh_fallbacks=False):
+        """Full re-render on request (post-render edits are kept: Shorts from the review decisions, long videos from edit_clip).
+        A job with both outputs re-renders the one being edited (edit_target), or `target` ("short" | "long").
+        refresh_fallbacks (explainer): shots that fell to a headline text card (e.g. the script AI was unreachable) go down the
+        visual ladder again (graphics -> simulation -> illustration -> headline), and caption emoji that weren't picked are picked
+        again, before the explainer is rendered."""
+        j = self.job(jid); s = j.state
+        target = target or ("long" if s.get("edit_target") == "long" or refresh_fallbacks else "")
+        st = "assemble" if (target == "long" and s.get("output")) or not s.get("short_output") else "short_render"
+        if refresh_fallbacks and st == "assemble": j.save(refresh_fallbacks=True)
         if st == "assemble":
             for p in (j.dir / "build").glob("sec_*.mp4"): p.unlink(missing_ok=True)
         d = [x for x in j.state.get("done", []) if x != st]
@@ -432,6 +439,8 @@ class Studio:
                     if any(v["type"] == "still" and not v.get("stock") for x in plan["sections"] for v in x["visuals"]): _need_wangp(wg)
                     render.do_stills(j.dir, plan, cfg, wg, log, stop); j.save_plan(plan)   # illustrations turn stills into motion clips
                 elif st == "assemble":
+                    if j.state.get("refresh_fallbacks"):   # Full re-render with "rebuild text-card fallbacks"
+                        render.refresh_fallbacks(j.dir, plan, cfg, log, stop); j.save_plan(plan); j.save(refresh_fallbacks=False)
                     meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
                     if s.get("presenter", False) or cfg.get("long_renderer", "remotion") == "ffmpeg":   # the old stitcher (presenter PIP lives there)
                         parts = assemble.build(j.dir, plan, log, stop, use_presenter=s.get("presenter", False), use_captions=s.get("captions", True)); final = assemble.finalize(j.dir, plan, parts, meta, log)
