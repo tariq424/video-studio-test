@@ -850,3 +850,17 @@ Back to the old behaviour: pick "Auto" on the form, or `"visual_review_default":
   refresh_fallbacks (explainer): shots that ended on the headline text card go down the v2 ladder again (graphics ->
   simulation -> illustration -> headline) and caption groups with no emoji are picked again, then the explainer is rendered
   (render.refresh_fallbacks). Made for 20261014_011407, where DeepSeek ran out of credit mid-job (17 text cards, no emoji).
+
+## Audience=Common that sticks, /make never-pause (2026-10-14)
+- Cause (job 20261014_122825): the Common line reached the writer, but the fact-checker (no audience rule, told to match the
+  source) put the source's jargon back ("NASA hot spots" -> "NASA FIRMS hot spots", "added GFS and ECMWF"), and the tight Short
+  length check ("cut weaker points") squeezed explanations out.
+- Fixes: FACTCHECK gets the audience (Common: never remove an explanation; explain any name/acronym it adds or corrects;
+  +20% length room); Common line made concrete (acronyms spelled out, 4-8 word explainer for named models/systems/events);
+  Short budget for Common 1.12 and "keep the short explanations of terms"; jargon_check (Common, after the fact-check): one
+  DeepSeek pass that adds explainers where a term is still unexplained, never blocks (failure -> logged, script kept); a
+  log-only acronym check after it. Log line "Audience: Common (settings default | this job)". Every chat_json prompt is
+  saved to <job>/prompts/NNN_<label>.txt (LLM.trace_dir).
+- /make: visuals "never" is a third mode and the default; "never pause", "decide everything", "no stops", "end to end",
+  "make the best call", "don't ask/stop/pause" -> never; "pause when unsure"/"auto mode" -> auto; review phrases -> review.
+  Summary: "Visuals: Decide everything (never pauses)". make.html maps never -> the form's never option.

@@ -5,7 +5,7 @@ from pathlib import Path
 import requests
 from . import config, media, tts
 from .llm import LLM, parse_json
-from .writer import SYSTEM, make_notes, fact_check, audience_line, COVER_FLOOR
+from .writer import SYSTEM, make_notes, fact_check, audience_line, audience_key, log_audience, jargon_check, COVER_FLOOR
 
 GAP, TAIL, MAX_SECS = 0.35, 2.2, 176.0   # YouTube Shorts allow up to 180 s; keep a margin
 SMOKE_WORDS = 58   # smoke-test Short: 2 beats of narration (the model runs ~10% long); with the ~12-word closing line about 75 words (~30 s)
@@ -140,7 +140,10 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
     if smoke: words, nb, minb, lo, hi = SMOKE_WORDS, 2, 2, 0.8, 1.2   # smoke test: ~75 words in all with the closing line (~30 s spoken)
     title, channel = meta.get("title") or "the source", meta.get("channel") or meta.get("uploader") or "the creator"
     with LLM(cfg, log, stop) as llm:
+        llm.trace_dir = Path(srcdir).parent / "prompts"
         log(f"Writing the Short with {llm.name} (~{secs:.0f}s, {words} words, {nb} beats)...")
+        log_audience(cfg, log)
+        if audience_key(cfg) == "common" and not smoke: hi = 1.12   # room for the plain-language explainers
         notes = make_notes(llm, meta, transcript, max(words, 1500), log, stop, srcdir)
         tries = []   # every parsed attempt, so a near miss can be kept instead of an unchecked re-ask
         def chk(j):
@@ -152,10 +155,10 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             tries.append((abs(n - words), j))
             if j.get("covered") is True and n >= words * COVER_FLOOR: return   # the notes are used up: shorter, not padded
             if n < words * lo: raise ValueError(f"narration is {n} words in total but must be about {words}; add detail from the notes")
-            if n > words * hi: raise ValueError(f"narration is {n} words in total but must be at most {int(words * 1.05)}; cut weaker points")
+            if n > words * hi: raise ValueError(f"narration is {n} words in total but must be at most {int(words * hi)}; cut weaker points (keep the short explanations of terms)")
         prompt = SHORT.format(secs=int(secs), words=words, title=title, channel=channel, notes=notes[:24000], nb=nb, audience=audience_line(cfg),
                               people=(meta.get("description") or "")[:1200] or "(see notes)")
-        try: j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=chk)
+        try: j = llm.trace("short script").chat_json(SYSTEM, prompt, max_tokens=8000, check=chk)
         except RuntimeError:
             if tries:
                 j = min(tries, key=lambda x: x[0])[1]
@@ -167,7 +170,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
         if j.get("covered") is True and nw0 < words * lo: log(f"  the AI says the source is fully covered at {nw0} of {words} words; kept short (no padding)")
         if smoke: j["beats"] = j["beats"][:2]   # a smoke test stays ~30 s even if the length check gave up
         else:   # hard cut: still more than 10% long -> drop whole middle beats (keep the hook and the payoff)
-            while len(j["beats"]) > minb and sum(len(x["vo"].split()) for x in j["beats"]) > words * 1.1:
+            while len(j["beats"]) > minb and sum(len(x["vo"].split()) for x in j["beats"]) > words * (hi + 0.05):
                 cut = j["beats"].pop(-2); log(f"  script too long; dropped a middle beat ({len(cut['vo'].split())} words)")
         plan = {"target_secs": float(secs), "title": (j.get("title") or title)[:90], "tag": (j.get("tag") or "CONDENSED")[:32].upper(),
                 "source_spoken": (j.get("source_spoken") or title)[:120],
@@ -189,7 +192,8 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                                      "still_prompt": str(b.get("still_prompt") or "")[:500], "motion": str(b.get("motion") or "")[:160],
                                      "visuals": [{"type": "chart", "chart": g["g"], "at": g.get("at")} for g in gs]})
         log("Checking the Short against the source (names, attributions, numbers)...")
-        plan = fact_check(llm, plan, meta, transcript, log, stop)
+        plan = fact_check(llm, plan, meta, transcript, log, stop, cfg)
+        if not smoke: jargon_check(llm, plan, cfg, log)
         from . import coherence
         ents = coherence.entities(cfg, Path(srcdir).parent, title, notes, log, stop, llm=llm)
         nl = 0

@@ -11,7 +11,7 @@ from . import config
 
 DEFAULT = {"input": {"type": "youtube", "source": "", "title": "", "credit": "", "transcript": ""},
            "output": {"mode": "short", "short_length": 165, "long_minutes": 15},
-           "pipeline": {"script_review": False, "visuals": "auto", "captions": True, "presenter": False, "script_ai": ""}}
+           "pipeline": {"script_review": False, "visuals": "never", "captions": True, "presenter": False, "script_ai": ""}}
 MODES = {"short", "explainer", "both"}   # "smoke" is set only by the rules ("smoke test")
 AIS = {"": "Settings default", "deepseek": "DeepSeek", "zai": "z.ai GLM", "claude": "Claude", "local": "Local AI (Ollama)"}
 
@@ -23,12 +23,17 @@ PROMPT = """Turn the user's request for a video into JSON. Fields:
 - "long_minutes": length of the explainer in minutes (3-20), or null if not said.
 - "script_review": true only if they want to read or approve the SCRIPT before rendering.
 - "visuals_review": true if they want to review/choose the visuals of every beat ("review mode", "review every beat", "let me pick visuals").
+- "visuals_mode": "never" if they want no pauses at all ("never pause", "decide everything", "no stops", "end to end", "make the best call"),
+  "auto" only if they explicitly want it to pause when unsure, "review" for review mode, or null if not said.
 - "captions": false only if they say no captions. "presenter": true only if they ask for an on-screen presenter.
 - "script_ai": "deepseek", "zai", "claude", "local", or "" if not named.
 - "title" and "credit": the source's title and author if they give them (for files/text), else "".
 Reply with ONLY the JSON object.
 
 Request: \"\"\"{text}\"\"\""""
+
+NEVER = (r"never[- ]?pause|no (pauses|stops|stopping)|don'?t (pause|stop|ask)|without (pausing|stopping)|decide everything|"
+         r"end[- ]to[- ]end|make the best call|best call when unsure|just (run|fire|go)|no review pauses|never stop")
 
 UNSUPPORTED = [(r"\bresearch", "research (there is no research step yet; the script is written from the source only)"),
                (r"\btl;?dr\b", "a TLDR (not an option yet)"),
@@ -63,8 +68,9 @@ def _rules(text):
     sm = re.search(r"\b(\d{2,3})\s*(?:s|sec|secs|seconds)\b", low)
     if sm: out["output"]["short_length"] = int(sm.group(1))
     if re.search(r"\bsmoke[- ]?test", low): out["output"].update(mode="smoke", short_length=30)
+    if re.search(r"pause (only )?when (it'?s |you'?re )?unsure|\bauto(matic)? (mode|visuals)\b", low): out["pipeline"]["visuals"] = "auto"
+    if re.search(NEVER, low): out["pipeline"]["visuals"] = "never"   # wins over "auto"; review mode wins over both (below)
     if re.search(r"review (mode|every beat|each beat|the visuals|visuals)|(pick|choose|approve|check) (the )?(visuals|footage|images|pictures)", low): out["pipeline"]["visuals"] = "review"
-    if re.search(r"\bauto(matic)? (mode|visuals)\b|\bdraft\b", low) and "visuals" not in out["pipeline"]: out["pipeline"]["visuals"] = "auto"
     if re.search(r"(review|read|check|approve|see|edit) (the |my )?script|script review", low): out["pipeline"]["script_review"] = True
     if re.search(r"(skip|no) script review|don'?t (need to )?review the script", low): out["pipeline"]["script_review"] = False
     if re.search(r"no captions|without captions", low): out["pipeline"]["captions"] = False
@@ -132,8 +138,10 @@ def parse(text, cfg):
         topic = {"script_review": r"script", "captions": r"caption|subtitle", "presenter": r"presenter|host|avatar"}
         for k in ("script_review", "captions", "presenter"):
             if isinstance(j.get(k), bool) and re.search(topic[k], low): spec["pipeline"][k] = j[k]
-        if isinstance(j.get("visuals_review"), bool) and re.search(r"visual|beat|footage|image|picture|review", low):
-            spec["pipeline"]["visuals"] = "review" if j["visuals_review"] else "auto"
+        if j.get("visuals_mode") in ("never", "auto", "review") and re.search(r"visual|beat|footage|image|picture|review|pause|stop|unsure|decide|end to end|end-to-end", low):
+            spec["pipeline"]["visuals"] = j["visuals_mode"]
+        elif j.get("visuals_review") is True and re.search(r"visual|beat|footage|image|picture|review", low):
+            spec["pipeline"]["visuals"] = "review"
         if j.get("script_ai") in AIS: spec["pipeline"]["script_ai"] = j["script_ai"]
         for k in ("title", "credit"):
             if isinstance(j.get(k), str): spec["input"][k] = j[k][:120]
@@ -157,7 +165,7 @@ def summary(spec):
             "smoke": "Smoke test: 30-second Short (about 75 words; pipeline check)"}[o["mode"]]
     lines = [f"Source: {src} — {show}", f"Make: {mode}",
              "Script review: " + ("pause so you can read and edit the script" if p["script_review"] else "skipped (renders straight away)"),
-             "Visuals: " + ("Review every beat" if p["visuals"] == "review" else "Auto (pauses only when unsure)") if o["mode"] != "explainer" else "Visuals: (explainer: automatic)",
+             "Visuals: " + {"review": "Review every beat", "auto": "Auto (pauses only when unsure)"}.get(p["visuals"], "Decide everything (never pauses)") if o["mode"] != "explainer" else "Visuals: (explainer: automatic)",
              f"Script AI: {AIS.get(p['script_ai'], p['script_ai'])}"]
     if o["mode"] in ("explainer", "both"): lines.append("Captions: " + ("on" if p["captions"] else "off") + " · Presenter: " + ("on" if p["presenter"] else "off"))
     if i.get("title"): lines.append(f"Source title: {i['title']}" + (f" — {i['credit']}" if i.get("credit") else ""))

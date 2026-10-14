@@ -38,6 +38,17 @@ class LLM:
         self.provider = cfg.get("script_provider", "claude")
         self.local = LocalServer(cfg, log) if self.provider == "local" else None
         self.tokens_in = self.tokens_out = 0
+        self.trace_dir = None; self.trace_label = ""; self._tn = 0   # set trace_dir: every chat_json prompt is saved there
+    def trace(self, label): self.trace_label = label; return self
+    def _save_prompt(self, system, user):
+        if not self.trace_dir: return
+        try:
+            from pathlib import Path
+            d = Path(self.trace_dir); d.mkdir(parents=True, exist_ok=True); self._tn += 1
+            name = f"{self._tn:03d}_{re.sub(r'[^a-z0-9]+', '_', (self.trace_label or 'prompt').lower()).strip('_')[:40]}.txt"
+            (d / name).write_text(f"MODEL: {self.name}\n=== SYSTEM ===\n{system}\n=== USER ===\n{user}\n", encoding="utf-8")
+        except Exception: pass
+        self.trace_label = ""
     def __enter__(self):
         if self.local: self.local.start()
         return self
@@ -84,6 +95,7 @@ class LLM:
     def chat_json(self, system, user, max_tokens=4000, check=None):
         """Ask for JSON, parse leniently, re-ask with the error if it doesn't parse or fails check()."""
         msg = user
+        self._save_prompt(system, user)
         for attempt in range(3):
             t = self.chat(system, msg, max_tokens)
             try:

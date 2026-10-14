@@ -4,6 +4,7 @@
   3. SECTIONS - each section's narration + visuals is written separately (small, reliable JSON)
 Works with Claude, z.ai GLM, or the local Qwen3-8B (see llm.py)."""
 import json, math, re
+from pathlib import Path
 from .llm import LLM
 
 SYSTEM = """You are a senior documentary writer and editor. You condense long talks and podcasts into tight,
@@ -95,6 +96,7 @@ Check the narration against the transcript and fix it:
 - claims that the transcript doesn't support, exaggerations, or jokes presented as serious claims: correct or remove them
 - statements that misrepresent what was meant (e.g. a joke, a steelman, a question from a listener)
 - grammar and awkward phrasing; keep the calm documentary voice and numbers written as spoken words
+{audience}
 Keep roughly the same length ({words} words). Do not add new facts.
 If something is important but you cannot resolve it from the transcript, keep the safest wording and list it in "questions"
 as a short plain-English question for the producer.
@@ -114,14 +116,36 @@ Reply with ONLY JSON: {{"vo":"corrected narration","charts":[...same chart objec
 _STOP = set("the a an and or but of to in on for with at by from is are was were be been it this that these those as not no so if then than too very just about into over under more most less least can could would should will may might do does did have has had you your we our they their he his she her i me my them what which who whom how why when where there here all any some such only own same other".split())
 
 AUDIENCE = {   # one line per level, added to the narration prompts (explainer sections and Shorts); job form "Audience"
-    "common": "Write for a general audience with no technical background. Use technical terms where they are the right word, but explain each one in a short phrase the first time it appears. Use analogies when they help. Keep the pacing accessible.",
+    "common": ("Write for a general audience with no technical background. Use technical terms where they are the right word, but explain "
+               "each one in a short phrase the first time it appears. Use analogies when they help. Keep the pacing accessible. Concretely: "
+               "spell out every acronym the first time (\"ALPR, automatic license plate readers,\"); the first time you name a model, "
+               "system, tool, dataset, organisation or event, add a 4-8 word explainer (\"GFS, the American weather model,\"; "
+               "\"Hurricane Rachel, a storm the map tracked,\"); turn jargon into what it means (\"the cone of uncertainty, the widening "
+               "band where the storm could go\"). These explanations are part of the word budget: cut a weaker point before an explanation."),
     "informed": "Write for a viewer with some technical familiarity. Use technical terms freely, adding brief context only for unusual ones. Skip basic explanations.",
     "expert": "Write for a specialist. Use jargon without explanation. Assume deep familiarity with the domain.",
 }
 
+def audience_key(cfg):
+    a = str(cfg.get("audience") or "common").lower()
+    return a if a in AUDIENCE else "common"
+
 def audience_line(cfg):
     """The prompt line for this job's audience (cfg["audience"]: the job's choice, else settings.json, else common)."""
-    return AUDIENCE.get(str(cfg.get("audience") or "common").lower(), AUDIENCE["common"])
+    return AUDIENCE[audience_key(cfg)]
+
+def log_audience(cfg, log):
+    src = "this job" if cfg.get("_audience_from") == "job" else "settings default"
+    log(f"  Audience: {audience_key(cfg).capitalize()} ({src}): {AUDIENCE[audience_key(cfg)][:90]}...")
+
+FACT_AUDIENCE = {   # what the fact-checker must keep (it used to put the source's jargon back: "NASA hot spots" -> "NASA FIRMS hot spots")
+    "common": "AUDIENCE: general viewers with no technical background. The narration explains terms in plain language on purpose. "
+              "Never remove or shorten an explanation of a term. When you correct or add a name, acronym or technical term, explain it "
+              "the same way the first time it appears in this section (acronyms spelled out, named models/systems/events given a "
+              "4-8 word explainer). Prefer the plain description over adding the source's exact jargon when both are accurate.",
+    "informed": "AUDIENCE: viewers with some technical familiarity. Keep any brief context the narration gives for unusual terms.",
+    "expert": "AUDIENCE: specialists. Technical terms need no explanation.",
+}
 
 def _passages(transcript_words, text, n=2, size=900):
     kw = {w.lower().strip(".,!?\"'():;") for w in text.split()}
@@ -139,11 +163,13 @@ def _passages(transcript_words, text, n=2, size=900):
         if len(picked) == n: break
     return "\n...\n".join(" ".join(transcript_words[i:i + size]) for i in sorted(picked))
 
-def fact_check(llm, plan, meta, transcript, log, stop=None):
+def fact_check(llm, plan, meta, transcript, log, stop=None, cfg=None):
     words = transcript.split()
     desc = (meta.get("description") or "")[:2500]
     title, channel = meta.get("title") or "", meta.get("channel") or meta.get("uploader") or ""
     questions = []
+    aud = audience_key(cfg or {}); aline = FACT_AUDIENCE[aud]
+    hi = 1.2 if aud == "common" else 1.12   # room for an explanation of a corrected term
     for k, s in enumerate(plan["sections"], 1):
         if stop and stop(): raise RuntimeError("stopped")
         charts = [v for v in s["visuals"] if v["type"] == "chart"]
@@ -151,9 +177,9 @@ def fact_check(llm, plan, meta, transcript, log, stop=None):
         def chk(j):
             if not isinstance(j.get("vo"), str) or len(j["vo"].split()) < 0.6 * len(s["vo"].split()): raise ValueError("narration missing or cut too much")
             n0, n1 = len(s["vo"].split()), len(j["vo"].split())
-            if not 0.88 * n0 <= n1 <= 1.12 * n0: raise ValueError(f"narration is {n1} words; keep it at {n0} words (+/-10%): fix, don't rewrite")
+            if not 0.88 * n0 <= n1 <= hi * n0: raise ValueError(f"narration is {n1} words; keep it at {n0} words (+/-10%): fix, don't rewrite")
         try:
-            j = llm.chat_json(SYSTEM, FACTCHECK.format(title=title, channel=channel, desc=desc, stitle=s["title"],
+            j = llm.trace(f"factcheck {s.get('id') or k}").chat_json(SYSTEM, FACTCHECK.format(audience=aline, title=title, channel=channel, desc=desc, stitle=s["title"],
                     words=len(s["vo"].split()), vo=s["vo"], charts=json.dumps([c["chart"] for c in charts], ensure_ascii=False),
                     passages=_passages(words, s["vo"] + " " + s["title"])), max_tokens=6000, check=chk)
         except Exception as e:
@@ -201,7 +227,9 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
     spv = cfg["seconds_per_visual"]
     title, channel = meta.get("title") or "the episode", meta.get("channel") or meta.get("uploader") or "the host"
     with LLM(cfg, log, stop) as llm:
+        if workdir: llm.trace_dir = Path(workdir).parent / "prompts"
         log(f"Writing script with {llm.name} (target {words} words)...")
+        log_audience(cfg, log)
         # 1. notes
         notes_txt = make_notes(llm, meta, transcript, words, log, stop, workdir)
         # 2. outline
@@ -242,7 +270,7 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
             sec_prompt = SECTION.format(k=k, n=len(secs), title=title, channel=channel, outline=outline_str,
                     stitle=s["title"], role=role, points="\n".join("- " + p for p in s["points"]), words=s["words"],
                     nvis=nvis, motion_rule=mrule, audience=audience_line(cfg))
-            try: j = llm.chat_json(SYSTEM, sec_prompt, max_tokens=4000, check=chk2)
+            try: j = llm.trace(f"section {k}").chat_json(SYSTEM, sec_prompt, max_tokens=4000, check=chk2)
             except RuntimeError:
                 if tries:
                     j = min(tries, key=lambda x: x[0])[1]
@@ -263,13 +291,68 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
         plan = normalize(plan)
         fit_length(llm, plan, secs, words, cfg, log, stop)
         log("Checking the script against the transcript (names, attributions, claims)...")
-        plan = fact_check(llm, plan, meta, transcript, log, stop)
+        plan = fact_check(llm, plan, meta, transcript, log, stop, cfg)
+        jargon_check(llm, plan, cfg, log)
         plan = normalize(plan)
         w = sum(_nw(s["vo"]) for s in plan["sections"])
         tk = f" Tokens in/out: {llm.tokens_in}/{llm.tokens_out}" if llm.tokens_in else ""
         log(f"Script ready: {len(plan['sections'])} sections, {w} words (~{w / cfg['wpm']:.1f} min), "
             f"{sum(len(s['visuals']) for s in plan['sections'])} visuals.{tk}")
         return plan
+
+JARGON = """You edit the narration of a video for a general audience with no technical background.
+Find every term such a viewer would not understand that is NOT explained where it first appears in the whole script: acronyms
+that aren't spelled out, names of models / systems / tools / datasets / organisations / events with no explainer, and jargon.
+A term counts as explained if a short phrase right next to its first use says what it is.
+For each section that has such a term, return the section's narration with a short explainer added at the term's FIRST use
+(acronym spelled out, or 4-8 words saying what it is). Change nothing else: same facts, same order, same voice.
+Only return sections you changed.
+
+SCRIPT:
+{script}
+
+Reply with ONLY JSON: {{"terms":[{{"term":"...","section":"<id>"}}],"sections":[{{"id":"<id>","vo":"edited narration"}}]}}"""
+
+ACRO = re.compile(r"\b[A-Z][A-Z0-9]{1,6}s?\b")
+
+def unexplained_acronyms(plan):
+    """Acronyms whose first use isn't followed (or preceded) by a spelled-out phrase: a cheap log-only check."""
+    seen, out = set(), []
+    for s in plan["sections"]:
+        vo = s["vo"]
+        for m in ACRO.finditer(vo):
+            a = m.group().rstrip("s") if len(m.group()) > 2 else m.group()
+            if a in seen or a in ("I", "OK", "TV", "US", "UK", "AM", "PM", "AI", "NASA", "FBI", "CIA", "USA", "UN", "EU", "NATO", "BBC", "CNN", "GPS", "CEO", "DNA", "UFO", "NFL", "NBA"): seen.add(a); continue
+            seen.add(a)
+            near = vo[max(0, m.start() - 70): m.end() + 70]
+            letters = a[:3].lower()
+            words = re.findall(r"[A-Za-z]+", near.replace(m.group(), " "))
+            if not ("," in vo[m.end(): m.end() + 2] or "(" in vo[m.end(): m.end() + 3] or
+                    "".join(w[0] for w in words if w[0].isupper() or True).lower().find(letters) >= 0):
+                out.append(f"{a} ({s.get('id', '')})")
+    return out
+
+def jargon_check(llm, plan, cfg, log):
+    """Common audience only, after the fact-check: one pass that adds a short explainer where a term is still unexplained.
+    Never blocks the pipeline: any failure is logged and the script is kept as it is."""
+    if audience_key(cfg) != "common": return plan
+    for i, s in enumerate(plan["sections"]): s.setdefault("id", s.get("id") or f"s{i}")
+    script = "\n\n".join(f"[{s['id']}] {s['vo']}" for s in plan["sections"])
+    try:
+        j = llm.trace("jargon check").chat_json(SYSTEM, JARGON.format(script=script), max_tokens=8000)
+        terms = [f"{t.get('term')} ({t.get('section')})" for t in (j.get("terms") or []) if isinstance(t, dict) and t.get("term")]
+        by = {s["id"]: s for s in plan["sections"]}; n = 0
+        for x in j.get("sections") or []:
+            s = by.get(str(x.get("id"))) if isinstance(x, dict) else None
+            vo = x.get("vo") if s else None
+            if isinstance(vo, str) and _nw(s["vo"]) <= _nw(vo) <= _nw(s["vo"]) * 1.25 + 12: s["vo"] = vo; n += 1
+        log(f"  jargon check (Common): {len(terms)} unexplained term(s) found" + (f": {', '.join(terms)[:300]}" if terms else "") +
+            f"; explainers added in {n} section(s)")
+    except Exception as e:
+        log(f"  jargon check skipped ({str(e)[:100]})")
+    left = unexplained_acronyms(plan)
+    if left: log(f"  still possibly unexplained acronyms: {', '.join(left)[:200]}")
+    return plan
 
 LEN_LO, LEN_HI = 0.9, 1.1   # per-section band (explainer); the whole script must land within +/-TOTAL_TOL of its target
 TOTAL_TOL = 0.06

@@ -66,7 +66,7 @@ function fillForm(spec){const d=$('form').contentDocument;const q=t=>d.querySele
  set('output-mode',{short:'short',explainer:'long',both:'both',smoke:'smoke'}[o.mode]);
  set('short-length',o.short_length,'input');set('long-length',o.long_minutes,'input');
  set('toggle-captions',p.captions);set('toggle-presenter',p.presenter);set('script-ai',p.script_ai||'');
- set('visuals-mode',p.visuals==='review'?'every':'auto');set('toggle-skip-script-review',!p.script_review);
+ set('visuals-mode',p.visuals==='review'?'every':p.visuals==='auto'?'auto':'never');set('toggle-skip-script-review',!p.script_review);
  const f=q('new-video-form');if(f){f.style.outline='2px solid var(--acc)';setTimeout(()=>f.style.outline='',1500)}}
 // the form tells us when Make video started a job
 window.addEventListener('message',ev=>{if(ev.data&&ev.data.vsJob){JOB=ev.data.vsJob;$('runcard').style.display='';watch()}});

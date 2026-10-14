@@ -294,7 +294,7 @@ class Studio:
     def _run(self, jid):
         j = self.job(jid); s = j.state; cfg = config.load()
         if s.get("tts_engine") in ("kokoro", "wanGP"): cfg["tts_engine"] = s["tts_engine"]   # the job's own narration choice
-        if s.get("audience") in ("common", "informed", "expert"): cfg["audience"] = s["audience"]   # the job's own audience (script prompts)
+        if s.get("audience") in ("common", "informed", "expert"): cfg["audience"] = s["audience"]; cfg["_audience_from"] = "job"   # the job's own audience (script prompts)
         if s.get("cancelled") and s.get("status") == "stopped": return   # cancelled while it waited in the queue
         self.current = jid
         stop = lambda: jid in self.cancel
