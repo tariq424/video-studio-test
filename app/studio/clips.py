@@ -223,7 +223,7 @@ def _segments(job, res, sections, wpm, rate=0.85):
 def _cut(src, start, length, out, W, H):
     media.ff("-ss", f"{start:.2f}", "-i", src, "-t", f"{length:.2f}", "-an",
              "-vf", f"scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H},fps=30,format=yuv420p",
-             "-c:v", "libx264", "-preset", "veryfast", "-crf", "14", out, timeout=900)
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "14", "-bf", "0", "-g", "30", out, timeout=900)
     if not media.ok(out, 0.3): raise RuntimeError(f"cutting {Path(src).name} produced no video")
     return out
 

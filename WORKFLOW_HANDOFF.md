@@ -842,3 +842,6 @@ Back to the old behaviour: pick "Auto" on the form, or `"visual_review_default":
   files (-> freeze). Several files: hard cuts in your order. Pictures are held for their share. Labels: YOUR FOOTAGE (video) /
   FILE (picture) unless you pick another. Supplied videos keep up to 180 s (was 20 s), other orientation shown whole.
   Shorts and explainers (the explainer editor uses the same layout). Narration unchanged.
+- Smoke test fix (20261014_000419): Remotion's compositor failed on a supplied clip ("No frame found at position ...") -
+  supplied videos (and your clips) are now encoded without B-frames and with a keyframe every second, and fit-and-render
+  footage holds its last frame instead of running past it under the next shot's 0.4 s overlap.

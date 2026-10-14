@@ -61,7 +61,7 @@ def user_layout(sd, items, d, mode="auto"):
     lens = []
     for it in items:
         pth = src_path(sd, it)
-        try: lens.append(media.dur(pth) if pth else None)
+        try: lens.append(max(0.2, media.dur(pth) - 0.1) if pth else None)   # a frame's margin: never ask for a time past the last frame
         except Exception: lens.append(None)
     vids = [i for i, L in enumerate(lens) if L]; out = []
     def emit(i, props, length): out.append((items[i], props, round(sum(x[3] for x in out), 3), length))
@@ -115,6 +115,10 @@ def user_layout(sd, items, d, mode="auto"):
             pr = {"rate": 1.0}
             if i == last: pr["freezeAt"] = round(lens[i] - 0.05, 3)
             emit(i, pr, lens[i] + (max(0.0, delta) if i == last else 0))
+    # each shot keeps playing 0.4 s under the next one (Teaser), so footage that is used to its end would run past its last
+    # frame there (Remotion: "No frame found"): hold the last frame instead
+    for it, pr, st, ln in out:
+        if src_path(sd, it) and "loop" not in pr and "freezeAt" not in pr: pr["freezeAt"] = round(max(0.05, ln - 0.05), 3)
     return out, mode, why or FIT_NAME.get(mode, mode)
 
 def layout(sd, items, d, mode="auto", vo="", filler=None):

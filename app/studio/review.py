@@ -433,7 +433,7 @@ def supply(job, bid, src, tag, cfg, log):
         vw, vh = _vsize(raw)
         same = (vw > vh) == (W > H)
         vf = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}" if same else "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2"
-        media.ff("-i", raw, "-t", 180, "-vf", vf + ",fps=30,format=yuv420p", "-an", "-c:v", "libx264", "-crf", 18, out, timeout=1800)
+        media.ff("-i", raw, "-t", 180, "-vf", vf + ",fps=30,format=yuv420p", "-an", "-c:v", "libx264", "-crf", 18, "-bf", 0, "-g", 30, out, timeout=1800)   # no B-frames, a keyframe a second: Remotion seeks it frame-exactly at any speed
         item = {"type": "video", "src": _rel(out, sd), "secs": round(media.dur(out), 2), "tag": tag or "YOUR FOOTAGE", "rate": 1.0, "user": True,
                 **({} if same else {"fit": "frame"})}   # other orientation: shown whole over a blurred copy
     else:
