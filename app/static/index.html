@@ -382,14 +382,14 @@ function edDraw(){if($('edchat'))ED.draft=$('edchat').value;const pv=$('edpv'),p
  // Log: pipeline status for this beat
  const last=(ED.last||{}).last;
  const log=`<div class="edp-log" data-testid="edit-log">${b.busy?`<div class="lg lg-busy">⏳ ${esc(b.busy)}</div>`:''}<div id="edmsg" data-testid="edit-message" class="lg"></div>
-  ${b.msg?`<div class="lg ${/^Not applied/.test(b.msg)?'lg-bad':''}">${esc(b.msg)}</div>`:''}
-  ${last&&last.beat==bid?`<div class="lg ${last.ok?'lg-ok':'lg-bad'}" data-testid="edit-last">${last.ok?'✓ Applied':'✗ Not applied'}: ${esc(last.msg||'')}</div>`:''}
+  ${b.msg&&!(last&&last.beat==bid&&/^(Applied|Not applied)/.test(b.msg))?`<div class="lg ${/^Not applied/.test(b.msg)?'lg-bad':''}">${esc(b.msg)}</div>`:''}
+  ${last&&last.beat==bid?`<div class="lg ${last.ok?'lg-ok':'lg-bad'}" data-testid="edit-last">${last.ok?'✓ '+esc(last.msg||'Applied.'):'✗ Not applied: '+esc(last.msg||'')}</div>`:''}
   ${(b.notes||[]).map(x=>`<div class="lg lg-meta">${esc(x.t)} you: “${esc(x.you)}” → <b>${esc(x.intent)}</b>: ${esc(x.understood)} [${esc(x.backend)}]</div>`).join('')}</div>`;
  let h=`<div class="card edp-card" style="margin-top:12px">${head}<div class="edp-grid"><div class="edp-col">${edPane('p-cand','Candidates',`${b.cands.filter(c=>!ED.rv.cands[c].missing).length} options`,cands,'candidates')}${edPane('p-fit','Fit options','',fit,'fit')}${edPane('p-act','Actions','',acts,'actions')}</div>
   <div class="edp-col">${edPane('p-prev','Preview of this beat','',prev,'preview')}${edPane('p-chat','Chat','about this beat',chat,'chat')}${edPane('p-log','Log','status of this beat',log,'log')}</div></div></div>`;
  $('edp').innerHTML=h;if(pvKeep)$('edpv').innerHTML=pvKeep;clearTimeout(ED.timer);if(b.busy)ED.timer=setTimeout(edRefresh,4000)}
 async function edChat(){const t=$('edchat').value.trim();if(!t||ED.chatBusy)return;ED.chatBusy=1;ED.draft=t;edDraw();const bid=ED.open;
- try{const x=await rvPost(`/api/jobs/${sel}/edit/chat`,{beat:bid,text:t});ED.draft='';ED.chat=(await j(`/api/jobs/${sel}/edit/chat?beat=${bid}`)).chat;
+ try{const x=await rvPost(`/api/jobs/${sel}/edit/chat`,{beat:bid,text:t});ED.draft='';if($('edchat'))$('edchat').value='';ED.chat=(await j(`/api/jobs/${sel}/edit/chat?beat=${bid}`)).chat;
   ED.chatBusy=0;if(ED.open!=bid)return;const r=await fetch(`/api/jobs/${sel}/edit/open/${bid}`,{method:'POST'});const d=await r.json();if(r.ok)ED.rv=d.rv;
   if(x.select)ED.sel=[...x.select];edDraw();if(x.action=='apply'&&!/Couldn't do it/.test(x.reply)){$('edmsg').textContent='Applying…';edWait()}}
  catch(e){ED.chatBusy=0;edDraw();alert(e.message)}}

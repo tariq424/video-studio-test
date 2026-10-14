@@ -212,8 +212,9 @@ def _cands_text(rv, bid):
     out, ids = [], []
     for i, cid in enumerate(b["cands"], 1):
         c = rv["cands"][cid]; ids.append(cid)
+        now = cid in (b.get("current") or [])
         out.append(f"{i}. {RUNG.get(c['rung'], c['rung'])}{' ' + c['item'].get('tag', '') if c['item'].get('tag') else ''}: "
-                   f"{'accepted' if c['ok'] else 'REJECTED'} - {c['why'][:100]}")
+                   f"{'accepted' if c['ok'] else 'REJECTED'} - {c['why'][:100]}{' [IN THE VIDEO NOW]' if now else ''}")
     return "\n".join(out) or "(none)", ids
 
 def _ctx_on():
