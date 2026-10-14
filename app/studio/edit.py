@@ -27,9 +27,11 @@ from . import media
 FPS_S = 30                     # Remotion (Shorts)
 BASE_RATE = 0.85               # footage plays slightly slowed everywhere
 ENC_S = ["-c:v", "libx264", "-preset", "fast", "-crf", 18, "-pix_fmt", "yuv420p", "-profile:v", "high", "-r", FPS_S]
-FITS = ("auto", "direct", "trim", "speed", "slow", "freeze", "loop", "still")
+FITS = ("auto", "direct", "trim", "speed", "slow", "freeze", "loop", "still", "segment")
 FIT_NAME = {"direct": "direct splice", "trim": "trimmed to a segment", "speed": "sped up", "slow": "slow motion, then hold",
-            "freeze": "last frame held", "loop": "looped", "still": "footage, then a still fills the rest"}
+            "freeze": "last frame held", "loop": "looped", "still": "footage, then a still fills the rest",
+            "segment": "chunks of it, hard cuts", "hold": "picture held for the beat"}
+USER_MAX = 1.5                 # fit-and-render: your footage plays 1/1.5x .. 1.5x at most
 
 ATMOS = re.compile(r"\b(storm|rain|clouds?|sky|skies|night|dawn|dusk|sunset|sunrise|fog|mist|snow|wind|sea|ocean|waves?|desert|"
                    r"mountains?|forest|skyline|city lights|quiet|calm|silence|silent|darkness|landscape|horizon|weather|scenery)\b", re.I)
@@ -48,8 +50,77 @@ def src_path(sd, item):
     if t == "video": return Path(sd) / item["src"]
     return None
 
+def is_user(item):
+    """Your own file (supplied to a beat, or one of your clips): fit-and-render, no interpretation."""
+    return bool(item.get("user") or item.get("own_n") or (item.get("clip") or {}).get("own"))
+
+def user_layout(sd, items, d, mode="auto"):
+    """Fit-and-render for your own media: mechanical fitting only, never a substitute or an AI still.
+    Footage plays at real speed (1.0x), sped up or slowed by up to 1.5x, trimmed, cut into 2-3 chunks (hard cuts), looped or held
+    on its last frame; pictures are held for their share of the beat (no pan / zoom). Several files: hard cuts in your order."""
+    lens = []
+    for it in items:
+        pth = src_path(sd, it)
+        try: lens.append(media.dur(pth) if pth else None)
+        except Exception: lens.append(None)
+    vids = [i for i, L in enumerate(lens) if L]; out = []
+    def emit(i, props, length): out.append((items[i], props, round(sum(x[3] for x in out), 3), length))
+    if not vids:
+        for i in range(len(items)): emit(i, {}, d / len(items))
+        return out, "hold", "your picture(s) held for the beat, no motion added"
+    if len(vids) < len(items):   # footage at real speed (trimmed if it doesn't fit), pictures share the rest (1.5 s each at least)
+        rest = len(items) - len(vids); room = max(0.5, d - 1.5 * rest); nat = sum(lens[i] for i in vids); k = min(1.0, room / nat)
+        left = max(0.0, d - nat * k)
+        for i in range(len(items)):
+            if i in vids: emit(i, {"rate": 1.0, **({"start": round(lens[i] * (1 - k) / 2, 3)} if k < 1 else {})}, lens[i] * k)
+            else: emit(i, {}, left / rest)
+        return out, "direct", "your footage at real speed, your pictures fill the rest"
+    total = sum(lens); r = total / d; delta = d - total; why = ""
+    if mode in ("auto", "direct") and abs(delta) <= 0.3: mode, why = "direct", "your footage is as long as the beat"
+    elif mode == "auto":
+        if delta < 0: mode = "speed" if r <= USER_MAX else ("trim" if r <= 2.5 else "segment")
+        else: mode = "slow" if r >= 1 / USER_MAX else ("loop" if total >= 2.0 else "freeze")
+        why = f"your footage is {abs(delta):.1f}s {'longer' if delta < 0 else 'shorter'} than the beat"
+    if mode == "still": mode = "freeze"   # never fill with an AI still: the last frame of your footage holds
+    if delta < -0.3 and mode in ("slow", "freeze", "loop", "direct"): mode = "trim"
+    if delta > 0.3 and mode in ("trim", "speed", "segment", "direct"): mode = "freeze"
+    last = len(items) - 1
+    if mode == "direct":
+        f = r   # within 0.3 s: a hair faster / slower so it ends with the beat
+        for i in range(len(items)): emit(i, {"rate": round(f, 4)}, lens[i] / f)
+    elif mode == "speed":
+        f = min(USER_MAX, r); k = min(1.0, d / (total / f))
+        for i in range(len(items)): emit(i, {"rate": round(f, 4), **({"start": round(lens[i] * (1 - k) / 2, 3)} if k < 1 else {})}, lens[i] / f * k)
+    elif mode == "trim":
+        for i in range(len(items)): a = lens[i] * d / total; emit(i, {"rate": 1.0, "start": round((lens[i] - a) / 2, 3)}, a)
+    elif mode == "segment":   # 2-3 evenly spaced chunks of each file, hard cut together (more of the footage than one trimmed piece)
+        n = 2 if r < 4 else 3
+        for i in range(len(items)):
+            a = lens[i] * d / total; c = a / n
+            for j in range(n): emit(i, {"rate": 1.0, "start": round(max(0.0, lens[i] - c - 0.05) * j / (n - 1), 3)}, c)
+    elif mode == "slow":
+        f = max(1 / USER_MAX, r); alloc = [L / f for L in lens]; extra = max(0.0, d - sum(alloc))
+        for i in range(len(items)):
+            pr = {"rate": round(f, 4)}
+            if i == last and extra > 0.05: pr["freezeAt"] = round(alloc[i] - 0.05, 3)
+            emit(i, pr, alloc[i] + (extra if i == last else 0))
+    elif mode == "loop":
+        for i in range(len(items)):
+            pr = {"rate": 1.0}
+            if i == last: pr["loop"] = round(lens[i], 3)
+            emit(i, pr, lens[i] + (max(0.0, delta) if i == last else 0))
+    else:   # freeze
+        mode = "freeze"
+        for i in range(len(items)):
+            pr = {"rate": 1.0}
+            if i == last: pr["freezeAt"] = round(lens[i] - 0.05, 3)
+            emit(i, pr, lens[i] + (max(0.0, delta) if i == last else 0))
+    return out, mode, why or FIT_NAME.get(mode, mode)
+
 def layout(sd, items, d, mode="auto", vo="", filler=None):
-    """-> (list of (item, props, start, length), mode used, why). props: rate / start / freezeAt / loop for videos."""
+    """-> (list of (item, props, start, length), mode used, why). props: rate / start / freezeAt / loop for videos.
+    Your own files (fit-and-render) go to user_layout: mechanical fitting only."""
+    if items and all(is_user(it) for it in items): return user_layout(sd, items, d, mode)
     lens = []
     for it in items:
         p = src_path(sd, it)
@@ -79,6 +150,7 @@ def layout(sd, items, d, mode="auto", vo="", filler=None):
         elif delta < 0: mode, why = "trim", f"the footage is {-delta:.1f}s longer than the beat"
         elif atmospheric(vo): mode, why = "slow", f"atmospheric beat, footage {delta:.1f}s short"
         else: mode, why = "still", f"the narration carries information; footage {delta:.1f}s short"
+    if mode == "segment": mode = "trim"   # chunking is for your own footage (user_layout)
     if delta < -0.3 and mode in ("slow", "freeze", "loop", "still"): mode = "trim"
     if delta > 0.3 and mode in ("trim",): mode = "freeze"
     if delta > 0.3 and mode == "speed": mode = "slow"
@@ -150,6 +222,11 @@ def to_bg(sd, item, props, start, story_subjects=False, dest=None, used=None):
     else:
         bg = {"type": "graphic", "g": item["g"]}
         if item.get("tag"): bg["tag"] = item["tag"]   # ILLUSTRATION / SILHOUETTE
+    if is_user(item):   # fit-and-render: no motion added (unless you asked for it), hard cuts, labelled as yours
+        bg["user"] = True
+        if item.get("move"): bg["still"] = False
+        if t in ("video", "stock"): bg["tag"] = item.get("tag") or "YOUR FOOTAGE"; bg.setdefault("rate", 1.0)
+        elif t == "image": bg["tag"] = item.get("tag") or "FILE"
     bg.update(props); bg["from"] = round(start, 3)
     return bg
 
@@ -541,7 +618,7 @@ def ensure_keyframes(job, log, k="short"):
     t0 = time.time(); tmp = outp.with_name("_kf_" + outp.name)
     times = _kf_times(a for _, a, _ in frames)
     media.ff("-i", outp, "-map", "0:v", "-map", "0:a?", *ENC_S, "-force_key_frames", times, "-forced-idr", 1, "-c:a", "copy", "-movflags", "+faststart", tmp, timeout=7200)
-    tmp.replace(outp)
+    replace_file(tmp, outp, log)
     _stamp_keyframes(job, k)
     log(f"  done in {time.time() - t0:.0f}s")
 
@@ -572,6 +649,70 @@ def _vstats(p):
 
 def _ostamp(p): p = Path(p); return {"size": p.stat().st_size, "mtime": int(p.stat().st_mtime)}
 
+# ---------------------------------------------------------------- replacing the output file safely (Windows file locks)
+LOCKED_MSG = "Can't replace the video file — it's open in another app. Close the player and retry."
+
+class FileLocked(RuntimeError):
+    pass
+
+def locked(p):
+    """True when another program holds the file open (Windows: an exclusive open fails with a sharing violation). Elsewhere False."""
+    import os
+    p = Path(p)
+    if os.name != "nt" or not p.exists(): return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateFileW.restype = wintypes.HANDLE
+        k32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+        h = k32.CreateFileW(str(p), 0x80000000 | 0x40000000 | 0x00010000, 0, None, 3, 0x80, None)   # read|write|DELETE, no sharing, OPEN_EXISTING
+        if h in (None, wintypes.HANDLE(-1).value, -1, 0xFFFFFFFFFFFFFFFF):
+            return ctypes.get_last_error() in (32, 33, 5)   # sharing / lock violation, access denied
+        k32.CloseHandle(h); return False
+    except Exception:
+        return False
+
+def replace_file(tmp, dst, log=print, wait=12.0):
+    """Put tmp in place of dst. Never leaves a stray _edit_ / _kf_ file and never reports success unless dst really changed.
+    1. dst locked by another app (player, Explorer preview, the page's own video stream): wait up to `wait` s for it to close,
+       without trying the rename. 2. rename (atomic), retried a few times. 3. copy over dst in place (works while a reader shares
+       the file for writing), with a backup copied back if that fails half-way. Fails with FileLocked (LOCKED_MSG)."""
+    import os
+    tmp, dst = Path(tmp), Path(dst); t0 = time.time(); said = False
+    while locked(dst) and time.time() - t0 < wait:
+        if not said: log(f"  {dst.name} is open in another app; waiting for it to close..."); said = True
+        time.sleep(0.5)
+    last = None
+    if not locked(dst):
+        for i in range(6):
+            try: os.replace(tmp, dst); return "renamed"
+            except PermissionError as e: last = e; time.sleep(0.4 * (i + 1))
+    try:   # copy-over-write (a reader that shares write access, e.g. the server streaming the preview, doesn't block this)
+        bak = dst.with_name("_bak_" + dst.name); shutil.copyfile(dst, bak)
+        try:
+            shutil.copyfile(tmp, dst)
+            if dst.stat().st_size != tmp.stat().st_size: raise OSError("size mismatch after copy")
+        except Exception:
+            try: shutil.copyfile(bak, dst)
+            except Exception: pass
+            raise
+        finally: bak.unlink(missing_ok=True)
+        tmp.unlink(missing_ok=True); return "copied"
+    except Exception as e:
+        last = last or e
+    tmp.unlink(missing_ok=True)   # no stray file next to the original; the original is unchanged
+    log(f"  replace failed ({type(last).__name__}: {str(last)[:120]})")
+    raise FileLocked(LOCKED_MSG)
+
+def clean_leftovers(job):
+    """Stray _edit_ / _kf_ / _bak_ files from older failed replaces."""
+    for pat in ("_edit_*.mp4", "_kf_*.mp4", "_bak_*.mp4"):
+        for d in (Path(job) / "output", Path(job) / "build"):
+            for q in d.glob(pat) if d.exists() else []:
+                try: q.unlink()
+                except Exception: pass
+
 # ---------------------------------------------------------------- undo stack (edit/history/NNN)
 def _hroot(job): return Path(job) / "edit" / "history"
 
@@ -598,11 +739,23 @@ def start_apply(job, bid, cids, fit, cfg, log):
         if _busy.get(key): return "Already applying an edit to this video."
         _busy[key] = f"Applying the new visual to {bid}..."
     def run():
+        from .pipeline import Job
         try: apply(job, bid, cids, fit, cfg, log)
         except Exception as e:
             import traceback
-            log(f"Edit {bid} failed: {str(e)[:300]}"); log(traceback.format_exc()[-800:])
-            _busy[key + ":err"] = str(e)[:300]
+            msg = LOCKED_MSG if isinstance(e, FileLocked) or "WinError 5" in str(e) or "WinError 32" in str(e) else str(e)[:300]
+            log(f"Edit {bid} NOT applied: {msg} The video is unchanged.")
+            if not isinstance(e, FileLocked): log(traceback.format_exc()[-800:])
+            _busy[key + ":err"] = msg
+            try: Job(job).save(edit_last={"beat": bid, "ok": False, "msg": msg, "t": time.time()})
+            except Exception: pass
+            try:
+                from . import review
+                ws = workspace(job)
+                with review._lock(ws):
+                    rv = review.load(ws)
+                    if rv and bid in rv.get("beats", {}): rv["beats"][bid]["msg"] = f"Not applied: {msg}"; review.save(ws, rv)
+            except Exception: pass
         finally: _busy[key] = ""
     _busy.pop(key + ":err", None)
     threading.Thread(target=run, daemon=True).start(); return ""
@@ -614,7 +767,9 @@ def apply(job, bid, cids, fit, cfg, log):
     from .pipeline import Job
     job = Path(job); t0 = time.time()
     k, ws, sd, rv, d, lay, mode, why = _plan_beat(job, bid, cids, fit, cfg)
-    log(f"Edit {bid}: {', '.join(RUNG(rv, c) for c in cids)} -> {FIT_NAME.get(mode, mode)} ({why})")
+    user = all(is_user(rv["cands"][c]["item"]) for c in cids)
+    log(f"Edit {bid}: {', '.join(RUNG(rv, c) for c in cids)} -> {'fit-and-render (your file, no AI): ' if user else ''}{FIT_NAME.get(mode, mode)} ({why})")
+    clean_leftovers(job)
     _clear_prev(job)   # older single-step undo files: the stack replaces them
     outp = _tl_out(job, k) if k in TL else Path(Job(job).state["output"])
     pre = _vstats(outp)
@@ -641,8 +796,9 @@ def apply(job, bid, cids, fit, cfg, log):
     ver = {"frames_same": pre["frames"] == post["frames"], "decode_ok": post["decode_errors"] == 0,
            "audio_same": (pre["audio_md5"] == post["audio_md5"]) if k in TL else abs(pre["audio_dur"] - post["audio_dur"]) < 0.05,
            "frames": post["frames"]}
-    j = Job(job); edits = j.state.get("edits", []); edits.append({"beat": bid, "fit": mode, "t": time.time(), "verify": ver, "kind": k, "h": int(hd.name)}); j.save(edits=edits)
-    log(f"Edit {bid}: spliced into the video in {time.time() - t0:.0f}s; check: frames {'same' if ver['frames_same'] else 'CHANGED'}, "
+    j = Job(job); edits = j.state.get("edits", []); edits.append({"beat": bid, "fit": mode, "t": time.time(), "verify": ver, "kind": k, "h": int(hd.name), "user": user})
+    j.save(edits=edits, edit_last={"beat": bid, "ok": True, "msg": f"Applied ({FIT_NAME.get(mode, mode)}).", "t": time.time()})
+    log(f"Edit {bid}: applied - spliced into the video in {time.time() - t0:.0f}s; check: frames {'same' if ver['frames_same'] else 'CHANGED'}, "
         f"audio {'unchanged' if ver['audio_same'] else 'CHANGED'}, decoding {'clean' if ver['decode_ok'] else 'ERRORS'} (undo step {int(hd.name)})")
 
 def RUNG(rv, cid):
@@ -678,9 +834,11 @@ def _splice(job, k, outp, a, e, seg, log, keep_old=None):
     tmp = outp.with_name("_edit_" + outp.name)
     media.ff("-i", newv, "-i", outp, "-map", "0:v", "-map", "1:a?", "-c", "copy", "-movflags", "+faststart", tmp)
     if abs(_nframes(tmp) - total_before) > 0: tmp.unlink(missing_ok=True); raise RuntimeError("the edited video has a different length; the original is unchanged")
-    tmp.replace(outp)
-    for p in (vcopy, newv): Path(p).unlink(missing_ok=True)
-    shutil.rmtree(parts, ignore_errors=True)
+    try: how = replace_file(tmp, outp, log)
+    finally:
+        for p in (vcopy, newv): Path(p).unlink(missing_ok=True)
+        shutil.rmtree(parts, ignore_errors=True)
+    if how == "copied": log("  (the video was open elsewhere: written over it in place)")
 
 def _apply_short(job, bid, sd, lay, cfg, log, hd=None):
     return _apply_timeline(job, "short", bid, sd, lay, cfg, log, hd)
@@ -758,7 +916,7 @@ def _rejoin_long(job, plan, outp):
     tmp = outp.with_name("_edit_" + outp.name)
     media.ff("-i", b / "final_video.mp4", "-i", b / "final_audio.wav", "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
              "-shortest", "-movflags", "+faststart", tmp)
-    tmp.replace(outp)
+    replace_file(tmp, outp)
 
 def undo(job, log):
     """Undo the newest edit still on the stack (repeat to go further back); older jobs fall back to their single .prev copy."""

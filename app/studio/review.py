@@ -398,6 +398,13 @@ def final_items(rv, sec):
 # ---------------------------------------------------------------- your own file / URL
 VIDEO_EXT = (".mp4", ".mov", ".webm", ".mkv", ".m4v", ".avi")
 
+def _vsize(p):
+    import subprocess
+    o = subprocess.run([media._bin("ffprobe"), "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", str(p)],
+                       capture_output=True, text=True).stdout.strip().split("\n")[0]
+    try: w, h = (int(x) for x in o.strip(",").split("x")[:2]); return w, h
+    except Exception: return 1920, 1080
+
 def supply(job, bid, src, tag, cfg, log):
     import requests
     from PIL import Image
@@ -417,23 +424,26 @@ def supply(job, bid, src, tag, cfg, log):
         if not p.exists(): raise RuntimeError(f"file not found on this PC: {src}")
         raw = sup / f"sup_{bid}_{n}_raw{p.suffix.lower()}"; shutil.copy2(p, raw)
     tag = tag if tag in ("", "FILE", "ILLUSTRATIVE", "GENERATED", "RECONSTRUCTION") else ""
+    # fit-and-render (default for your own media): the file is used as it is - no vision check, no AI animation, no substitute,
+    # no rejection, no automatic pan / zoom / parallax. edit.layout fits it to the beat mechanically (trim, loop, freeze, speed,
+    # segment) and Remotion renders it. Labelled YOUR FOOTAGE (video) / FILE (picture) unless you picked another label.
+    W, H = _fsize(sd)
     if raw.suffix.lower() in VIDEO_EXT:
         out = sup / f"sup_{bid}_{n}.mp4"
-        W, H = _fsize(sd)
-        media.ff("-i", raw, "-t", 20, "-vf", f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}", "-an", "-c:v", "libx264",
-                 "-pix_fmt", "yuv420p", "-crf", 18, out)
-        secs = round(media.dur(out) / 0.85, 2)
-        item = {"type": "video", "src": _rel(out, sd), "secs": secs, "tag": tag}
+        vw, vh = _vsize(raw)
+        same = (vw > vh) == (W > H)
+        vf = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}" if same else "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2"
+        media.ff("-i", raw, "-t", 180, "-vf", vf + ",fps=30,format=yuv420p", "-an", "-c:v", "libx264", "-crf", 18, out, timeout=1800)
+        item = {"type": "video", "src": _rel(out, sd), "secs": round(media.dur(out), 2), "tag": tag or "YOUR FOOTAGE", "rate": 1.0, "user": True,
+                **({} if same else {"fit": "frame"})}   # other orientation: shown whole over a blurred copy
     else:
         im = Image.open(raw).convert("RGB"); out = sup / f"sup_{bid}_{n}.jpg"; im.save(out, quality=93)
-        W, H = _fsize(sd)
-        if (im.width > im.height) != (W > H): item = {"type": "image", "src": _rel(out, sd), "fit": "frame", "tag": tag}   # other orientation: shown whole
-        else: item = {"type": "layers", "layers": [_rel(p, sd) for p in short.depth_free(out, sup / f"sup_{bid}_{n}", (W, H))], "tag": tag}
+        item = {"type": "image", "src": _rel(out, sd), "fit": "frame" if (im.width > im.height) != (W > H) else "still", "tag": tag or "FILE", "user": True}
     try: raw.unlink()
     except Exception: pass
     with _lock(job):
         rv = load(job); cid = _add(rv, bid, item, "supplied", True, "your file: " + Path(src).name[:60])
-        b = rv["beats"][bid]; b["decision"], b["chosen"] = "chosen", [cid]; b["msg"] = f"Added your file and selected it ({RUNG['supplied']})."
+        b = rv["beats"][bid]; b["decision"], b["chosen"] = "chosen", [cid]; b["msg"] = f"Added your file and selected it ({RUNG['supplied']}: fitted to the beat as it is, no AI changes)."
         save(job, rv)
     thumbs(job, cfg, log, [cid]); return cid
 

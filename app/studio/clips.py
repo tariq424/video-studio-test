@@ -287,9 +287,9 @@ def offer(job, sd, rv, bid, cfg, log):
         out = od / f"own{c['n']}.mp4"
         if not media.ok(out, 0.3):
             src = Path(job) / c["file"]; d = info.get(c["n"], {}).get("dur") or media.dur(src)
-            _cut(src, 0.0, min(20.0, d), out, sp["w"], sp["h"])
+            _cut(src, 0.0, min(180.0, d), out, sp["w"], sp["h"])
         desc = info.get(c["n"], {}).get("desc") or c["name"]
-        review._add(rv, bid, {"type": "video", "src": f"own/{out.name}", "tag": "", "own_n": c["n"]}, "own", True, f"your clip {c['n']}: {desc}"[:120])
+        review._add(rv, bid, {"type": "video", "src": f"own/{out.name}", "tag": "YOUR FOOTAGE", "own_n": c["n"], "rate": 1.0, "user": True}, "own", True, f"your clip {c['n']}: {desc}"[:120])
 
 
 def coverage(job):

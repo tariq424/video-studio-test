@@ -821,3 +821,24 @@ Back to the old behaviour: pick "Auto" on the form, or `"visual_review_default":
   splice fell back to a full re-encode: 9.7 min -> 2.5 min per edit; keyframe stamp v2 redoes old ones once); the clip
   matcher keeps DeepSeek's "nothing fits" instead of falling back to word matching.
 - Seen, not fixed: in the Blyb1D927pM explainer a branded text card (slot s0_4) carries a SILHOUETTE label.
+
+## Beat-edit panel, safe file replace, fit-and-render (2026-10-13)
+- Beat-edit panel redesigned: six titled panes with their own tint - Candidates, Fit options, Actions (left) | Preview of
+  this beat, Chat, Log (right). Narration line on top. Candidates carry a source tag (FILE = real media / your file, AI =
+  AI-made picture or motion, GENERATED = drawn by the studio), rejection reasons in small red under failed ones, a boxed
+  "Use" checkbox. Chat: you on the right (blue), assistant on the left (grey) with backend/action meta, pipeline status lines
+  (the "(...)" notes) as amber monospace rows. Log pane: busy / applied / NOT applied / notes for this beat.
+- File replacement (edit.replace_file): every replace of a finished video (splice, keyframes, long rejoin, undo) checks for a
+  Windows file lock first (exclusive CreateFileW -> sharing violation) and waits up to 12 s without attempting the rename;
+  then os.replace with retries; then copy-over-write with a backup (works while a reader shares write access, e.g. the
+  server streaming the page's player); else the temp file is deleted and the edit fails with "Can't replace the video file -
+  it's open in another app. Close the player and retry." The page unloads its players before Apply and reloads them after.
+  Stray _edit_/_kf_/_bak_ files are cleaned at the next apply. State edit_last {beat, ok, msg}: the bar shows "Last edit
+  (bN): applied" or "NOT applied - <reason>"; the count reads "N edit(s) in the video" (successful splices only).
+- Fit-and-render (default for your own media: supplied files, your clips): no vision check, no AI animation, no substitute,
+  no rejection, no pan/zoom/parallax (Remotion bg user=true -> no push-in, hard cuts; still=false only if motion is asked
+  for). edit.user_layout fits mechanically: real speed 1.0x; longer -> speed up to 1.5x, trim (<=2.5x), segment (2-3 evenly
+  spaced chunks, hard cuts); shorter -> slow to 1/1.5x, loop (>=2 s footage), freeze. "Add still" is never used for your
+  files (-> freeze). Several files: hard cuts in your order. Pictures are held for their share. Labels: YOUR FOOTAGE (video) /
+  FILE (picture) unless you pick another. Supplied videos keep up to 180 s (was 20 s), other orientation shown whole.
+  Shorts and explainers (the explainer editor uses the same layout). Narration unchanged.

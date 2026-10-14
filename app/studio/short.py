@@ -741,6 +741,7 @@ def build(job, plan, cfg, log):
                 used.append(f"stock/clips/{c['id']}.mp4")
                 bg = {"src": f"media/stock/{c['id']}.mp4", "type": "video", "from": round(t0, 3)}
                 if story_subjects and not c.get("own"): bg["tag"] = "ILLUSTRATIVE"   # generic footage in a story about a specific event (not your own)
+                if c.get("own"): bg["tag"] = "YOUR FOOTAGE"
                 if c.get("orient") == "landscape": bg["fit"] = "frame"
             elif c["type"] == "image":
                 used.append(c["src"]); dst = pub / "media" / "fb" / Path(c["src"]).name

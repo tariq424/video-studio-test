@@ -175,7 +175,7 @@ def edit_beats(jid):
     except Exception as e: return jsonify(error=str(e)[:300], kind=None, beats=[])
     k = str(j.dir); out.update(busy=edit.status(j.dir), error=edit._busy.get(k + ":err", ""), edits=j.state.get("edits", []),
                                  undo=edit.can_undo(j.dir), history=edit.history(j.dir) if edit.v2() else [], outputs=edit.outputs(j.dir),
-                                 target=edit.kind(j.dir))
+                                 target=edit.kind(j.dir), last=j.state.get("edit_last"))
     return jsonify(out)
 
 @app.post("/api/jobs/<jid>/edit/target")

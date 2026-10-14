@@ -41,7 +41,10 @@ const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, s
   const p = Math.min(1, t / Math.max(dur, 0.1));
   const ease = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
   // first shot of a beat cuts in hard (a fade there dips to black between beats); later shots crossfade over the previous one
-  const fadeIn = bg.from === 0 ? 1 : interpolate(t, [0, 0.35], [0, 1], { extrapolateRight: "clamp" });
+  const fadeIn = bg.from === 0 || (bg as any).user ? 1 : interpolate(t, [0, 0.35], [0, 1], { extrapolateRight: "clamp" });   // your files: hard cuts
+  // your own file (fit-and-render): shown as it is - no push-in, pan or zoom unless you asked for motion (still === false)
+  const hold = !!(bg as any).user && (bg as any).still !== false;
+  const zz = (a: number, b: number) => (hold ? 1 : interpolate(p, [0, 1], [a, b]));
   const shade = "linear-gradient(180deg, rgba(5,8,14,0.45) 0%, rgba(5,8,14,0) 18%, rgba(5,8,14,0) 62%, rgba(5,8,14,0.7) 100%)";
   if (bg.type === "graphic") {
     const k = bg.g.kind;
@@ -57,7 +60,7 @@ const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, s
   if (bg.type === "layers") return <LayersBackdrop layers={bg.layers} dur={dur} seed={seed} />;
   if (bg.type === "video" && bg.fit === "frame") {
     // landscape clip shown whole, over a blurred enlarged copy of itself
-    const z = interpolate(p, [0, 1], [1.0, 1.03]);
+    const z = zz(1.0, 1.03);
     return (
       <AbsoluteFill style={{ opacity: fadeIn, overflow: "hidden", background: "#000" }}>
         <Vid bg={bg} style={{ width: "100%", height: "100%", objectFit: "cover", filter: "blur(38px) brightness(0.55)", transform: "scale(1.15)" }} />
@@ -70,7 +73,7 @@ const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, s
     );
   }
   if (bg.type === "video") {
-    const z = interpolate(p, [0, 1], [1.0, 1.04]);   // gentle: every % of zoom softens the picture
+    const z = zz(1.0, 1.04);   // gentle: every % of zoom softens the picture
     return (
       <AbsoluteFill style={{ opacity: fadeIn, overflow: "hidden" }}>
         <Vid bg={bg} style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${z})` }} />
@@ -80,7 +83,7 @@ const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, s
   }
   if (bg.type === "image" && bg.fit === "still") {
     // a slide (chart / card) that must stay readable: cover, a slow 3% push-in, no scrolling
-    const z = interpolate(p, [0, 1], [1.0, 1.03]);
+    const z = zz(1.0, 1.03);
     return (
       <AbsoluteFill style={{ opacity: fadeIn, overflow: "hidden", background: "#0b0f17" }}>
         <Img src={asset(bg.src)} style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${z})` }} />
@@ -89,7 +92,7 @@ const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, s
   }
   if (bg.type === "image" && bg.fit === "frame") {
     // a real photo shown whole (sharp), over a blurred enlarged copy of itself, with a slow push-in; credit line at the bottom
-    const z = interpolate(p, [0, 1], [1.0, 1.07]);
+    const z = zz(1.0, 1.07);
     return (
       <AbsoluteFill style={{ opacity: fadeIn, overflow: "hidden", background: "#000" }}>
         <Img src={asset(bg.src)} style={{ width: "100%", height: "100%", objectFit: "cover", filter: "blur(38px) brightness(0.5)", transform: "scale(1.15)" }} />

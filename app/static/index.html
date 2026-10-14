@@ -37,6 +37,26 @@ main>section{min-width:0}
 .rv-c .wrn{position:relative}.rv-c .wrn:after{content:"⚠";position:absolute;top:6px;right:8px;font-size:22px;color:#ffcc00;text-shadow:0 0 4px #000}
 .rv-badge{font-size:12px;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}.rv-prev{margin:6px 0}.rv-prev video,.rv-prev img{max-height:420px;width:auto;border-radius:8px}
 .rv-note{font-size:12.5px;color:var(--mut);border-left:2px solid var(--line);padding-left:8px;margin:4px 0}
+.edp-card{padding:14px}.edp-head{display:flex;align-items:flex-start;gap:10px}.edp-meta{font-size:12px;color:var(--mut);margin-top:2px}
+.edp-vo{font-size:14px;line-height:1.5;margin:10px 0;padding:8px 10px;border-left:3px solid var(--acc);background:rgba(245,165,36,.06);border-radius:4px}
+.edp-lab{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:2px}
+.edp-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:12px}@media(max-width:1000px){.edp-grid{grid-template-columns:1fr}}
+.edp-col{display:flex;flex-direction:column;gap:12px;min-width:0}
+.edp{border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:14px}.edp-t{font-size:15px;font-weight:700;margin:0 0 8px;letter-spacing:.01em}
+.edp-sub{font-size:11.5px;font-weight:400;color:var(--mut);margin-left:6px}.edp-help{font-size:12px;color:var(--mut);margin-bottom:6px;line-height:1.45}.edp-empty{font-size:12.5px;color:var(--mut);font-style:italic;padding:6px 0}
+.p-cand{background:#111a26}.p-fit{background:#16141f}.p-act{background:#121c18}.p-prev{background:#0b0f15;border-color:#3a4a63}.p-chat{background:#141820}.p-log{background:#18150f}
+.edp-user{color:var(--ok)}
+.edc .edc-name{font-weight:700;font-size:12.5px;margin-top:4px}.edc .edc-meta{font-size:11px;color:var(--mut);line-height:1.3}.edc .edc-rej{font-size:11px;color:var(--bad);line-height:1.3}
+.edc-src{position:absolute;left:6px;top:6px;font-size:10.5px;font-weight:800;letter-spacing:.06em;padding:2px 6px;border-radius:4px;color:#111}
+.src-file{background:#5bd68a}.src-ai{background:#c49bff}.src-generated{background:#7fc4ff}
+.edc-use{display:flex!important;align-items:center;gap:6px;margin:6px 0 0!important;padding:4px 8px;border:1px solid var(--line);border-radius:6px;color:var(--fg)!important;font-size:12.5px!important;font-weight:600;cursor:pointer;background:#0d1117}
+.edc-use input{width:17px;height:17px;accent-color:var(--acc);margin:0}.edc.sel .edc-use{border-color:var(--acc);background:rgba(245,165,36,.12)}
+.edp-chat{max-height:320px;display:flex;flex-direction:column;gap:6px}.cm{max-width:88%}.cm-b{padding:7px 10px;border-radius:10px;white-space:pre-wrap;font-size:13.5px;line-height:1.45}
+.cm-m{font-size:10.5px;color:var(--mut);margin:2px 4px 0}.cm-you{align-self:flex-end;text-align:right}.cm-you .cm-b{background:#1f4b7a;color:#fff;border-bottom-right-radius:3px;text-align:left}
+.cm-ai{align-self:flex-start}.cm-ai .cm-b{background:#262c36;color:var(--fg);border-bottom-left-radius:3px}
+.cm-sys{align-self:center;max-width:95%;font-size:11.5px;color:#e3b341;background:rgba(227,179,65,.08);border:1px dashed rgba(227,179,65,.4);border-radius:6px;padding:3px 8px;font-family:ui-monospace,Consolas,monospace}
+.edp-log .lg{font-size:12.5px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.04)}.edp-log .lg:empty{display:none}.lg-ok{color:var(--ok)}.lg-bad{color:var(--bad)}.lg-busy{color:var(--acc)}.lg-meta{font-size:11.5px;color:var(--mut)}
+.ed-last{font-size:12.5px}
 .ed-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}.ed-fit button{padding:5px 10px;font-size:12.5px}.ed-fit button.on{background:var(--acc);color:#111;border-color:var(--acc)}
 html.embed header,html.embed #settings,html.embed main>section:last-child,html.embed main>section>.card:not(#newvideo){display:none!important}
 html.embed main{grid-template-columns:1fr;padding:0;max-width:none}html.embed body{background:var(--panel)}html.embed #newvideo{border:0;margin:0}
@@ -263,7 +283,7 @@ async function smoke(){$('ssaved').textContent='Starting smoke test...';try{cons
 
 // ---------------- post-render editing (every output type)
 let ED={beats:[],kind:null,cur:null,open:null,space:'short',rv:null,sel:[],fit:'auto',timer:null};
-const FITS=[['auto','Auto'],['freeze','Freeze'],['slow','Slow down'],['loop','Loop'],['trim','Trim'],['speed','Speed up'],['still','Add still']];
+const FITS=[['auto','Auto'],['freeze','Freeze'],['slow','Slow down'],['loop','Loop'],['trim','Trim'],['speed','Speed up'],['still','Add still']];   // + Segment for your own files (edDraw)
 function fmtT(x){return Math.floor(x/60)+':'+String(Math.floor(x%60)).padStart(2,'0')}
 async function edInit(){try{const d=await j(`/api/jobs/${sel}/edit/beats`);ED.beats=d.beats||[];ED.kind=d.kind;edBar(d)}catch(e){}}
 function edJump(id){const v=$('ov'),b=ED.beats.find(x=>x.id==id);if(!v||!b)return;v.pause();v.currentTime=b.start+Math.min(0.5,b.dur/2);ED.cur=b.id;edBar()}
@@ -280,8 +300,9 @@ function edBar(d){const el=$('edbar');if(!el)return;const v=$('ov');const b=v?ed
  if(!d.busy&&(d.outputs||[]).length>1)h+=`<span class="mut" style="font-size:13px">Editing:</span><button class="sec ${d.target=='short'?'on':''}" data-testid="edit-target-short" onclick="edTarget('short')">Short</button><button class="sec ${d.target!='short'?'on':''}" data-testid="edit-target-long" onclick="edTarget('long')">Explainer</button>`;
  h+=`<button class="sec" onclick="if(confirm('Re-render the whole video? Your edits are kept.'))edAll('rerender')">Full re-render</button><button class="sec" onclick="edAll('cleanup')" title="Deletes previews and unused treatment files; thumbnails stay">Done editing (clean up)</button>`;
  if(ED.beats.some(x=>x.own))h+=`<span class="mut" data-testid="edit-own-coverage" style="font-size:12.5px">Your footage: ${ED.beats.filter(x=>x.own).map(x=>esc(x.label)+(ED.kind!='short'?' · '+x.id:'')).join(', ')}</span>`;
- if(d.error)h+=`<span style="color:var(--bad);font-size:13px">Last edit failed: ${esc(d.error)}</span>`;
- if(d.edits&&d.edits.length)h+=`<span class="mut" style="font-size:12px">${d.edits.length} edit(s) applied</span>`;
+ const L=d.last;if(L&&!d.busy)h+=`<span class="ed-last" data-testid="edit-last-status" style="color:var(${L.ok?'--ok':'--bad'})">Last edit (${esc(L.beat)}): ${L.ok?'applied':'NOT applied — '+esc(L.msg)}</span>`;
+ else if(d.error&&!d.busy)h+=`<span style="color:var(--bad);font-size:13px">Last edit NOT applied: ${esc(d.error)}</span>`;
+ if(d.edits&&d.edits.length)h+=`<span class="mut" style="font-size:12px">${d.edits.length} edit(s) in the video</span>`;
  el.innerHTML=h+`</div>`}
 // ---------------- timeline scrubber: find a beat by scrubbing the video, then open it in the edit panel below
 // Short / Explainer selector (edit/target), player scrubber with the beat strip, timestamp, beat at that time, Play / Stop,
@@ -314,32 +335,59 @@ function scEdit(){const v=$('ov');if(!v)return;v.pause();const b=edAt(v.currentT
 
 async function edTarget(t){try{await rvPost(`/api/jobs/${sel}/edit/target`,{target:t});ED.open=null;lastKey='';loadJobs()}catch(e){alert(e.message)}}
 async function edAll(a){try{await rvPost(`/api/jobs/${sel}/edit_all/${a}`);if(a=='undo'){edReload()}else{lastKey='';loadJobs()}}catch(e){alert(e.message)}}
-function edReload(){const v=$('ov');if(v){const t=v.currentTime;v.src=v.src.split('?')[0]+'?t='+Date.now();v.currentTime=t}edInit()}
+function edReload(){const v=$('ov');if(v){const base=(v.getAttribute('src')||ED.ovSrc||'').split('?')[0];const t=v.getAttribute('src')?v.currentTime:(ED.ovT||0);if(base){v.src=base+'?t='+Date.now();v.currentTime=t}ED.ovSrc=null}edInit()}
 const edQ=()=>ED.space=='long'?'?space=long':'';const edBase=()=>`/files/${sel}/${ED.space=='long'?'longedit/':''}short/`;
 async function edOpen(bid){const v=$('ov');if(v)v.pause();$('edp').innerHTML='<p class="mut">Opening the beat…</p>';
  try{const r=await fetch(`/api/jobs/${sel}/edit/open/${bid}`,{method:'POST'});const d=await r.json();if(!r.ok)throw new Error(d.error);
   ED.open=bid;ED.space=d.space;ED.rv=d.rv;const b=ED.rv.beats[bid];ED.sel=[...(b.current||[])];ED.fit='auto';ED.draft='';ED.chat=(await j(`/api/jobs/${sel}/edit/chat?beat=${bid}`)).chat;edDraw()}catch(e){$('edp').innerHTML=`<p style="color:var(--bad)">${esc(e.message)}</p>`}}
-function edDraw(){if($('edchat'))ED.draft=$('edchat').value;const bid=ED.open,b=ED.rv.beats[bid],bt=ED.beats.find(x=>x.id==bid)||{};
- let h=`<div class="card" style="margin-top:12px"><div class="row"><h2 style="margin:0">Edit ${esc(bt.label||bid)} <span class="mut" style="font-weight:400;font-size:13px">${fmtT(bt.start||0)}–${fmtT((bt.start||0)+(bt.dur||0))} · ${(bt.dur||0).toFixed(1)}s</span></h2><span style="flex:1"></span><button class="sec" onclick="ED.open=null;$('edp').innerHTML=''">Close</button></div>
- <p style="margin:6px 0">${esc(b.vo)}</p>${b.busy?`<span class="rv-badge" style="color:var(--acc)">${esc(b.busy)}</span>`:''}
- <div class="mut" style="font-size:13px">Tick the treatment(s) to use (they play in the order ticked); click a thumbnail to preview it. Blue outline = in the video now.</div><div class="rv-row">`;
- for(const cid of b.cands){const c=ED.rv.cands[cid];if(c.missing)continue;const i=ED.sel.indexOf(cid);const tag=c.item.tag?` · ${esc(c.item.tag)}`:'';
-  h+=`<div class="rv-c ${i>=0?'sel':''} ${(b.current||[]).includes(cid)?'auto':''}" data-testid="edit-treatment" data-cand="${cid}" data-rung="${c.rung}" data-index="${b.cands.indexOf(cid)}"><div class="${c.worst?'wrn':''}"><img data-testid="edit-treatment-thumb" loading="lazy" src="${c.thumb?edBase()+c.thumb+tq(c):''}" onclick="edCand('${cid}')" style="${ED.space=='long'?'width:213px;height:120px':''}"></div>
-  <b>${esc(RUNG[c.rung]||(c.rung=='current'?((b.current||[]).includes(cid)?'In the video now':'Before your edit'):c.rung))}</b>${tag}<br><span class="${c.ok?'ok':'bad'}">${c.ok?'✓':'✗'} ${esc(c.rung=='current'&&!(b.current||[]).includes(cid)?'was in the video':c.why)}</span><br>
-  <label style="margin:2px 0;color:var(--fg)"><input type="checkbox" data-testid="edit-choose" data-cand="${cid}" ${i>=0?'checked':''} onchange="edTickC('${cid}',this.checked)"> Use${i>=0&&ED.sel.length>1?' #'+(i+1):''}</label></div>`}
- h+=`</div><div id="edpv" class="rv-prev"></div>
- <div class="row ed-fit"><span class="mut" style="font-size:13px">Fit to the ${(bt.dur||0).toFixed(1)}s slot:</span>${FITS.map(([k,n])=>`<button class="sec ${ED.fit==k?'on':''}" data-testid="edit-fit-${k}" onclick="ED.fit='${k}';edDraw()">${n}</button>`).join('')}</div>
- <div class="row" style="margin-top:8px"><button data-testid="edit-preview" onclick="edPreview()" ${ED.sel.length?'':'disabled'}>Preview in the video</button><button data-testid="edit-apply" onclick="edApply()" ${ED.sel.length?'':'disabled'}>Apply to video</button>
- <button class="sec" data-testid="edit-skip" onclick="edSkip()">Skip (headline card)</button><button class="sec" data-testid="edit-show-all" onclick="edRv('expand')" ${b.busy?'disabled':''}>Show all options for this beat</button><button class="sec" data-testid="edit-add-animation" onclick="edRv('animate')" ${b.busy?'disabled':''}>Add animation</button><span id="edmsg" data-testid="edit-message" class="mut"></span></div>
- <details style="margin-top:8px"><summary>Refine / supply your own</summary>
- <label>Tell it what to change (e.g. "nose down, storm clouds", or a file path / URL)</label><textarea id="edrf" data-testid="edit-refine-text" rows="2"></textarea><div class="row"><button data-testid="edit-refine" onclick="edRv('refine')" ${b.busy?'disabled':''}>Regenerate</button></div>
- <label>Your own file (path on this PC or a URL) and its on-screen label</label><div class="row"><input type="text" id="edsp" data-testid="edit-supply-path" style="flex:1"><select id="edst" data-testid="edit-supply-label" style="width:auto"><option value="">no label</option><option>FILE</option><option>ILLUSTRATIVE</option><option>GENERATED</option></select><button class="sec" data-testid="edit-supply" onclick="edSupply()">Add</button></div>
- ${(b.notes||[]).map(x=>`<div class="rv-note">${esc(x.t)} you: “${esc(x.you)}” → <b>${esc(x.intent)}</b>: ${esc(x.understood)} <span style="opacity:.7">[handled by ${esc(x.backend)}]</span></div>`).join('')}</details>
- ${b.msg?`<div class="mut" style="font-size:12.5px;margin-top:6px">${esc(b.msg)}</div>`:''}
- <div style="margin-top:10px"><b>Chat about this beat</b> <span class="mut" style="font-size:12.5px">same chat as the pause panel: ask why, refine, more stock, simulate, use option N — then "apply it" to re-render this beat and splice it in</span>
- <div class="dbg-chat" data-testid="edit-chat-log">${(ED.chat||[]).map(x=>`<div class="you">you: ${esc(x.you)}</div><div class="ai">${esc(x.reply)} <span style="opacity:.7">[${esc(x.backend)}${x.action&&x.action!='none'?' · '+esc(x.action):''}]</span>${x.handoff?` <button class="sec" style="padding:2px 8px;font-size:12px" data-h="${esc(x.handoff)}" onclick="navigator.clipboard.writeText(this.dataset.h);this.textContent='Copied — paste it in the Claude chat'">Copy for Claude</button>`:''}</div>`).join('')}</div>
- <div class="row"><textarea id="edchat" data-testid="edit-chat-text" rows="2" style="flex:1" placeholder="e.g. simulate the descent with real physics / use option 3 / apply it">${esc(ED.draft||'')}</textarea><button data-testid="edit-chat-send" onclick="edChat()" ${ED.chatBusy?'disabled':''}>${ED.chatBusy?'Thinking…':'Send'}</button></div></div></div>`;
- $('edp').innerHTML=h;clearTimeout(ED.timer);if(b.busy)ED.timer=setTimeout(edRefresh,4000)}
+// ---- beat-edit panel: six labelled panes (Candidates, Fit options, Actions | Preview, Chat, Log), each with its own tint
+const SRC_OF=(c)=>{const r=c.rung,it=c.item||{};if(it.user||r=='supplied'||r=='own')return['FILE','your file'];
+ if(['still','animate','parallax','parallax (fill)','cloud','reconstruction'].includes(r))return['AI','AI-made picture or motion'];
+ if(['stock','photo'].includes(r))return['FILE','real footage / photo'];
+ if(r=='current'){if(it.type=='graphic')return['GENERATED','drawn by the studio'];if(/GENERATED|RECON/.test(it.tag||''))return['AI','AI-made'];return['FILE','media file']}
+ return['GENERATED','drawn by the studio (graphic, simulation, map, card)']};
+const edUserSel=()=>ED.sel.length&&ED.sel.every(c=>{const x=ED.rv.cands[c];return x&&(x.item.user||x.item.own_n||x.rung=='supplied'||x.rung=='own')});
+function edPane(cls,title,sub,body,tid){return`<section class="edp ${cls}" data-testid="edit-pane-${tid}"><h3 class="edp-t">${title}${sub?` <span class="edp-sub">${sub}</span>`:''}</h3>${body}</section>`}
+function edDraw(){if($('edchat'))ED.draft=$('edchat').value;const pv=$('edpv'),pvKeep=pv&&!pv.querySelector('.edp-empty')&&pv.innerHTML.trim()?pv.innerHTML:'';const bid=ED.open,b=ED.rv.beats[bid],bt=ED.beats.find(x=>x.id==bid)||{};
+ const head=`<div class="edp-head"><div><h2 style="margin:0">Edit ${esc(bt.label||bid)}</h2><div class="edp-meta">${fmtT(bt.start||0)}–${fmtT((bt.start||0)+(bt.dur||0))} · ${(bt.dur||0).toFixed(1)}s slot${ED.kind!='short'?' · '+esc(bid):''}</div></div><span style="flex:1"></span><button class="sec" onclick="ED.open=null;$('edp').innerHTML=''">Close</button></div>
+ <div class="edp-vo"><span class="edp-lab">Narration</span>${esc(b.vo)}</div>`;
+ // Candidates
+ let cands=`<div class="edp-help">Tick <b>Use</b> on the ones to show (they play in the order ticked). Click a thumbnail to preview it on the right. Blue outline = in the video now.</div><div class="rv-row">`;
+ for(const cid of b.cands){const c=ED.rv.cands[cid];if(c.missing)continue;const i=ED.sel.indexOf(cid);const [src,srcT]=SRC_OF(c);
+  const name=RUNG[c.rung]||(c.rung=='current'?((b.current||[]).includes(cid)?'In the video now':'Before your edit'):c.rung);
+  const why=c.rung=='current'&&!(b.current||[]).includes(cid)?'was in the video':c.why;
+  cands+=`<div class="rv-c edc ${i>=0?'sel':''} ${(b.current||[]).includes(cid)?'auto':''}" data-testid="edit-treatment" data-cand="${cid}" data-rung="${c.rung}" data-index="${b.cands.indexOf(cid)}"><div class="${c.worst?'wrn':''}" style="position:relative"><img data-testid="edit-treatment-thumb" loading="lazy" src="${c.thumb?edBase()+c.thumb+tq(c):''}" onclick="edCand('${cid}')" style="${ED.space=='long'?'width:213px;height:120px':''}"><span class="edc-src src-${src.toLowerCase()}" data-testid="edit-source-tag" title="${esc(srcT)}">${src}</span></div>
+  <div class="edc-name">${esc(name)}</div>${c.item.tag?`<div class="edc-meta">on screen: ${esc(c.item.tag)}</div>`:''}
+  ${c.ok?`<div class="edc-meta">${esc(why)}</div>`:`<div class="edc-rej" data-testid="edit-reject-reason">✗ ${esc(why)}</div>`}
+  <label class="edc-use"><input type="checkbox" data-testid="edit-choose" data-cand="${cid}" ${i>=0?'checked':''} onchange="edTickC('${cid}',this.checked)"> Use${i>=0&&ED.sel.length>1?' #'+(i+1):''}</label></div>`}
+ cands+=`</div>`;
+ // Fit options
+ const user=edUserSel();const fits=user?FITS.filter(([k])=>k!='still').concat([['segment','Segment (2–3 chunks)']]):FITS;
+ const fit=`<div class="edp-help">${user?'<b class="edp-user">Your file — fit-and-render.</b> Used exactly as supplied: no vision check, no AI animation, no substitution, no pan/zoom. Only fitted to the slot (trim, loop, freeze, speed ≤1.5×, segment), then rendered.':'How the picked treatment is fitted to the slot.'} Slot: ${(bt.dur||0).toFixed(1)}s.</div>
+  <div class="row ed-fit">${fits.map(([k,n])=>`<button class="sec ${ED.fit==k?'on':''}" data-testid="edit-fit-${k}" onclick="ED.fit='${k}';edDraw()">${n}</button>`).join('')}</div>`;
+ // Actions
+ const acts=`<div class="row"><button data-testid="edit-preview" onclick="edPreview()" ${ED.sel.length?'':'disabled'}>Preview in the video</button><button data-testid="edit-apply" onclick="edApply()" ${ED.sel.length?'':'disabled'}>Apply to video</button></div>
+  <div class="row" style="margin-top:6px"><button class="sec" data-testid="edit-skip" onclick="edSkip()">Skip (headline card)</button><button class="sec" data-testid="edit-show-all" onclick="edRv('expand')" ${b.busy?'disabled':''}>Show all options</button><button class="sec" data-testid="edit-add-animation" onclick="edRv('animate')" ${b.busy?'disabled':''}>Add animation</button></div>
+  <label>Your own file (path on this PC or a URL) — used as-is, fitted to the slot</label><div class="row"><input type="text" id="edsp" data-testid="edit-supply-path" style="flex:1"><select id="edst" data-testid="edit-supply-label" style="width:auto"><option value="">label: auto (YOUR FOOTAGE / FILE)</option><option>FILE</option><option>YOUR FOOTAGE</option><option>ILLUSTRATIVE</option><option>GENERATED</option></select><button class="sec" data-testid="edit-supply" onclick="edSupply()">Add</button></div>
+  <label>Regenerate with a change (e.g. "nose down, storm clouds")</label><div class="row"><textarea id="edrf" data-testid="edit-refine-text" rows="2" style="flex:1"></textarea><button class="sec" data-testid="edit-refine" onclick="edRv('refine')" ${b.busy?'disabled':''}>Regenerate</button></div>`;
+ // Preview
+ const prev=`<div id="edpv" class="rv-prev" data-testid="edit-preview-area"><div class="edp-empty">Nothing previewed yet. Click a thumbnail, or <b>Preview in the video</b> to see this beat as it will look.</div></div>`;
+ // Chat: you right, assistant left, pipeline status lines (in brackets) separate
+ const msgs=(ED.chat||[]).map(x=>{const parts=String(x.reply||'').split(/\n(?=\()/);const main=parts[0],st=parts.slice(1);
+  return`<div class="cm cm-you" data-testid="chat-you"><div class="cm-b">${esc(x.you)}</div><div class="cm-m">you${x.t?' · '+esc(x.t):''}</div></div>
+  <div class="cm cm-ai" data-testid="chat-ai"><div class="cm-b">${esc(main)}${x.handoff?` <button class="sec" style="padding:2px 8px;font-size:12px" data-h="${esc(x.handoff)}" onclick="navigator.clipboard.writeText(this.dataset.h);this.textContent='Copied — paste it in the Claude chat'">Copy for Claude</button>`:''}</div><div class="cm-m">assistant · ${esc(x.backend||'')}${x.action&&x.action!='none'?' · action: '+esc(x.action):''}</div></div>
+  ${st.map(z=>`<div class="cm cm-sys" data-testid="chat-status">⚙ ${esc(z.replace(/^\(|\)$/g,''))}</div>`).join('')}`}).join('')||'<div class="edp-empty">Ask why, refine, more stock, simulate, use option N — then "apply it".</div>';
+ const chat=`<div class="dbg-chat edp-chat" data-testid="edit-chat-log">${msgs}</div>
+  <div class="row"><textarea id="edchat" data-testid="edit-chat-text" rows="2" style="flex:1" placeholder="e.g. simulate the descent with real physics / use option 3 / apply it">${esc(ED.draft||'')}</textarea><button data-testid="edit-chat-send" onclick="edChat()" ${ED.chatBusy?'disabled':''}>${ED.chatBusy?'Thinking…':'Send'}</button></div>`;
+ // Log: pipeline status for this beat
+ const last=(ED.last||{}).last;
+ const log=`<div class="edp-log" data-testid="edit-log">${b.busy?`<div class="lg lg-busy">⏳ ${esc(b.busy)}</div>`:''}<div id="edmsg" data-testid="edit-message" class="lg"></div>
+  ${b.msg?`<div class="lg ${/^Not applied/.test(b.msg)?'lg-bad':''}">${esc(b.msg)}</div>`:''}
+  ${last&&last.beat==bid?`<div class="lg ${last.ok?'lg-ok':'lg-bad'}" data-testid="edit-last">${last.ok?'✓ Applied':'✗ Not applied'}: ${esc(last.msg||'')}</div>`:''}
+  ${(b.notes||[]).map(x=>`<div class="lg lg-meta">${esc(x.t)} you: “${esc(x.you)}” → <b>${esc(x.intent)}</b>: ${esc(x.understood)} [${esc(x.backend)}]</div>`).join('')}</div>`;
+ let h=`<div class="card edp-card" style="margin-top:12px">${head}<div class="edp-grid"><div class="edp-col">${edPane('p-cand','Candidates',`${b.cands.filter(c=>!ED.rv.cands[c].missing).length} options`,cands,'candidates')}${edPane('p-fit','Fit options','',fit,'fit')}${edPane('p-act','Actions','',acts,'actions')}</div>
+  <div class="edp-col">${edPane('p-prev','Preview of this beat','',prev,'preview')}${edPane('p-chat','Chat','about this beat',chat,'chat')}${edPane('p-log','Log','status of this beat',log,'log')}</div></div></div>`;
+ $('edp').innerHTML=h;if(pvKeep)$('edpv').innerHTML=pvKeep;clearTimeout(ED.timer);if(b.busy)ED.timer=setTimeout(edRefresh,4000)}
 async function edChat(){const t=$('edchat').value.trim();if(!t||ED.chatBusy)return;ED.chatBusy=1;ED.draft=t;edDraw();const bid=ED.open;
  try{const x=await rvPost(`/api/jobs/${sel}/edit/chat`,{beat:bid,text:t});ED.draft='';ED.chat=(await j(`/api/jobs/${sel}/edit/chat?beat=${bid}`)).chat;
   ED.chatBusy=0;if(ED.open!=bid)return;const r=await fetch(`/api/jobs/${sel}/edit/open/${bid}`,{method:'POST'});const d=await r.json();if(r.ok)ED.rv=d.rv;
@@ -351,10 +399,13 @@ async function edCand(cid){const el=$('edpv');el.innerHTML='<span class="mut">Re
  try{const d=await rvPost(`/api/jobs/${sel}/preview/${cid}${edQ()}`);el.innerHTML=(d.video?pvVideo(`${edBase()}${d.video}`):`<img src="${edBase()}${d.image}">`)+` <button class="sec" onclick="this.parentElement.innerHTML=''">Close</button>`}catch(e){el.innerHTML=`<span style="color:var(--bad)">${esc(e.message)}</span>`}}
 async function edPreview(){const el=$('edpv');el.innerHTML='<span class="mut">Rendering the beat as it will look in the video (half resolution)…</span>';
  try{const d=await rvPost(`/api/jobs/${sel}/edit/preview/${ED.open}`,{cands:ED.sel,fit:ED.fit});el.innerHTML=`<div class="mut" style="font-size:13px">Fit: <b>${esc(d.fit)}</b> — ${esc(d.why)}</div><video controls autoplay playsinline src="/files/${sel}/${d.video}" style="max-height:480px"></video> <button class="sec" onclick="this.parentElement.innerHTML=''">Close</button>`}catch(e){el.innerHTML=`<span style="color:var(--bad)">${esc(e.message)}</span>`}}
-async function edApply(){if(!ED.sel.length)return;$('edmsg').textContent='Applying…';try{await rvPost(`/api/jobs/${sel}/edit/apply/${ED.open}`,{cands:ED.sel,fit:ED.fit});edWait()}catch(e){$('edmsg').textContent='';alert(e.message)}}
+// let go of the video file before it is replaced (Windows won't replace a file a player has open): pause + unload the players
+function edRelease(){const v=$('ov');if(v&&v.getAttribute('src')){ED.ovSrc=v.getAttribute('src');ED.ovT=v.currentTime;v.pause();v.removeAttribute('src');v.load()}
+ document.querySelectorAll('#edpv video').forEach(x=>{x.pause();x.removeAttribute('src');x.load()})}
+async function edApply(){if(!ED.sel.length)return;$('edmsg').textContent='Applying…';edRelease();try{await rvPost(`/api/jobs/${sel}/edit/apply/${ED.open}`,{cands:ED.sel,fit:ED.fit});edWait()}catch(e){$('edmsg').textContent='';edReload();alert(e.message)}}
 async function edSkip(){const b=ED.rv.beats[ED.open];const cid=b.cands.find(c=>ED.rv.cands[c].rung=='headline');if(!cid){alert('No headline card for this beat');return}ED.sel=[cid];ED.fit='auto';edApply()}
 async function edWait(){const d=await j(`/api/jobs/${sel}/edit/beats`);edBar(d);if(d.busy){setTimeout(edWait,3000);if($('edmsg'))$('edmsg').textContent=d.busy;return}
- if(d.error){if($('edmsg'))$('edmsg').textContent='';alert('Edit failed: '+d.error);return}
+ if(d.error){edReload();if($('edmsg'))$('edmsg').textContent='✗ Not applied: '+d.error;const bid=ED.open;if(bid){const r=await fetch(`/api/jobs/${sel}/edit/open/${bid}`,{method:'POST'});const x=await r.json();if(r.ok){ED.rv=x.rv;edDraw();$('edmsg').textContent='✗ Not applied: '+d.error}}return}
  if($('edmsg'))$('edmsg').textContent='Applied. The video below is updated.';edReload();const bid=ED.open;if(bid){const r=await fetch(`/api/jobs/${sel}/edit/open/${bid}`,{method:'POST'});const x=await r.json();if(r.ok){ED.rv=x.rv;ED.sel=[...(ED.rv.beats[bid].current||[])];edDraw();$('edmsg').textContent='Applied. The video is updated.'}}}
 async function edRv(a){const body={action:a};if(a=='refine'){body.text=$('edrf').value.trim();if(!body.text)return}
  try{ED.rv=await rvPost(`/api/jobs/${sel}/review/${ED.open}${edQ()}`,body);edDraw();setTimeout(edRefresh,1500)}catch(e){alert(e.message)}}
