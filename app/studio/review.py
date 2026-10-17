@@ -299,7 +299,7 @@ def _thumb(job, c, cfg, log):
             _frame(src, tt, out.with_suffix(".tmp.jpg")); _cover(out.with_suffix(".tmp.jpg"), out, ts); out.with_suffix(".tmp.jpg").unlink()
         elif t == "image": _contain(sd / it["src"], out, ts) if it.get("fit") == "frame" else _cover(sd / it["src"], out, ts)
         elif t == "layers": _cover(sd / it["layers"][0], out, ts)
-        elif t == "graphic" and it["g"].get("kind") in ("recon", "illustration", "silhouette", "sim", "simmap", "tpl"):
+        elif t == "graphic" and it["g"].get("kind") in ("recon", "illustration", "silhouette", "sim", "simmap", "motion", "tpl"):
             _remotion(sd, it, 6, out, cfg, log, frame=FPS * 3, scale=0.25)
         elif t == "graphic" and it["g"].get("kind") == "map":
             _card(it["g"].get("title") or "Map", "map: " + ", ".join(p["name"] for p in it["g"].get("points", []))[:28], out)

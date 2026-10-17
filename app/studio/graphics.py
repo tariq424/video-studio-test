@@ -110,6 +110,10 @@ def _valid(t, d):
 
 def classify(cfg, sec, log, ctx=""):
     """-> {"template": t | None, "data", "why", "how": "analysis" | "model"}. Never raises."""
+    from .physics import synthetic_motion
+    motion = synthetic_motion(sec)
+    if motion:
+        return {"template": "motion", "data": motion, "why": "physical motion requires animation", "how": "synthetic"}
     a = _from_analysis(sec)
     if a: return {"template": a[0], "data": a[1], "why": a[2], "how": "analysis"}
     from .llm import LLM
@@ -147,7 +151,7 @@ def _hard(e):
 def render_template(cfg, sd, t, data, secs, out, log, tag=None):
     """Template -> MP4 at out. tag (e.g. "GRAPHICS") burns the label in (explainers); Shorts get it from Shot instead."""
     from . import review
-    bg = {"type": "graphic", "g": {"kind": "tpl", "t": t, "d": data}}
+    bg = {"type": "graphic", "g": data if t == "motion" else {"kind": "tpl", "t": t, "d": data}}
     if tag: bg["tag"] = tag
     raw = Path(out).with_name(Path(out).stem + "_raw.mp4")
     review._remotion(sd, bg, secs, raw, cfg, log, frames=(0, int(secs * FPS) - 1), scale=1, crf=16, timeout=int(cfg.get("graphics_timeout", 300)))

@@ -15,6 +15,7 @@ import type { Tpl } from "./Templates";
 export type Backdrop =
   | { kind: "map"; title?: string; points: MapPoint[] }
   | { kind: "headline"; kicker?: string; text: string; sub?: string }
+  | {kind: "motion"; module: string; title: string; label: string; angles: number[]; points: number[][]; targets: number[][]}
   | Recon | Illustration | Silhouette | Sim | SimMap | Tpl;
 
 const countries = (feature as any)(world as any, (world as any).objects.countries);

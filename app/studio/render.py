@@ -220,6 +220,11 @@ def v2_after_wangp(cfg, job, v, vo, log):
         if g6:
             v["type"] = "motion"; v["g"] = g6; v["tag"] = "SIMULATION"; log(f"  {v['id']}: simulation ({amod}, action: {verb})"); return "simulation"
         log(f"  {v['id']}: simulation {amod} had no usable data")
+    motion = physics.synthetic_motion(sec)
+    if motion:
+        v["type"] = "motion"; v["g"] = motion; v["tag"] = "SYNTHETIC"
+        log(f"  {v['id']}: synthetic motion ({motion['module']})")
+        return "simulation"
     from . import illustrate
     ac = illustrate.aircraft_for(sec)
     if ac and ac["type"] == "fighter" and re.search(illustrate.FIGHTER, vo, re.I):   # fighters named: draw them, not a text card

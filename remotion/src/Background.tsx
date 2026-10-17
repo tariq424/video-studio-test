@@ -6,6 +6,7 @@ import { MapBackdrop, HeadlineBackdrop, LayersBackdrop } from "./Backdrops";
 import { ReconBackdrop } from "./Recon";
 import { IllustrationBackdrop, SilhouetteBackdrop } from "./Illustration";
 import { SimBackdrop, SimMapBackdrop } from "./Sim";
+import { MotionBackdrop } from "./Motion";
 import { TemplateBackdrop } from "./Templates";
 
 // Stills are wide (16:9) in a tall frame, so we SCROLL across them to reveal the whole scene.
@@ -48,6 +49,7 @@ const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, s
   const shade = "linear-gradient(180deg, rgba(5,8,14,0.45) 0%, rgba(5,8,14,0) 18%, rgba(5,8,14,0) 62%, rgba(5,8,14,0.7) 100%)";
   if (bg.type === "graphic") {
     const k = bg.g.kind;
+    if (k === "motion") return <MotionBackdrop g={bg.g} dur={dur} />;
     if (k === "map") return <MapBackdrop g={bg.g} dur={dur} />;
     if (k === "recon") return <ReconBackdrop g={bg.g} dur={dur} />;
     if (k === "illustration") return <IllustrationBackdrop g={bg.g} dur={dur} />;

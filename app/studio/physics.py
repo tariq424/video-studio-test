@@ -184,7 +184,8 @@ def weather_event(p):
         for q in p.get("forecast") or []:
             try: fc.append({"lat": float(q["lat"]), "lon": float(q["lon"]), "h": float(q.get("hours") or 24 * (len(fc) + 1))})
             except Exception: pass
-    if len(track) + len(fc) < 2: return None
+    if len(track) + len(fc) < 2:
+        return synthetic_motion({"vo": p.get("_context") or "Storm moving across the ocean"})
     if len(track) > 60: k = len(track) / 60; track = [track[int(i * k)] for i in range(60)] + [track[-1]]
     fpts = [{"lat": q["lat"], "lon": q["lon"], "r_km": round(_cone_km(q.get("h", 24))), "label": f"+{int(q.get('h', 0))}h" if q.get("h") in (24, 72, 120) else ""} for q in fc]
     if len(track) < 2 and len(fpts) >= 1: track = track + [{"lat": fpts[0]["lat"], "lon": fpts[0]["lon"], "label": ""}]
@@ -223,7 +224,8 @@ def ship_route(p, cfg=None):
     if key and len(mmsi) == 9:
         pos = _ais_position(key, mmsi)
         if pos: wps.append({"lat": pos["lat"], "lon": pos["lon"], "name": "AIS: now"}); src = "route from the narration + live AIS position (aisstream.io)"
-    if len(wps) < 2: return None
+    if len(wps) < 2:
+        return synthetic_motion({"vo": p.get("_context") or "Ships moving along a shipping route"})
     track = []   # densify each leg so the vessel glides (straight in Mercator: the waypoints carry the real path round land)
     for a, b in zip(wps, wps[1:]):
         for i in range(12): k = i / 12; track.append({"lat": a["lat"] + (b["lat"] - a["lat"]) * k, "lon": a["lon"] + (b["lon"] - a["lon"]) * k})
@@ -252,11 +254,13 @@ MODULES = {
     "structural_collapse": (_not_built("structural_collapse"), "building collapse (not built yet)"),
     "earthquake": (_not_built("earthquake"), "seismic event (not built yet)"),
     "ship_route": (ship_route, "vessel path on a map. params: waypoints [{name, lat, lon}] (ports / straits in order, real coordinates in decimal degrees; add waypoints so the path stays at sea), vessel (name), mmsi (9 digits, only if the narration gives it), title, label"),
+    "radar_sweep": (lambda p: synthetic_motion({"vo": "Radar sweeps across the weather panel"}), "Illustrative radar sweep; synthetic angles, not live radar observations."),
     "weather_event": (weather_event, "hurricane / tropical storm / cyclone track with an uncertainty cone (NOAA data). params: storm_name, year, kind_word (Hurricane / Typhoon / Cyclone / Tropical Storm), points [{lat, lon, label, wind_mph}] and forecast [{lat, lon, hours}] only when the narration gives positions, title, label"),
 }
 
 # v2 ladder (rung 6): a module only when the beat's subject matches it - never speculatively
 ROUTES = [
+    ("radar_sweep", r"\bradar\b", None),
     ("weather_event", r"\b(hurricanes?|typhoons?|cyclones?|tropical (storm|depression)s?|storm surge|landfall|eye ?wall)\b", None),
     ("submarine_descent", r"\b(submarines?|submersibles?|sub)\b", r"\b(depth|deep|feet|metres?|meters?|dive|dived|descen\w*|sank|sinking|implo\w*|crush\w*)\b"),
     ("aircraft_flight", None, r"\b(feet|altitude|descen\w*|dropp?\w*|plung\w*|plummet\w*|dive|dove|diving|climb\w*|lost height|nosedive\w*|"
@@ -287,7 +291,7 @@ def action(sec, text=None):
                                vo[max(0, x.start() - 30):x.start()], re.I)), None)
     mod = route({**sec, "vo": vo})
     if mod == "aircraft_flight" and not m: mod = None   # "feet" / "altitude" talk alone isn't an action to animate
-    if not m and mod not in ("weather_event", "ship_route"): return "", None   # a storm track / voyage is motion by itself
+    if not m and mod not in ("weather_event", "ship_route", "radar_sweep"): return "", None   # a storm track / voyage is motion by itself
     return (m.group(0) if m else mod), mod
 
 
@@ -321,7 +325,7 @@ Leave out anything not given. Numbers as plain numbers. Reply with ONLY JSON: {{
 def fill(cfg, mod, sec, log):
     """Parameters for module `mod` from the narration: one small JSON call (script provider); regex defaults without a model.
     aircraft_flight also gets the airline livery the narration / subject names (liveries.pick; None = generic airliner)."""
-    p = _fill(cfg, mod, sec, log)
+    p = {} if mod == "radar_sweep" else _fill(cfg, mod, sec, log)
     if mod == "aircraft_flight":
         from . import liveries
         sj = sec.get("subject") or {}
@@ -334,6 +338,7 @@ def fill(cfg, mod, sec, log):
             else:
                 ft = _feet(vo)
                 if ft: p["drop_ft"] = ft
+    p["_context"] = sec.get("vo", "")
     return p
 
 
@@ -382,8 +387,41 @@ def run(module, params, cfg=None):
     if module not in MODULES: return None
     fn = MODULES[module][0]
     try: r = fn(params or {}, cfg) if module == "ship_route" else fn(params or {})
-    except Exception: return None
+    except Exception:
+        if module in ("ship_route", "weather_event", "radar_sweep"):
+            context = (params or {}).get("_context") or {"ship_route": "Ships moving on a route", "weather_event": "Storm moving across the ocean", "radar_sweep": "Radar sweep"}[module]
+            return synthetic_motion({"vo": context})
+        return None
     if not r: return None
+    if r.get("kind") == "motion": return r
     if r.get("kind") == "simmap": return r if len(r.get("track") or []) >= 2 else None
     if len(r.get("series") or []) < 2: return None
     return {"kind": "sim", "module": module, **r}
+
+
+# Deterministic, offline illustrative motion. Never presented as observations.
+def synthetic_motion(sec):
+    text = str(sec.get("vo") or "")
+    radar = re.search(r"\b(radar|radars)\b", text, re.I)
+    moving = re.search(r"\b(mov\w*|sweep\w*|flow\w*|travel\w*|sail\w*|transit\w*|cross\w*|heading|en route|route|tracking|track)\b", text, re.I)
+    ship = re.search(r"\b(ships?|vessels?|tankers?|shipping)\b", text, re.I)
+    if not radar and not moving: return None
+    # Avoid treating financial/figurative movement as physical motion.
+    physical = ship or radar or re.search(r"\b(water|wind|aircraft|plane|vehicle|car|train|storm|river|current|traffic|particles?|fluid|satellites?|missiles?|troops|cargo|spacecraft|rocket|ball|object|signal)\b", text, re.I)
+    if not physical: return None
+    if ship and re.search(r"hormuz", text, re.I):
+        params = {"title": "Strait of Hormuz transit", "waypoints": [
+            {"name": "", "lat": 26.5, "lon": 55.6},
+            {"name": "Strait of Hormuz", "lat": 26.6, "lon": 56.3},
+            {"name": "Gulf of Oman", "lat": 25.6, "lon": 57.4}]}
+        result = ship_route(params)
+        result.update(synthetic=True, label="SYNTHETIC • illustrative route, not live AIS",
+                      notes="Illustrative coordinates and timing; no observed vessel track.", source="synthetic")
+        return result
+    return {"kind": "motion", "module": "radar_sweep" if radar else "physical_flow",
+            "title": "Radar sweep" if radar else ("Vessel transit" if ship else "Physical motion"),
+            "synthetic": True, "source": "synthetic",
+            "label": "SYNTHETIC • schematic, not live tracking",
+            "angles": [i * 6 for i in range(121)],
+            "points": [[0.15 + i * 0.7 / 60, 0.5 + 0.16 * math.sin(i / 60 * math.pi * 2)] for i in range(61)],
+            "targets": [[0.25, 0.3], [0.7, 0.4], [0.55, 0.75]]}

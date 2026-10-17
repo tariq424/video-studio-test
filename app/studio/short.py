@@ -520,6 +520,11 @@ def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill,
         chain.append(f"simulation ({amod}, action: {verb})")
         if g6: vb["pok"] = True; return {"type": "graphic", "g": g6, "tag": "SIMULATION", "rung": "simulation"}
         why.append(f"simulation: {amod} had no usable data"); failed.append("simulation")
+    motion = physics.synthetic_motion({**s, "vo": physics.slot_text(s.get("vo", ""), pos)})
+    if motion:
+        vb["pok"] = True
+        chain.append("synthetic motion")
+        return {"type": "graphic", "g": motion, "tag": "SYNTHETIC", "rung": "simulation"}
     ac = illustrate.aircraft_for(s, pos)
     if ac and ac["type"] == "fighter" and re.search(illustrate.FIGHTER, physics.slot_text(s.get("vo", ""), pos), re.I):
         # the slot's narration names fighters ("scrambled F-35s"): the fighter drawing IS the specific picture; a text card isn't
@@ -652,7 +657,7 @@ def _clip_len(sd, c):
     if p not in _lens: _lens[p] = media.dur(p) if p.exists() else 0.0
     return _lens[p]
 
-TEXT_BG = ("headline", "sim", "simmap", "tpl")   # backgrounds that carry their own text in the middle of the frame (+ a map with a title)
+TEXT_BG = ("headline", "sim", "simmap", "motion", "tpl")   # backgrounds that carry their own text in the middle of the frame (+ a map with a title)
 
 def _resolve_overlaps(bid, bgs, gfx, d, log):
     """One text layer per screen zone at a time. A background that carries its own text (headline card, simulation, titled map)
