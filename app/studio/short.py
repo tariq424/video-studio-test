@@ -807,6 +807,8 @@ def build(job, plan, cfg, log):
     media.ff(*args, "-filter_complex", flt, "-map", "[out]", "-ar", 48000, pub / "voice.wav")
     data = {"audio": "voice.wav", "total": round(t, 3), "tag": plan.get("tag", ""), "beats": beats}
     (sd / "used.json").write_text(json.dumps(sorted(set(used)), indent=1), encoding="utf-8")
+    from .render_media import sanitize_timeline
+    sanitize_timeline(data, pub, log)
     (pub / "teaser.json").write_text(json.dumps(data, indent=1, ensure_ascii=False), encoding="utf-8")
     log(f"Short timeline: {t:.1f}s, {len(beats)} beats, {sum(len(b['bgs']) for b in beats)} clips")
     return t

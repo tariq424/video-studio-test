@@ -161,6 +161,8 @@ def build(job, plan, cfg, log, stop=lambda: False):
               "equalizer=f=120:t=q:w=1:g=2,loudnorm=I=-16:TP=-1.5:LRA=11[out]")
     media.ff(*ins, "-filter_complex", ";".join(fl), "-map", "[out]", "-ar", 48000, pub / "voice.wav")
     data = {"audio": "voice.wav", "total": round(total, 3), "tag": "", "beats": beats, "w": W, "h": H, "progress": False}
+    from .render_media import sanitize_timeline
+    sanitize_timeline(data, pub, log, stop)
     (pub / "teaser.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     log(f"Explainer timeline: {total:.1f}s ({len(secs)} sections from the narration + {END_SECS:.0f}s end card)")
     return total
