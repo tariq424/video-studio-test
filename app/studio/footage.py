@@ -7,7 +7,7 @@ Flow per slot (a Short beat or a long-video visual):
                darkness/blur and whether it shows what was asked; first clips that pass are used
   4. fetch   - only the needed seconds are cut from the source at high quality and normalised
 Keys come from the project .env (PEXELS_API_KEY, PIXABAY_API_KEY); NASA needs none. Keys are never logged."""
-import base64, io, json, math, re, time
+import base64, io, json, math, re, time, subprocess
 from pathlib import Path
 import requests
 from . import config, media
@@ -355,7 +355,13 @@ def reference(subject, out_dir, log):
 def fetch(c, out, max_secs):
     """Cut up to max_secs straight from the source URL (no full download) and normalise:
     portrait -> 1080x1920 (cropped), landscape -> 1920x1080 (cropped). Near-lossless so the final render is the only real compression."""
-    if media.ok(out): return out
+    from .render_media import inspect_video
+    if Path(out).exists():
+        try:
+            inspect_video(out)
+            return out
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            Path(out).unlink(missing_ok=True)
     dur = float(c.get("dur") or 0)
     start = 0.3 if dur < 20 else min(dur * 0.15, 20.0)
     length = max(3.0, min(max_secs, (dur - start - 0.3) if dur else max_secs))
@@ -365,8 +371,10 @@ def fetch(c, out, max_secs):
             media.ff("-user_agent", UA["User-Agent"], "-ss", f"{start:.2f}", "-i", c["file"], "-t", f"{length:.2f}", "-an",
                      "-vf", f"scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H},fps=30,format=yuv420p",
                      "-c:v", "libx264", "-preset", "veryfast", "-crf", "12", out, timeout=600)   # light on CPU so it can run beside narration
-            if media.ok(out): return out
+            inspect_video(out)  # ffprobe metadata + strict full-frame decode before selection
+            return out
         except Exception as e:
+            Path(out).unlink(missing_ok=True)  # do not cache a partial/undecodable download
             if attempt: raise RuntimeError(f"download of {c['id']} failed: {str(e)[:200]}")
     raise RuntimeError(f"download of {c['id']} produced no video")
 

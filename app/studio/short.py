@@ -851,7 +851,7 @@ def render_recon(g, out, secs, size, cfg, log, stop):
     pf = out.with_suffix(".json"); pf.write_text(json.dumps({"g": g, "secs": secs, "w": size[0], "h": size[1]}), encoding="utf-8")
     tmp = out.with_name(out.stem + "_tmp.mp4")
     cmd = [_npx(), "remotion", "render", "src/Root.tsx", "Recon", str(tmp), f"--props={pf}", f"--gl={_gl(cfg)}",
-           f"--concurrency={cfg.get('short_concurrency', '75%')}", "--jpeg-quality=92", "--crf=18", "--log=error"]
+           f"--concurrency={render_concurrency(cfg)}", "--jpeg-quality=92", "--crf=18", "--log=error"]
     for attempt in range(3):
         p = subprocess.run(cmd, cwd=rdir, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
         if p.returncode == 0 or BROWSER_FLAKE not in (p.stdout + p.stderr) or attempt == 2: break
@@ -862,6 +862,13 @@ def render_recon(g, out, secs, size, cfg, log, stop):
     tmp.rename(out); log(f"  reconstruction {out.stem}: {g.get('scene')} ({g.get('name') or ''})")
     return out
 
+def render_concurrency(cfg):
+    # Percentage-based fan-out exhausts RAM with concurrent 1080x1920 decoders.
+    # Bound automatic settings; explicit numeric settings remain an override.
+    value = cfg.get("short_concurrency", "75%")
+    return 2 if str(value).endswith("%") else value
+
+
 def do_render(job, plan, cfg, meta, log, stop):
     total = build(job, plan, cfg, log)
     rdir = _ensure_remotion(log)
@@ -870,7 +877,7 @@ def do_render(job, plan, cfg, meta, log, stop):
     out = out_dir / f"{safe}_short.mp4"; tmp = out_dir / "_short_rendering.mp4"
     cmd = [_npx(), "remotion", "render", "src/Root.tsx", "Teaser", str(tmp), f"--public-dir={job / 'short' / 'public'}",
            f"--concurrency={cfg.get('short_concurrency', '75%')}", "--jpeg-quality=95", "--crf=16", "--log=info", f"--gl={_gl(cfg)}"]
-    log(f"Rendering the Short with Remotion ({total:.0f}s of video)...")
+    log(f"Rendering the Short with Remotion ({total:.0f}s of video; concurrency {render_concurrency(cfg)})...")
     for attempt in range(3):
         p = subprocess.Popen(cmd, cwd=rdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
         last, t0, tail, errline = "", time.time(), [], ""
