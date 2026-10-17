@@ -162,6 +162,10 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             # shorter than the target, or longer but within 3:00: accepted as written (no padding, no trimming)
         prompt = SHORT.format(secs=int(secs), words=words, wmax=wmax if not smoke else int(words * hi), title=title, channel=channel, notes=notes[:24000], nb=nb, audience=audience_line(cfg),
                               people=(meta.get("description") or "")[:1200] or "(see notes)")
+        if audience_key(cfg) == 'beginner':
+            prompt += '\nBEGINNER PRIORITY: depth over breadth. Explain one core technical idea per beat instead of listing many features. Keep the technical names of the chosen idea, and explain what they mean immediately. Omit secondary features that would introduce more terms than you have room to explain.'
+            if smoke:
+                prompt += f'\nFor this 30-second test, use the TWO beats to explain ONE technical idea from the title/notes, in {int(words * lo)}-{int(words * hi)} words TOTAL. Do not introduce API keys, radar, lightning density or other secondary jargon unless that is the chosen topic. Keep source_spoken to 2-4 words so the closing line stays short.'
         try: j = llm.trace("short script").chat_json(SYSTEM, prompt, max_tokens=8000, check=chk)
         except RuntimeError:
             if tries:
@@ -198,7 +202,9 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                                      "visuals": [{"type": "chart", "chart": g["g"], "at": g.get("at")} for g in gs]})
         log("Checking the Short against the source (names, attributions, numbers)...")
         plan = fact_check(llm, plan, meta, transcript, log, stop, cfg)
-        if not smoke: jargon_check(llm, plan, cfg, log)
+        if not smoke or audience_key(cfg) == 'beginner':
+            if smoke: plan['smoke'] = True
+            jargon_check(llm, plan, cfg, log, source_notes=notes)
         from . import coherence
         ents = coherence.entities(cfg, Path(srcdir).parent, title, notes, log, stop, llm=llm)
         nl = 0

@@ -126,7 +126,7 @@ class Studio:
                 shutil.rmtree(j.dir, ignore_errors=True); raise
             j.save(my_clips=mc); j.log(f"Your clips: {len(mc)} file(s)" + (" with a placement note" if (own_clips.get("hints") or "").strip() else ""))
         if tts_engine in ("kokoro", "wanGP"): j.save(tts_engine=tts_engine)
-        if audience in ("common", "informed", "expert"): j.save(audience=audience)
+        if audience in writer.AUDIENCE: j.save(audience=audience)
         what = url or (f"file {up}" if up else "pasted text")
         j.log(f"Job created for {what} (output: {'SMOKE TEST, ' if smoke else ''}{mode}; long {minutes} min, short {short_secs:.0f}s)"); self.q.put(jid); return jid
 
@@ -297,7 +297,7 @@ class Studio:
     def _run(self, jid):
         j = self.job(jid); s = j.state; cfg = config.load()
         if s.get("tts_engine") in ("kokoro", "wanGP"): cfg["tts_engine"] = s["tts_engine"]   # the job's own narration choice
-        if s.get("audience") in ("common", "informed", "expert"): cfg["audience"] = s["audience"]; cfg["_audience_from"] = "job"   # the job's own audience (script prompts)
+        if s.get("audience") in writer.AUDIENCE: cfg["audience"] = s["audience"]; cfg["_audience_from"] = "job"   # the job's own audience (script prompts)
         if s.get("cancelled") and s.get("status") == "stopped": return   # cancelled while it waited in the queue
         self.current = jid
         stop = lambda: jid in self.cancel

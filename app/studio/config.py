@@ -60,7 +60,7 @@ DEFAULTS = {
     "own_clips": False,
     "post_edit_v2": False,            # timeline editor: Remotion explainers editable slot by slot, Short/Explainer switch, open a job by ID,
                                       # chat "supply" / "card" actions (studio/edit.py); off = the editor as before               # job form "Provide clips": your footage matched to beats (studio/clips.py)
-    "audience": "common",             # script register for every job that doesn't pick one: common | informed | expert (writer.AUDIENCE)
+    "audience": "common",             # common (default) | beginner (more explanation) | informed | expert (writer.AUDIENCE)
     "kokoro_speed": 1.0,
     "kokoro_wpm": 140,                # Kokoro's pace for sizing Shorts (am_michael at speed 1.0: 139.5-139.7 wpm, measured 2026-10-12)
     "kokoro_online": False,           # False: the worker runs with HF_HUB_OFFLINE=1 (model cached by install_kokoro.js)

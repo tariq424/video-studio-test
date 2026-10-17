@@ -9,7 +9,7 @@ main{display:grid;grid-template-columns:minmax(320px,440px) 1fr;gap:20px;padding
 @media(max-width:980px){main{grid-template-columns:1fr}}
 main>section{min-width:0}.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
 h2{font-size:16px;margin:0 0 10px}.mut{color:var(--mut)}label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
-textarea,input[type=text]{width:100%;background:#0d1117;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font:inherit}
+textarea,input[type=text],select{width:100%;background:#0d1117;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font:inherit}
 textarea{min-height:120px;resize:vertical}
 button{background:var(--acc);color:#111;border:0;border-radius:8px;padding:9px 14px;font-weight:600;cursor:pointer}button.sec{background:transparent;color:var(--fg);border:1px solid var(--line)}button:disabled{opacity:.5;cursor:default}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -26,6 +26,7 @@ pre{background:#0d1117;border:1px solid var(--line);border-radius:8px;padding:10
 <section>
  <div class="card"><h2>What should it make?</h2>
   <textarea id="desc" data-testid="make-describe" aria-label="Describe the video" placeholder="e.g. Take https://youtu.be/xcQ7MhOMLrg and make a 2:45 Short, review mode for the visuals, DeepSeek for the script."></textarea>
+  <label for="make-audience">Audience</label><select id="make-audience" data-testid="make-audience" aria-label="Audience" onchange="audienceChanged()"><option value="">Settings default (Common)</option><option value="common">Common: brief first-use explanations</option><option value="beginner">Beginner: zero background, clear explanations and analogies</option><option value="informed">Informed: some technical familiarity</option><option value="expert">Expert: specialist terminology</option></select>
   <div class="row" style="margin-top:10px"><button id="gen" data-testid="make-generate" onclick="generate()">Fill the form</button><span id="gmsg" class="mut" data-testid="make-message"></span></div>
   <details id="parsed" data-testid="make-parsed" style="margin-top:12px" open><summary class="mut">What was understood</summary><div id="psum" class="mut" style="font-size:14px">Nothing yet.</div></details>
  </div>
@@ -52,8 +53,9 @@ const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 let SPEC=null, JOB=null, jt=null, rt=null, RID=null;
 async function post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});const d=await r.json();if(!r.ok)throw new Error(d.error||'failed');return d}
 async function generate(){const t=$('desc').value.trim();if(!t)return;$('gen').disabled=true;$('gmsg').textContent='Reading your description…';
- try{const d=await post('/make/parse',{text:t});SPEC=d.spec;showParsed(d);fillForm(SPEC);$('gmsg').textContent='Form filled — check it and click Make video.'}
+ try{const d=await post('/make/parse',{text:t,audience:$('make-audience').value});SPEC=d.spec;showParsed(d);fillForm(SPEC);$('gmsg').textContent='Form filled — check it and click Make video.'}
  catch(e){$('gmsg').textContent=e.message}finally{$('gen').disabled=false}}
+function audienceChanged(){const a=$('make-audience').value;if(SPEC)SPEC.pipeline.audience=a;const e=$('form').contentDocument?.querySelector('[data-testid="audience"]');if(e){e.value=a;e.dispatchEvent(new Event('change',{bubbles:true}))}}
 function showParsed(d){$('psum').innerHTML=`<ul class="sum">${d.summary.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`+
  (d.notes&&d.notes.length?`<div class="note">${d.notes.map(n=>'Not done: '+esc(n)).join('<br>')}</div>`:'')+`<div style="font-size:12px;margin-top:6px">Read by: ${esc(d.parsed_by)}</div>`}
 // fill the real form (same page origin, by data-testid)
@@ -66,6 +68,7 @@ function fillForm(spec){const d=$('form').contentDocument;const q=t=>d.querySele
  set('output-mode',{short:'short',explainer:'long',both:'both',smoke:'smoke'}[o.mode]);
  set('short-length',o.short_length,'input');set('long-length',o.long_minutes,'input');
  set('toggle-captions',p.captions);set('toggle-presenter',p.presenter);set('script-ai',p.script_ai||'');
+ $('make-audience').value=p.audience||'';set('audience',p.audience||'');
  set('visuals-mode',p.visuals==='review'?'every':p.visuals==='auto'?'auto':'never');set('toggle-skip-script-review',!p.script_review);
  const f=q('new-video-form');if(f){f.style.outline='2px solid var(--acc)';setTimeout(()=>f.style.outline='',1500)}}
 // the form tells us when Make video started a job

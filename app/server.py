@@ -384,9 +384,12 @@ def make_page(): return send_from_directory(app.static_folder, "make.html")
 @app.post("/make/parse")
 def make_parse():
     from studio import make
-    t = ((request.get_json(silent=True) or {}).get("text") or "").strip()
+    body = request.get_json(silent=True) or {}
+    t = (body.get("text") or "").strip()
     if not t: return jsonify(error="Describe the video first."), 400
-    return jsonify(make.parse(t, config.load()))
+    audience = str(body.get('audience') or '').lower()
+    if audience and audience not in make.AUDIENCE: return jsonify(error='Unknown audience'), 400
+    return jsonify(make.parse(t, config.load(), audience=audience))
 
 @app.get("/make/model")
 def make_model():

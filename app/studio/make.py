@@ -8,10 +8,11 @@ import json, re, threading, time, subprocess, sys, os, shutil
 from pathlib import Path
 import requests
 from . import config
+from .writer import AUDIENCE
 
 DEFAULT = {"input": {"type": "youtube", "source": "", "title": "", "credit": "", "transcript": ""},
            "output": {"mode": "short", "short_length": 165, "long_minutes": 15},
-           "pipeline": {"script_review": False, "visuals": "never", "captions": True, "presenter": False, "script_ai": ""}}
+           "pipeline": {"script_review": False, "visuals": "never", "captions": True, "presenter": False, "script_ai": "", "audience": ""}}
 MODES = {"short", "explainer", "both"}   # "smoke" is set only by the rules ("smoke test")
 AIS = {"": "Settings default", "deepseek": "DeepSeek", "zai": "z.ai GLM", "claude": "Claude", "local": "Local AI (Ollama)"}
 
@@ -27,6 +28,8 @@ PROMPT = """Turn the user's request for a video into JSON. Fields:
   "auto" only if they explicitly want it to pause when unsure, "review" for review mode, or null if not said.
 - "captions": false only if they say no captions. "presenter": true only if they ask for an on-screen presenter.
 - "script_ai": "deepseek", "zai", "claude", "local", or "" if not named.
+- "audience": "beginner" for zero-background viewers who need terms explained in depth, "common" for general viewers,
+  "informed" for some technical familiarity, "expert" for specialists, or "" if not specified.
 - "title" and "credit": the source's title and author if they give them (for files/text), else "".
 Reply with ONLY the JSON object.
 
@@ -45,6 +48,12 @@ UNSUPPORTED = [(r"\bresearch", "research (there is no research step yet; the scr
 def _rules(text):
     """Facts read straight from the text. -> partial spec, notes"""
     t = text or ""; low = t.lower(); out = {"input": {}, "output": {}, "pipeline": {}}
+    for audience in AUDIENCE:
+        instruction = low.split('transcript:')[0].split('text:')[0]
+        if re.search(r'\b(?:for (?:a |an )?' + audience + r's?|audience\s*[:=]?\s*' + audience +
+                     r'|' + audience + r'(?:[- ]friendly| (?:audience|level|viewers|short|explainer|video)))\b', instruction):
+            out['pipeline']['audience'] = audience
+            break
     m = re.search(r"https?://(?:www\.|m\.)?(?:youtube\.com/(?:watch\?v=|shorts/|live/)|youtu\.be/)[\w\-?=&%.]+", t)
     if m: out["input"].update(type="youtube", source=m.group(0).rstrip(".,)"))
     p = re.search(r"(?:\"([A-Za-z]:\\[^\"]+)\"|([A-Za-z]:\\[^\s,;\"']+(?: [^\s,;\"'\\]+)*\.[A-Za-z0-9]{2,4}))", t)
@@ -121,7 +130,7 @@ def _deep(a, b):
         else: a[k] = v
     return a
 
-def parse(text, cfg):
+def parse(text, cfg, audience=None):
     """-> {"spec", "summary", "notes", "parsed_by"}"""
     spec = json.loads(json.dumps(DEFAULT))
     j, who = _llm(cfg, text)
@@ -143,12 +152,16 @@ def parse(text, cfg):
         elif j.get("visuals_review") is True and re.search(r"visual|beat|footage|image|picture|review", low):
             spec["pipeline"]["visuals"] = "review"
         if j.get("script_ai") in AIS: spec["pipeline"]["script_ai"] = j["script_ai"]
+        if j.get('audience') in AUDIENCE: spec['pipeline']['audience'] = j['audience']
         for k in ("title", "credit"):
             if isinstance(j.get(k), str): spec["input"][k] = j[k][:120]
         parsed_by = who
     else: parsed_by = f"rules only ({who})"
     rules, notes = _rules(text)
     _deep(spec, rules)   # links, paths, numbers and explicit keywords win
+    if audience:
+        if audience not in AUDIENCE: raise ValueError('Unknown audience: ' + str(audience))
+        spec['pipeline']['audience'] = audience
     o = spec["output"]; o["short_length"] = 30 if o["mode"] == "smoke" else max(120, min(176, int(o["short_length"]))); o["long_minutes"] = max(3, min(20, int(o["long_minutes"])))
     if o["mode"] == "smoke" and not spec["input"]["source"] and cfg.get("smoke_source"):   # no source given: the standard smoke-test video
         spec["input"].update(type="youtube", source=cfg["smoke_source"]); notes.append("no source given: using the standard smoke-test video")
@@ -166,7 +179,8 @@ def summary(spec):
     lines = [f"Source: {src} — {show}", f"Make: {mode}",
              "Script review: " + ("pause so you can read and edit the script" if p["script_review"] else "skipped (renders straight away)"),
              "Visuals: " + {"review": "Review every beat", "auto": "Auto (pauses only when unsure)"}.get(p["visuals"], "Decide everything (never pauses)") if o["mode"] != "explainer" else "Visuals: (explainer: automatic)",
-             f"Script AI: {AIS.get(p['script_ai'], p['script_ai'])}"]
+             f"Script AI: {AIS.get(p['script_ai'], p['script_ai'])}",
+             'Audience: ' + (p.get('audience') or 'Settings default').capitalize()]
     if o["mode"] in ("explainer", "both"): lines.append("Captions: " + ("on" if p["captions"] else "off") + " · Presenter: " + ("on" if p["presenter"] else "off"))
     if i.get("title"): lines.append(f"Source title: {i['title']}" + (f" — {i['credit']}" if i.get("credit") else ""))
     return lines

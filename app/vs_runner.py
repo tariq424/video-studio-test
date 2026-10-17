@@ -62,6 +62,7 @@ def fill(page, spec, run):
         page.set_checked(T("toggle-captions"), bool(pl.get("captions", True)))
         page.set_checked(T("toggle-presenter"), bool(pl.get("presenter", False)))
     page.select_option(T("script-ai"), pl.get("script_ai", ""))
+    page.select_option(T("audience"), pl.get("audience", ""))
     if o["mode"] != "explainer": page.select_option(T("visuals-mode"), "every" if pl.get("visuals") == "review" else "auto")
     page.set_checked(T("toggle-skip-script-review"), not pl.get("script_review", False))
     run.step("options set", detail=json.dumps({"mode": o["mode"], "short": o["short_length"], "long": o["long_minutes"], **pl}))
