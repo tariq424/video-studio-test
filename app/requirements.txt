@@ -6,6 +6,8 @@ matplotlib>=3.8
 numpy>=1.26
 pillow>=10.0
 faster-whisper>=1.1
+# PyAV 19 removed metadata_errors, which faster-whisper 1.2.1 still passes.
+av>=11,<19
 json-repair
 keyring
 imageio-ffmpeg
