@@ -5,7 +5,7 @@ from pathlib import Path
 import requests
 from . import config, media, tts
 from .llm import LLM, parse_json
-from .writer import SYSTEM, make_notes, fact_check, audience_line, audience_key, log_audience, jargon_check, COVER_FLOOR
+from .writer import SYSTEM, make_notes, fact_check, audience_line, audience_key, log_audience, jargon_check, editorial_review, COVER_FLOOR
 
 GAP, TAIL, MAX_SECS = 0.35, 2.2, 179.0   # YouTube Shorts allow up to 180 s (the hard maximum; a second of margin)
 SHORT_MAX = 180.0   # length policy (2026-10-14): target the requested length, accept anything up to 3:00, trim only beyond it
@@ -162,6 +162,8 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             # shorter than the target, or longer but within 3:00: accepted as written (no padding, no trimming)
         prompt = SHORT.format(secs=int(secs), words=words, wmax=wmax if not smoke else int(words * hi), title=title, channel=channel, notes=notes[:24000], nb=nb, audience=audience_line(cfg),
                               people=(meta.get("description") or "")[:1200] or "(see notes)")
+        from . import source_visuals
+        prompt += source_visuals.prompt(srcdir)
         if audience_key(cfg) == 'beginner':
             prompt += '\nBEGINNER PRIORITY: depth over breadth. Explain one core technical idea per beat instead of listing many features. Keep the technical names of the chosen idea, and explain what they mean immediately. Omit secondary features that would introduce more terms than you have room to explain.'
             if smoke:
@@ -198,6 +200,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             plan["sections"].append({"id": f"b{i}", "title": f"Beat {i + 1}", "vo": re.sub(r"\s+", " ", b["vo"]).strip(),
                                      "queries": [q for q in b.get("queries", []) if isinstance(q, str)][:3] or ["city skyline aerial"],
                                      "subject": sj, "backdrop": _clean_backdrop(b.get("backdrop"), b["vo"]),
+                                     "source_visual": b.get("source_visual"),
                                      "still_prompt": str(b.get("still_prompt") or "")[:500], "motion": str(b.get("motion") or "")[:160],
                                      "visuals": [{"type": "chart", "chart": g["g"], "at": g.get("at")} for g in gs]})
         log("Checking the Short against the source (names, attributions, numbers)...")
@@ -205,6 +208,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
         if not smoke or audience_key(cfg) == 'beginner':
             if smoke: plan['smoke'] = True
             jargon_check(llm, plan, cfg, log, source_notes=notes)
+        editorial_review(llm, plan, meta, transcript, cfg, log, stop)
         from . import coherence
         ents = coherence.entities(cfg, Path(srcdir).parent, title, notes, log, stop, llm=llm)
         nl = 0
@@ -224,10 +228,10 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
     # closing call-to-action beat
     src_name = plan.get("source_spoken") or title
     if mode == "both":
-        cta_vo = f"That was a short summary of {src_name}. The full breakdown is linked below."
+        cta_vo = f"That was a short summary of {src_name}. Big picture, fewer rabbit holes. The full breakdown is linked below."
         cta = {"kind": "cta", "badge": "FULL BREAKDOWN", "title": long_title or plan["title"], "line": "Watch it, linked below"}
     else:
-        cta_vo = f"That was a short summary of {src_name}. Follow for more."
+        cta_vo = f"That was a short summary of {src_name}. Big picture, fewer rabbit holes. Follow for more."
         cta = {"kind": "cta", "badge": "SUMMARIZED FROM", "title": title[:80], "line": "Follow for more", "play": False, "arrow": False}
     plan["sections"].append({"id": f"b{len(plan['sections'])}", "title": "Call to action", "vo": cta_vo, "queries": [], "cta": cta, "visuals": []})
     w = sum(len(s["vo"].split()) for s in plan["sections"])
@@ -345,14 +349,18 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
 
     def prepare(s):
         n = needs[s["id"]]; items = []; rej = []
+        from . import source_visuals
+        source = source_visuals.make(cfg, job, sd, s, log)
+        if source:
+            items.append(source)
         bd = s.get("backdrop") or {"kind": "headline", "kicker": "", "text": s["vo"][:60], "sub": ""}
-        if bd.get("kind") == "map": items.append({"type": "graphic", "g": bd, "rung": "map"})
+        if bd.get("kind") == "map" and len(items) < n: items.append({"type": "graphic", "g": bd, "rung": "map"})
         have = len(pick.get(s["id"], []))
         why1 = f"only {have} coherent stock clip(s)" if have else "no coherent stock"
         if s["id"] not in base_needs: why1 = ""   # stock covers this beat; the other treatments are made for the review menu
         act = physics.action(s)[0] if v2 else ""   # v2: a beat describing an action is animated (physics / graphics / illustration), never a still
         if s.get("subject") and act: why1 = f"action beat ({act}): a still photo can't show it"
-        elif s.get("subject"):   # step 1 for a subject beat: real licensed photos of it (FILE), only where a photo can show this moment
+        elif s.get("subject") and len(items) < n:   # source evidence already filling the slot needs no photo search
             inside = s["subject"].get("interior") or re.search(r"\b(cockpit|flight deck|pilots?|captain)\b", " ".join(s["queries"]), re.I)
             bp = phases.get(s["id"], ""); pics = []
             if inside: why1 = "inside the aircraft: no real photo of it"
@@ -392,6 +400,9 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         cap = bd.get("text", "") if bd.get("kind") == "headline" else bd.get("title", "")
         rung1, why1 = step1[s["id"]]
         lines, k5, kill, failed = [], 0, 0, ([rung1] if why1 else [])
+        for item in items:
+            if item.get("rung") == "source":
+                lines.append(f"source evidence ({item['g']['media']} at {item['g']['timestamp']:.2f}s) beside original analysis / graphics")
         vb = {"g": False, "hard": False, "p": False, "pok": False, "capcut": ""}   # v2, once per beat: graphics tried / hard-failed, physics tried / fitted
         if v2:
             from . import capcut

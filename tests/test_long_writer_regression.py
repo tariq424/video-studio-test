@@ -53,6 +53,7 @@ class LongWriterRegression(unittest.TestCase):
             patch("studio.writer.fit_length"),
             patch("studio.writer.fact_check", side_effect=lambda llm, p, *a: p),
             patch("studio.writer.jargon_check") as review,
+            patch("studio.writer.editorial_review"),
         ):
             result = writer.write_plan(
                 cfg, {"title": "ADS-B"}, "A source transcript", 3, lambda _: None

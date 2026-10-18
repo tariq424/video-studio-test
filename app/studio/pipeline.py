@@ -432,6 +432,9 @@ class Studio:
                 elif st == "presenter":
                     if s.get("presenter", False): _need_wangp(wg); render.do_presenter(j.dir, plan, cfg, wg, log, stop)
                 elif st == "broll":
+                    if not cfg.get("long_broll", True):
+                        from . import source_visuals
+                        source_visuals.apply_long(j.dir, plan, cfg, log); j.save_plan(plan)
                     if cfg.get("long_broll", True):
                         from . import footage
                         footage.long_broll(j.dir, plan, cfg, log, stop); j.save_plan(plan)

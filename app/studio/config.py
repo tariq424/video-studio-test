@@ -5,6 +5,8 @@ APP = Path(__file__).resolve().parent.parent
 ROOT = APP.parent
 CFG = ROOT / "settings.json"
 DEFAULTS = {
+    "source_visuals": True,           # opt-in per beat via a timestamp + original commentary purpose
+    "source_visual_max_uses": 2,      # editorial cap per output, not a legal safe harbor
     "script_provider": "deepseek",
     "qa_provider": "off",
     "anthropic_api_key": "",

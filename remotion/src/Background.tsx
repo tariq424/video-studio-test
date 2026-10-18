@@ -39,6 +39,7 @@ const Vid: React.FC<{ bg: any; style: React.CSSProperties }> = ({ bg, style }) =
 const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, seed }) => {
   const f = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
+  const tall = height > width;
   const t = f / fps;
   const p = Math.min(1, t / Math.max(dur, 0.1));
   const ease = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
@@ -50,6 +51,30 @@ const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, s
   const shade = "linear-gradient(180deg, rgba(5,8,14,0.45) 0%, rgba(5,8,14,0) 18%, rgba(5,8,14,0) 62%, rgba(5,8,14,0.7) 100%)";
   if (bg.type === "graphic") {
     const k = bg.g.kind;
+    if (k === "source_excerpt") {
+      const g = bg.g;
+      const child = { type: "graphic", from: 0, g: g.graphic } as Bg;
+      if (g.graphic?.kind === "source_excerpt") return null;
+      // The excerpt is visible ONCE for at most three seconds, then only our graphic continues.
+      if (t >= Math.min(3, g.seconds)) return <ShotInner bg={child} dur={dur} seed={seed} />;
+      return <AbsoluteFill style={{ background: "#091421" }}>
+        <div style={{ position: "absolute", right: 0, top: tall ? "26%" : "18%", width: "52%", height: tall ? "43%" : "64%", overflow: "hidden" }}>
+          <div style={{ width, height, transform: `scale(${tall ? 0.43 : 0.52})`, transformOrigin: "top left" }}>
+            <ShotInner bg={child} dur={dur} seed={seed} />
+          </div>
+        </div>
+        <div style={{ position: "absolute", left: "3%", top: "30%", width: "44%", height: "35%", background: "black", border: "3px solid #ffc83d" }}>
+          {g.media === "clip" ? <Html5Video src={asset(g.src)} muted style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+            : <Img src={asset(g.src)} style={{ width: "100%", height: "100%", objectFit: "contain" }} />}
+        </div>
+        <div style={{ position: "absolute", left: "4%", top: "20%", right: "4%", color: "#ffc83d", fontFamily: "Inter, sans-serif", fontSize: tall ? 31 : 26 }}>
+          OUR TAKE: {g.purpose}
+        </div>
+        <div style={{ position: "absolute", left: "4%", top: "68%", right: "4%", color: "white", fontFamily: "Inter, sans-serif", fontSize: tall ? 26 : 21 }}>
+          Source: {g.credit} · {g.timestamp.toFixed(1)}s · brief excerpt
+        </div>
+      </AbsoluteFill>;
+    }
     if (k === "motion") return <MotionBackdrop g={bg.g} dur={dur} />;
     if (k === "map") return <MapBackdrop g={bg.g} dur={dur} />;
     if (k === "recon") return <ReconBackdrop g={bg.g} dur={dur} />;

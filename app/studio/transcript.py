@@ -55,10 +55,12 @@ def _whisper(url, outdir, log):
         raise RuntimeError("Captions were blocked and local transcription isn't installed. Paste the transcript into the job, or run Reinstall in Pinokio.")
     def run(m):
         segs, _ = m.transcribe(audio, language="en", vad_filter=True)
-        text = []; t0 = time.time()
+        text = []; cues = []; t0 = time.time()
         for s in segs:
             text.append(s.text.strip())
+            cues.append({"start": s.start, "text": s.text.strip()})
             if time.time() - t0 > 60: log(f"  transcribed to {int(s.end//60)} min..."); t0 = time.time()
+        (outdir / "source_cues.json").write_text(json.dumps(cues, ensure_ascii=False), encoding="utf-8")
         return _clean(" ".join(text))
     try:
         return run(WhisperModel("large-v3-turbo", device="cuda", compute_type="float16"))
@@ -99,6 +101,11 @@ def fetch(url, outdir, log):
     turl, lang = _pick_track(info)
     if turl:
         d = _fetch_caption(turl, log)
+        if d:
+            cues = [{"start": e.get("tStartMs", 0) / 1000,
+                     "text": "".join(s.get("utf8", "") for s in e.get("segs", [])).strip()}
+                    for e in d.get("events", []) if e.get("segs")]
+            (outdir / "source_cues.json").write_text(json.dumps(cues, ensure_ascii=False), encoding="utf-8")
         if d: text = _from_json3(d); log(f"  captions: {lang}")
     if len(text.split()) < 200:
         text = _whisper(url, outdir, log)

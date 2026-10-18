@@ -135,3 +135,9 @@ git -C F:\code\video-studio apply F:\videos_test\evidence\e2e_review_20261018\fi
 
 Then restart the main instance through its normal launcher and Resume the failed
 jobs. No production rollback, patch application, or restart is part of this review run.
+
+## Subsequent fork work
+
+The humor/original-commentary prompts and source screenshots/micro-clips are
+documented in `EDITORIAL_SOURCE_REVIEW.md`, including current tests, generated
+examples, live-download limitations and the unchanged TypeScript baseline errors.

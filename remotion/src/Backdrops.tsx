@@ -13,6 +13,7 @@ import type { Illustration, Silhouette } from "./Illustration";
 import type { Sim, SimMap } from "./Sim";
 import type { Tpl } from "./Templates";
 export type Backdrop =
+  | { kind: "source_excerpt"; src: string; media: "clip" | "screenshot"; seconds: number; credit: string; purpose: string; timestamp: number; graphic: any }
   | { kind: "map"; title?: string; points: MapPoint[] }
   | { kind: "headline"; kicker?: string; text: string; sub?: string }
   | {kind: "motion"; module: string; title: string; label: string; angles: number[]; points: number[][]; targets: number[][]}

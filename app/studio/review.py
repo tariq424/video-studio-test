@@ -13,7 +13,7 @@ from pathlib import Path
 from . import media
 
 FPS = 30
-RUNG = {"own": "Your footage", "stock": "Stock footage", "photo": "Real photo", "cloud": "Cloud still", "illustration": "Illustration", "silhouette": "Silhouette", "simulation": "Simulation", "still": "AI still", "animate": "AI animation", "parallax": "Parallax",
+RUNG = {"source": "Source evidence + commentary", "own": "Your footage", "stock": "Stock footage", "photo": "Real photo", "cloud": "Cloud still", "illustration": "Illustration", "silhouette": "Silhouette", "simulation": "Simulation", "still": "AI still", "animate": "AI animation", "parallax": "Parallax",
         "reconstruction": "3D reconstruction", "headline": "Headline card", "map": "Map", "supplied": "Your file", "parallax (fill)": "Parallax",
         "graphics": "Remotion graphics", "capcut": "CapCut"}
 STATIC = {"still", "headline", "photo"}          # click enlarges instead of playing
