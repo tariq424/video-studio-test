@@ -1,5 +1,5 @@
 import React from "react";
-import { AbsoluteFill, Freeze, Img, Loop, OffthreadVideo, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Freeze, Img, Loop, Html5Video, OffthreadVideo, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
 import { Bg } from "./types";
 import { asset } from "./asset";
 import { MapBackdrop, HeadlineBackdrop, LayersBackdrop } from "./Backdrops";
@@ -29,7 +29,8 @@ export const Shot: React.FC<{ bg: Bg; dur: number; seed: number }> = (props) => 
 // into the source, freezeAt = hold the frame shown at that many seconds, loop = repeat every that many seconds
 const Vid: React.FC<{ bg: any; style: React.CSSProperties }> = ({ bg, style }) => {
   const f = useCurrentFrame(); const { fps } = useVideoConfig();
-  const v = <OffthreadVideo src={asset(bg.src)} muted playbackRate={bg.rate ?? 0.85} trimBefore={bg.start ? Math.round(bg.start * fps) : undefined} style={style} />;
+  const VideoComponent = bg.decoder === "browser" ? Html5Video : OffthreadVideo;
+  const v = <VideoComponent src={asset(bg.src)} muted playbackRate={bg.rate ?? 0.85} trimBefore={bg.start ? Math.round(bg.start * fps) : undefined} style={style} />;
   if (bg.loop) return <Loop durationInFrames={Math.max(1, Math.round(bg.loop * fps))} layout="none">{v}</Loop>;
   if (bg.freezeAt != null) { const n = Math.max(0, Math.round(bg.freezeAt * fps) - 1); if (f > n) return <Freeze frame={n}>{v}</Freeze>; }
   return v;

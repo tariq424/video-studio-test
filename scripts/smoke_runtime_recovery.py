@@ -29,6 +29,7 @@ with patch('studio.short.build',return_value=4),patch('studio.short.subprocess.P
  output=short.do_render(JOB,{'title':'Runtime recovery smoke'},{**cfg},{'title':'Test'},log,lambda:False)
 report={'validation':inspect_video(output),'render_attempts':len(calls),'source_retained':hashlib.sha256((PUB/'bad.mp4').read_bytes()).hexdigest()==source_hash,'recovered_timeline':json.loads((PUB/'teaser.json').read_text())}
 assert len(calls)==2 and report['source_retained']
-assert report['recovered_timeline']['beats'][0]['bgs'][0]['type']=='graphic'
+assert report['recovered_timeline']['beats'][0]['bgs'][0]['type']=='video'
+assert report['recovered_timeline']['beats'][0]['bgs'][0]['decoder']=='browser'
 assert report['recovered_timeline']['beats'][0]['bgs'][1]['type']=='video'
 (JOB/'report.json').write_text(json.dumps(report,indent=2));(JOB/'workflow.log').write_text('\n'.join(logs),encoding='utf-8');print('PASS',output,flush=True)

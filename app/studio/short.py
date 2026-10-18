@@ -894,14 +894,14 @@ def do_render(job, plan, cfg, meta, log, stop):
     cmd.extend(browser_args)
     log(f"  Render browser: {browser_args[0].split('=', 1)[1] if browser_args else 'Remotion default'}")
     log(f"Rendering the Short with Remotion ({total:.0f}s of video; concurrency {render_concurrency(cfg)})...")
-    # A compositor can reject an otherwise decodable asset. Retry with a card for
-    # that asset only, bounded by the number of unique videos plus browser retries.
+    # If the native compositor rejects a valid video, try browser decoding first.
+    # Card recovery is per asset and retries are bounded, including browser startup.
     from .render_media import fallback_failed_video
     timeline = job / "short" / "public" / "teaser.json"
     data = json.loads(timeline.read_text(encoding="utf-8"))
     videos = {b.get("src") for beat in data["beats"] for b in beat.get("bgs", []) if b.get("type") == "video"}
     browser_retries = 0
-    for attempt in range(len(videos) + 3):
+    for attempt in range(2 * len(videos) + 3):
         p = subprocess.Popen(cmd, cwd=rdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
         last, t0, tail, errline = "", time.time(), [], ""
         for line in p.stdout:

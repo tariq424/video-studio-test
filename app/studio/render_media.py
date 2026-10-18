@@ -56,12 +56,17 @@ def sanitize_timeline(data, public_dir, log, stop=lambda: False):
     """
     root = Path(public_dir).resolve()
     checked = {}
+    try:
+        use_browser = json.loads((root / "video_decoder.json").read_text(encoding="utf-8")).get("decoder") == "browser"
+    except (OSError, ValueError, AttributeError):
+        use_browser = False
     for beat in data['beats']:
         for index, bg in enumerate(beat.get('bgs', [])):
             if stop():
                 raise RuntimeError('cancelled')
             if bg.get('type') != 'video':
                 continue
+            if use_browser: bg['decoder'] = 'browser'
             try:
                 path = (root / bg['src']).resolve()
                 if not path.is_relative_to(root):
@@ -107,7 +112,8 @@ def fallback_failed_video(timeline, public_dir, error, log):
     """Recover a runtime-only compositor failure without deleting a healthy source.
 
     Only URLs naming a video actually present in this timeline may be replaced.
-    Each replacement removes that video, so a retry cannot loop on the same asset.
+    Native compositor failures switch videos to browser decoding first. A second
+    failure for an already switched asset uses a card, bounding retries.
     """
     import re
     from urllib.parse import unquote
@@ -120,6 +126,16 @@ def fallback_failed_video(timeline, public_dir, error, log):
     if not (root / src).resolve().is_relative_to(root): return False
     path = Path(timeline)
     data = json.loads(path.read_text(encoding="utf-8"))
+    targets = [bg for beat in data.get("beats", []) for bg in beat.get("bgs", [])
+               if bg.get("type") == "video" and bg.get("src") == src]
+    if not targets: return False
+    if any(bg.get("decoder") != "browser" for bg in targets):
+        videos = [bg for beat in data.get("beats", []) for bg in beat.get("bgs", []) if bg.get("type") == "video"]
+        for bg in videos: bg["decoder"] = "browser"
+        (root / "video_decoder.json").write_text(json.dumps({"decoder":"browser"}), encoding="utf-8")
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        log(f"Runtime media recovery: native compositor rejected {src}; switching {len(videos)} video slot(s) to Chrome decoding; original visuals retained")
+        return True
     replaced = 0
     for beat in data.get("beats", []):
         for i, bg in enumerate(beat.get("bgs", [])):

@@ -12,7 +12,7 @@ export type Graphic =
 import type { Backdrop } from "./Backdrops";
 // from = seconds into beat. "layers": AI still split into depth layers (2.5D). "graphic": full-screen map/headline backdrop.
 export type Bg =
-  | { src: string; type: "image" | "video"; from: number; fit?: "cover" | "frame" | "still"; credit?: string; tag?: string; rate?: number; freezeAt?: number; start?: number; loop?: number; user?: boolean; still?: boolean }   // user = your own file (fit-and-render: no motion unless still is false)   // tag: "FILE" / "ILLUSTRATIVE"; still = a slide (chart) with a slow push-in
+  | { src: string; type: "image" | "video"; from: number; fit?: "cover" | "frame" | "still"; credit?: string; tag?: string; rate?: number; decoder?: "browser"; freezeAt?: number; start?: number; loop?: number; user?: boolean; still?: boolean }   // user = your own file (fit-and-render: no motion unless still is false)   // tag: "FILE" / "ILLUSTRATIVE"; still = a slide (chart) with a slow push-in
   | { type: "layers"; layers: string[]; from: number }
   | { type: "graphic"; g: Backdrop; from: number };
 

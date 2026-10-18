@@ -23,3 +23,9 @@ The follow-up explicitly selects installed Chrome (or remotion_browser_executabl
 Validation: 24 offline tests pass. scripts/smoke_runtime_recovery.py injects a compositor error into the actual Short render loop, then invokes real Remotion with explicit Chrome. It passes on the second render attempt: 4 seconds, 120 frames, 30fps, strict full decoding; source retained, only the named clip replaced, second clip preserved. Evidence: F:\videos_test\jobs\runtime_recovery_smoke\report.json and workflow.log.
 
 Follow-up patch: F:\videos_test\evidence\render-runtime-recovery.patch. Main originals for rollback are saved under F:\videos_test\evidence\runtime-recovery-backup. This patch supplements the earlier stock-validation patch.
+
+## Preserve visuals using browser decoding
+
+Production's native compositor rejected several additional files that pass full decoding. Runtime recovery now switches all video slots to Remotion Html5Video in installed Chrome on the first native failure, preserving the original footage. Only an asset that also fails browser decoding is replaced by a headline card. The per-job decision is saved in public/video_decoder.json and honored by preflight on later builds. Retry bounds account for both decoder fallback and asset fallback.
+
+Validation: 25 offline tests pass. The real four-second recovery smoke injects one compositor failure, then renders both original videos using Chrome decoding: 120 frames pass strict decoding, sources retained, exactly two render attempts. This supersedes the card-first behavior described above. Main job's generated decoder policy is set to browser before resuming, restoring original visual selections from fallback.json during build; original media, script, and narration are retained.
