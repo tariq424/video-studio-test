@@ -310,7 +310,7 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
         fit_length(llm, plan, secs, words, cfg, log, stop)
         log("Checking the script against the transcript (names, attributions, claims)...")
         plan = fact_check(llm, plan, meta, transcript, log, stop, cfg)
-        jargon_check(llm, plan, cfg, log, source_notes=notes)
+        jargon_check(llm, plan, cfg, log, source_notes=notes_txt)
         plan = normalize(plan)
         w = sum(_nw(s["vo"]) for s in plan["sections"])
         tk = f" Tokens in/out: {llm.tokens_in}/{llm.tokens_out}" if llm.tokens_in else ""
