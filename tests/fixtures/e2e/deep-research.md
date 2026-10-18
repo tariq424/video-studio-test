@@ -1,0 +1,13 @@
+# Synthetic maritime motion: research-format test fixture
+
+## Scope
+This fixture tests document ingestion; it is not an actual Deep Research export.
+
+## Findings
+This is a fictional training demonstration, not a report about a real vessel or a live tracking service. A ship moves from the Persian Gulf through the Strait of Hormuz and into the Gulf of Oman. Its route is a sequence of latitude and longitude coordinates. Latitude describes how far north or south a point lies, while longitude describes its east or west position. A moving marker follows those coordinates in their listed order. The demonstration uses synthetic data, meaning positions created for an illustration rather than measured from a real ship. AIS, the Automatic Identification System, is a radio system through which vessels broadcast information such as their identity and position. A drawn route without AIS observations must therefore be labeled illustrative. The animation compresses a long journey into a few seconds, so its speed on screen is not the ship's actual speed. A radar sweep uses a rotating beam to show the direction being examined. Radar sends out radio waves and uses returning echoes to locate objects. Synthetic sweep angles can explain the motion without claiming to show live observations. A map animation should show the vessel moving along a route, while a radar graphic should show its sweep rotating. These are two different kinds of motion and should be labeled clearly.
+
+## Limitations
+No live AIS or radar observations are included. Synthetic paths do not establish the location or identity of any real vessel.
+
+## Conclusion
+Preserve the distinction between observation and illustration.
