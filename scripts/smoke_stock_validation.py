@@ -13,6 +13,8 @@ print('Copying failing timeline and media into test directory...',flush=True)
 shutil.copytree(SOURCE,PUBLIC,dirs_exist_ok=True)
 cfg=config.load(); cfg['short_concurrency']='75%'; workers=short.render_concurrency(cfg)
 cmd=[short._npx(),'remotion','render','src/Root.tsx','Teaser',str(OUT/'result.mp4'),f'--public-dir={PUBLIC}',f'--concurrency={workers}','--jpeg-quality=95','--crf=16','--log=info',f'--gl={short._gl(cfg)}']
+cmd.extend(short.render_browser_args(cfg))
+print('Explicit browser:',short.render_browser_args(cfg),flush=True)
 start=time.time()
 with (OUT/'render.log').open('w',encoding='utf-8') as log:
  result=subprocess.run(cmd,cwd=ROOT/'remotion',stdout=log,stderr=subprocess.STDOUT)

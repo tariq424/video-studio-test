@@ -101,3 +101,34 @@ def sanitize_timeline(data, public_dir, log, stop=lambda: False):
                     'kicker': 'VIDEO STUDIO', 'sub': ''}}
                 log(f"Media preflight: {bg.get('src', '?')} invalid ({error}) -> headline card")
     return data
+
+
+def fallback_failed_video(timeline, public_dir, error, log):
+    """Recover a runtime-only compositor failure without deleting a healthy source.
+
+    Only URLs naming a video actually present in this timeline may be replaced.
+    Each replacement removes that video, so a retry cannot loop on the same asset.
+    """
+    import re
+    from urllib.parse import unquote
+    if not any(x in error for x in ("Could not extract frame", "No frame found", "delayRender()")):
+        return False
+    match = re.search(r"/public/([^\s?&\"')]+?\.mp4)", unquote(error))
+    if not match: return False
+    src = match.group(1)
+    root = Path(public_dir).resolve()
+    if not (root / src).resolve().is_relative_to(root): return False
+    path = Path(timeline)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    replaced = 0
+    for beat in data.get("beats", []):
+        for i, bg in enumerate(beat.get("bgs", [])):
+            if bg.get("type") != "video" or bg.get("src") != src: continue
+            text = beat.get("title") or " ".join(str(w[0]) for w in beat.get("words", [])[:12]) or beat.get("id", "Video")
+            beat["bgs"][i] = {**{k:bg[k] for k in ("from", "slot") if k in bg},
+                "type":"graphic", "g":{"kind":"headline", "text":text[:90], "kicker":"VIDEO STUDIO", "sub":""}}
+            replaced += 1
+    if not replaced: return False
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    log(f"Runtime media recovery: {src} failed in compositor; {replaced} slot(s) -> headline card; original file retained")
+    return True

@@ -13,3 +13,13 @@ Patch: F:\videos_test\evidence\stock-validation.patch (only app/studio/footage.p
 Manual rollback is possible using the two original files saved under F:\videos_test\evidence\stock-validation-backup before applying to main. Production lifecycle uses Pinokio pterm stop/run, preserving launcher configuration and other services.
 
 Completed isolated result: 5,357 frames, 178.566667 seconds at 30fps; strict decode passed, original source hashes unchanged; 775.87 seconds for render/encoding.
+
+## Follow-up after production verification
+
+The first main rerender still failed on px7989667.mp4 at two workers. Thus the worker limit alone was not a complete fix. Source files were equivalent, but the passing fork used a local Chrome override whereas main used Remotion's default browser.
+
+The follow-up explicitly selects installed Chrome (or remotion_browser_executable when configured). It also adds bounded runtime recovery for frame-extraction or frame-fetch errors: only the video identified in the error URL and actually present in the current timeline is replaced by a headline card; other assets, timing, captions, and original source files remain intact. Each failed video is removed from the current timeline so it cannot create an infinite retry loop. Unknown errors remain errors. Runtime replacements are logged and saved in short/public/teaser.json; a later full rebuild may attempt original assets again.
+
+Validation: 24 offline tests pass. scripts/smoke_runtime_recovery.py injects a compositor error into the actual Short render loop, then invokes real Remotion with explicit Chrome. It passes on the second render attempt: 4 seconds, 120 frames, 30fps, strict full decoding; source retained, only the named clip replaced, second clip preserved. Evidence: F:\videos_test\jobs\runtime_recovery_smoke\report.json and workflow.log.
+
+Follow-up patch: F:\videos_test\evidence\render-runtime-recovery.patch. Main originals for rollback are saved under F:\videos_test\evidence\runtime-recovery-backup. This patch supplements the earlier stock-validation patch.

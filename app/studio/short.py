@@ -862,6 +862,19 @@ def render_recon(g, out, secs, size, cfg, log, stop):
     tmp.rename(out); log(f"  reconstruction {out.stem}: {g.get('scene')} ({g.get('name') or ''})")
     return out
 
+def render_browser_args(cfg):
+    """Match the installed Chrome used by local smoke tests; allow an explicit override."""
+    explicit = cfg.get("remotion_browser_executable")
+    candidates = [Path(explicit)] if explicit else [
+        Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Google/Chrome/Application/chrome.exe",
+        Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Google/Chrome/Application/chrome.exe",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/Application/chrome.exe"] if os.name == "nt" else []
+    for path in candidates:
+        if path.is_file(): return [f"--browser-executable={path}"]
+    if explicit: raise RuntimeError(f"Configured Remotion browser not found: {explicit}")
+    return []
+
+
 def render_concurrency(cfg):
     # Percentage-based fan-out exhausts RAM with concurrent 1080x1920 decoders.
     # Bound automatic settings; explicit numeric settings remain an override.
@@ -877,8 +890,18 @@ def do_render(job, plan, cfg, meta, log, stop):
     out = out_dir / f"{safe}_short.mp4"; tmp = out_dir / "_short_rendering.mp4"
     cmd = [_npx(), "remotion", "render", "src/Root.tsx", "Teaser", str(tmp), f"--public-dir={job / 'short' / 'public'}",
            f"--concurrency={cfg.get('short_concurrency', '75%')}", "--jpeg-quality=95", "--crf=16", "--log=info", f"--gl={_gl(cfg)}"]
+    browser_args = render_browser_args(cfg)
+    cmd.extend(browser_args)
+    log(f"  Render browser: {browser_args[0].split('=', 1)[1] if browser_args else 'Remotion default'}")
     log(f"Rendering the Short with Remotion ({total:.0f}s of video; concurrency {render_concurrency(cfg)})...")
-    for attempt in range(3):
+    # A compositor can reject an otherwise decodable asset. Retry with a card for
+    # that asset only, bounded by the number of unique videos plus browser retries.
+    from .render_media import fallback_failed_video
+    timeline = job / "short" / "public" / "teaser.json"
+    data = json.loads(timeline.read_text(encoding="utf-8"))
+    videos = {b.get("src") for beat in data["beats"] for b in beat.get("bgs", []) if b.get("type") == "video"}
+    browser_retries = 0
+    for attempt in range(len(videos) + 3):
         p = subprocess.Popen(cmd, cwd=rdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
         last, t0, tail, errline = "", time.time(), [], ""
         for line in p.stdout:
@@ -889,9 +912,12 @@ def do_render(job, plan, cfg, meta, log, stop):
             if time.time() - t0 > 30 and last: log("  " + last[:160]); t0 = time.time()
             if stop(): p.kill(); raise RuntimeError("cancelled")
         if p.wait() == 0: break
-        if attempt < 2 and any(BROWSER_FLAKE in l for l in tail):
+        if browser_retries < 2 and any(BROWSER_FLAKE in l for l in tail):
             # headless Chrome sometimes starts slowly (busy GPU/disk); Remotion gives it 25 s - just start again
-            log(f"  Remotion couldn't connect to its browser in time; retrying the render ({attempt + 2} of 3)"); time.sleep(10); continue
+            browser_retries += 1
+            log(f"  Remotion couldn't connect to its browser in time; retrying the render ({browser_retries + 1} of 3)"); time.sleep(10); continue
+        if fallback_failed_video(timeline, job / "short" / "public", errline + "\n" + "\n".join(tail), log):
+            continue
         for l in tail[-15:]: log("  | " + l[:200])
         raise RuntimeError("Remotion render failed: " + (re.sub(r"\x1b\[[0-9;]*m", "", errline) or " / ".join(x for x in tail[-6:] if x)[:400]))
     if out.exists(): out.unlink()

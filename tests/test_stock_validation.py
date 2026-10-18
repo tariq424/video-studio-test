@@ -32,6 +32,12 @@ class StockValidationTests(unittest.TestCase):
    with patch('studio.footage.media.ff',side_effect=bad):
     with self.assertRaises(RuntimeError):footage.fetch({'id':'truncated','file':'unused'},out,3)
    self.assertFalse(out.exists())
+ def test_browser_override(self):
+  with tempfile.TemporaryDirectory() as d:
+   browser=Path(d)/'chrome.exe';browser.touch()
+   self.assertEqual(short.render_browser_args({'remotion_browser_executable':str(browser)}),[f'--browser-executable={browser}'])
+   with self.assertRaisesRegex(RuntimeError,'not found'):
+    short.render_browser_args({'remotion_browser_executable':str(browser)+'missing'})
  def test_concurrency(self):
   for value in ['75%','100%','25%']:
    self.assertEqual(short.render_concurrency({'short_concurrency':value}),2)
