@@ -57,3 +57,21 @@ class ProtectionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SmokeTrimAndStockGateTests(unittest.TestCase):
+    def test_trim_keeps_main_fact_and_opinion(self):
+        from app.studio import short
+        plan = {"sections": [{"id": "b0", "take": "Honestly, that is not spycraft.",
+                              "vo": "An OpenAI employee hid a twenty-dollar recorder behind a TV. It was wrapped in toilet paper in a conference room. "
+                                    "The FBI arrested him in October. Honestly, that is not spycraft."},
+                             {"id": "b1", "vo": "That was AI Search, condensed.", "cta": {"kind": "cta"}}]}
+        short.trim_smoke(plan, lambda m: None)
+        self.assertEqual(plan["sections"][0]["vo"], "An OpenAI employee hid a twenty-dollar recorder behind a TV. Honestly, that is not spycraft.")
+        self.assertEqual(plan["sections"][1]["vo"], "That was AI Search, condensed.")
+
+    def test_stock_gate(self):
+        from app.studio import footage
+        q = ["hidden camera in office ceiling"]
+        self.assertFalse(footage.on_subject({"desc": "animation of an unrolled tissue paper"}, q))
+        self.assertTrue(footage.on_subject({"desc": "security cameras on an office ceiling"}, q))

@@ -379,6 +379,31 @@ def fetch(c, out, max_secs):
     raise RuntimeError(f"download of {c['id']} produced no video")
 
 # ------------------------------------------------------------------ one call for a list of slots
+GENERIC = set("""a an the and or of in on at to for with from by into over under near close up closeup shot shots view views
+aerial footage video videos clip background scene scenes slow motion timelapse time lapse cinematic stock b roll broll
+person people man men woman women hands hand someone close-up top down wide angle macro camera-angle detail details
+dark light bright night day modern old new big small""".split())
+
+
+def _stem(w):
+    for suf in ("ing", "ers", "er", "es", "ed", "s"):
+        if len(w) > len(suf) + 2 and w.endswith(suf): return w[:-len(suf)]
+    return w
+
+
+def _subject_words(texts):
+    return {_stem(w) for t in texts for w in re.findall(r"[a-z0-9]+", str(t).lower()) if len(w) > 2 and w not in GENERIC}
+
+
+def on_subject(c, slot_queries, subject=None):
+    """Hard relevance gate before any model or vision check: the clip's own title/tags must name the subject of the shot,
+    i.e. share a content word with the slot's queries (or its locked subject). A tissue roll found by "hidden camera in office
+    ceiling" shares none and is rejected."""
+    want = _subject_words(list(slot_queries) + ([subject["name"]] if subject and subject.get("name") else []))
+    have = _subject_words([c.get("desc", ""), c.get("title", "")])
+    return bool(want & have) if want else True
+
+
 def fill(cfg, slots, orient, need, out_dir, log, stop, want_long_side, max_secs, state_file, fallback=False):
     """slots: [{"id","text","queries"}]; need: {slot_id: n}. Returns {slot_id: [chosen candidate dicts]} (may be short).
     Progress is saved to state_file so a resumed job doesn't redo work."""
@@ -418,6 +443,10 @@ def fill(cfg, slots, orient, need, out_dir, log, stop, want_long_side, max_secs,
                 if len(got) >= need[s["id"]]: break
                 c = byid.get(cid)
                 if not c or cid in used: continue
+                if cfg.get("stock_subject_gate", True) and not on_subject(c, s["queries"], sj):
+                    log(f"  {s['id']}: skipped {c['src']} clip {cid} (its description doesn't name the shot's subject: {c.get('desc', '')[:50]})")
+                    st.setdefault("rejected", {}).setdefault(s["id"], []).append({"id": cid, "src": c["src"], "why": "off-subject description", "desc": c.get("desc", "")[:80]})
+                    continue
                 try: sh = sheet(c, out_dir / "sheets")
                 except Exception as e: log(f"  preview of {cid} failed ({str(e)[:60]})"); continue
                 ok, why, seen = verify(cfg, c, sh, log, subject=sj, ref=refs.get(sj["name"]) if sj else None, avoid=s.get("avoid"),

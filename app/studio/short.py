@@ -32,10 +32,8 @@ Hard limit: {wmax} words (YouTube Shorts are cut off at 3 minutes). If the notes
   Attribute opinions and predictions to who said them (first name is fine in narration).
 - Last beat: the payoff / biggest takeaway, ending on a strong line.
 Narration: spoken, punchy, short sentences, plain words, numbers written as spoken words ("ten billion dollars", "twenty thirty").
-VOICE: snarky and conversational, like a sharp friend, not a narrator. EVERY beat has (1) one original opinion of ours, marked
-as ours ("honestly,", "our take:"), and (2) one dry joke about a concrete consequence, e.g. "Google cracked a quantum problem in
-one step, which is great, unless you're the intern who has to update the documentation." Jokes punch at companies, hype and
-situations, never at victims or ordinary people, and never change a fact.{cta_rule}
+VOICE: conversational, like a sharp friend, not a narrator. Say what happened plainly and clearly first. Where it fits, add
+one short opinion of ours ("honestly,", "our take:"). Do NOT write jokes: a dry closing joke is added to each beat separately.{cta_rule}
 AUDIENCE: {audience}
 No markdown, no stage directions. Never invent numbers, quotes or names.
 
@@ -85,7 +83,7 @@ Also give "title" (max 60 chars, YouTube title), "tag" (max 28 chars, small labe
 name the source in a sentence, e.g. "the Moonshots podcast, episode two ninety-three" or "a NotebookLM briefing on battery recycling".
 
 Reply with ONLY JSON:
-{{"title":"...","tag":"...","description":"...","source_spoken":"...","covered":false,"beats":[{{"vo":"...","take":"EXACT words copied from vo: our opinion","joke":"EXACT words copied from vo: the dry joke","graphics":[{{"at":null,"g":{{...}}}},{{"at":"word","g":{{...}}}}],"queries":["...","..."],"subject":null,"backdrop":{{...}},"still_prompt":"...","motion":"..."}}]}}"""
+{{"title":"...","tag":"...","description":"...","source_spoken":"...","covered":false,"beats":[{{"vo":"...","take":"optional: our opinion, copied from vo","graphics":[{{"at":null,"g":{{...}}}},{{"at":"word","g":{{...}}}}],"queries":["...","..."],"subject":null,"backdrop":{{...}},"still_prompt":"...","motion":"..."}}]}}"""
 
 def _log_none(m): pass
 
@@ -153,6 +151,27 @@ def _quoted(phrase, vo):
     return hit >= 0.8 * len(p)
 
 
+SMOKE_FACT_WORDS = 20   # per beat, before its punch-up joke (~12 words): two beats + the closing line land at ~30 s
+
+
+def trim_smoke(plan, log, limit=SMOKE_FACT_WORDS):
+    """In-code length control for the 30-second test (the model ignores word budgets): keep each beat's main fact sentence
+    (the first) and our opinion sentence when there is one; drop the rest. Never cuts inside a sentence."""
+    for x in plan["sections"]:
+        if x.get("cta"): continue
+        sents = [t.strip() for t in re.split(r"(?<=[.!?])\s+", x["vo"].strip()) if t.strip()]
+        if not sents: continue
+        keep = [sents[0]]
+        take = x.get("take") or ""
+        op = next((t for t in sents[1:] if (take and _quoted(take, t)) or re.match(r"(honestly|our take|which tells you)", t, re.I)), None)
+        if op and len((" ".join(keep + [op])).split()) <= limit + 8: keep.append(op)
+        elif len(keep[0].split()) < limit * 0.6 and len(sents) > 1 and len((keep[0] + " " + sents[1]).split()) <= limit: keep.append(sents[1])
+        new = " ".join(keep)
+        if new != x["vo"].strip():
+            log(f"  {x['id']}: trimmed {len(x['vo'].split())} -> {len(new.split())} words for the 30-second test")
+            x["vo"] = new
+
+
 def protected_of(section):
     from .writer import protected
     return protected(section)
@@ -173,29 +192,15 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
         log_audience(cfg, log)
         notes = make_notes(llm, meta, transcript, max(words, 1500), log, stop, srcdir)
         tries = []   # every parsed attempt, so a near miss can be kept instead of an unchecked re-ask
-        def voice(j):   # VOICE: every beat carries our opinion and a dry joke, quoted back exactly from its narration
-            b = j.get("beats")
-            if not isinstance(b, list) or not b: raise ValueError("no beats")
-            for k, x in enumerate(b):
-                for f, what in (("take", "an opinion of ours"), ("joke", "a dry, snarky joke")):
-                    if not _quoted(x.get(f), x.get("vo")):
-                        got = str(x.get(f) or "")[:70]
-                        raise ValueError(f"beat {k + 1} needs {what} IN its vo, and \"{f}\" must repeat those words exactly as written in vo "
-                                         f"(write the sentence into vo first, then copy it into \"{f}\"; you gave \"{got}\")")
-                t, jk = _vnorm(x.get("take")), _vnorm(x.get("joke"))
-                if t in jk or jk in t:
-                    raise ValueError(f"beat {k + 1}: \"take\" (our opinion) and \"joke\" must be two DIFFERENT sentences of its vo")
         def chk(j):
             b = j.get("beats")
             if not isinstance(b, list) or len(b) < minb: raise ValueError(f"need at least {minb} beats")
             for x in b:
                 if not isinstance(x.get("vo"), str) or not x.get("queries"): raise ValueError("beat missing vo or queries")
-            voice(j)
             n = sum(len(x["vo"].split()) for x in b)
             tries.append((abs(n - words), j))
-            if smoke:   # the smoke test keeps its tight ~30 s band
-                if n < words * lo: raise ValueError(f"narration is {n} words in total but must be about {words}; add detail from the notes")
-                if n > words * hi: raise ValueError(f"narration is {n} words in total but must be at most {int(words * hi)}")
+            if smoke:   # the 30-second test is trimmed in code afterwards (trim_smoke); only a runaway length is re-asked
+                if n > words * 3: raise ValueError(f"narration is {n} words in total; keep it near {words}")
             elif n > wmax: raise ValueError(f"narration is {n} words in total; the hard limit is {wmax} (YouTube's 3:00): cut the weakest point, keep the explanations of terms")
             # shorter than the target, or longer but within 3:00: accepted as written (no padding, no trimming)
         prompt = SHORT.format(secs=int(secs), words=words, wmax=wmax if not smoke else int(words * hi), title=title, channel=channel, notes=notes[:24000], nb=nb, audience=audience_line(cfg),
@@ -209,42 +214,19 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
         if audience_key(cfg) == 'beginner':
             prompt += '\nBEGINNER PRIORITY: depth over breadth. Explain one core technical idea per beat instead of listing many features. Keep the technical names of the chosen idea, and explain what they mean immediately. Omit secondary features that would introduce more terms than you have room to explain.'
             if smoke:
-                prompt += f'\nFor this 30-second test, use the TWO beats to explain ONE technical idea from the title/notes, in {int(words * lo)}-{int(words * hi)} words TOTAL. Do not introduce API keys, radar, lightning density or other secondary jargon unless that is the chosen topic. Keep source_spoken to 2-4 words so the closing line stays short. The VOICE rules still apply to both beats: one opinion of ours and one dry joke each.'
+                prompt += f'\nFor this 30-second test, use the TWO beats to explain ONE technical idea from the title/notes, in {int(words * lo)}-{int(words * hi)} words TOTAL. Do not introduce API keys, radar, lightning density or other secondary jargon unless that is the chosen topic. Keep source_spoken to 2-4 words so the closing line stays short. Plain and clear; no jokes (they are added separately).'
         try: j = llm.trace("short script").chat_json(SYSTEM, prompt, max_tokens=8000, check=chk)
         except RuntimeError:
             if tries:
                 j = min(tries, key=lambda x: x[0])[1]
                 log(f"  length still off after 3 tries; keeping the closest ({sum(len(x['vo'].split()) for x in j['beats'])} words, target {words})")
             else:
-                log("  no usable script after 3 tries; asking again without the length check (the opinion + joke check stays)")
-                try: j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=voice)
-                except RuntimeError:
-                    log("  VOICE CHECK FAILED: no beat set with an opinion and a joke in every beat; keeping the last script, the editorial review must add them")
-                    j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=lambda x: None if x.get("beats") else (_ for _ in ()).throw(ValueError("no beats")))
+                log("  no usable script after 3 tries; asking once more without the length check")
+                j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=lambda x: None if x.get("beats") else (_ for _ in ()).throw(ValueError("no beats")))
         nw0 = sum(len(x["vo"].split()) for x in j["beats"])
         if j.get("covered") is True and nw0 < words * lo: log(f"  the AI says the source is fully covered at {nw0} of {words} words; kept short (no padding)")
         if not smoke: log(f"  script: {nw0} words (target {words}, hard limit {wmax} = 3:00){'; over the target, accepted' if nw0 > words * 1.05 else ''}")
         if smoke: j["beats"] = j["beats"][:2]   # a smoke test stays ~30 s even if the length check gave up
-        if smoke and sum(len(x["vo"].split()) for x in j["beats"]) > words * hi:   # still too long: shorten, keeping take + joke verbatim
-            per = int(words * hi) // len(j["beats"])
-            def chk_short(r):
-                bs = r.get("beats")
-                if not isinstance(bs, list) or len(bs) != len(j["beats"]): raise ValueError(f"return exactly {len(j['beats'])} beats")
-                for k, (o, nb_) in enumerate(zip(j["beats"], bs)):
-                    vo = str((nb_ or {}).get("vo") or "")
-                    if len(vo.split()) > per + 4: raise ValueError(f"beat {k + 1} is {len(vo.split())} words; at most {per}")
-                    for f in ("take", "joke"):
-                        if o.get(f) and _quoted(o[f], o["vo"]) and not _quoted(o[f], vo): raise ValueError(f"beat {k + 1} must keep its {f} word for word: {o[f]}")
-            try:
-                r = llm.trace("shorten smoke script").chat_json(SYSTEM,
-                    f"Shorten each beat of this 30-second Short to AT MOST {per} words. Keep each beat's \"take\" and \"joke\" sentences "
-                    f"word for word; cut background, secondary facts and explanations of minor terms instead. Keep the beat's main fact and "
-                    f"its numbers exact. Reply with JSON only: {{\"beats\":[{{\"vo\":\"...\"}}]}}\nBEATS:\n" +
-                    json.dumps([{"vo": x["vo"], "take": x.get("take"), "joke": x.get("joke")} for x in j["beats"]]), max_tokens=2000, check=chk_short)
-                for o, nb_ in zip(j["beats"], r["beats"]): o["vo"] = nb_["vo"]
-                log(f"  shortened to {sum(len(x['vo'].split()) for x in j['beats'])} words for the 30-second test (opinion and joke kept)")
-            except Exception as e:
-                log(f"  couldn't shorten the smoke script ({str(e)[:100]})")
         else:   # hard cut: still more than 10% long -> drop whole middle beats (keep the hook and the payoff)
             while len(j["beats"]) > minb and sum(len(x["vo"].split()) for x in j["beats"]) > wmax:
                 cut = j["beats"].pop(-2); log(f"  script too long; dropped a middle beat ({len(cut['vo'].split())} words)")
@@ -266,24 +248,20 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                                      "queries": [q for q in b.get("queries", []) if isinstance(q, str)][:3] or ["city skyline aerial"],
                                      "subject": sj, "backdrop": _clean_backdrop(b.get("backdrop"), b["vo"]),
                                      "source_visual": b.get("source_visual"), "take": str(b.get("take") or ""), "joke": str(b.get("joke") or ""),
-                                     "protect": [str(b.get(f) or "") for f in ("take", "joke") if _quoted(b.get(f), b["vo"])],
+                                     "protect": [str(b.get("take") or "")] if _quoted(b.get("take"), b["vo"]) else [],
                                      "still_prompt": str(b.get("still_prompt") or "")[:500], "motion": str(b.get("motion") or "")[:160],
                                      "visuals": [{"type": "chart", "chart": g["g"], "at": g.get("at")} for g in gs]})
         log("Checking the Short against the source (names, attributions, numbers)...")
         if smoke: plan['smoke'] = True
-        plan = fact_check(llm, plan, meta, transcript, log, stop, cfg)   # take / joke are protected from here on
-        # review checks (our analysis + a joke, then fact-check) BEFORE the term-explanation step; the review runs that step
-        # itself, last, with the opinion and joke protected
-        content = [x for x in plan["sections"] if not x.get("cta")]
-        if all(len(protected_of(x)) == 2 for x in content):   # the script already has our opinion + a joke in every beat
-            log("  voice: every beat already has our opinion and a joke (checked word for word); the humor rewrite is skipped")
-            plan["editorial_warnings"] = ["skipped: voice already present"]
+        plan = fact_check(llm, plan, meta, transcript, log, stop, cfg)   # an opinion of ours (take) is protected from here on
+        from .writer import punch_up
+        if smoke:   # 30-second test: plain summary -> trimmed in code to its main fact (+ opinion) -> one punch-up joke per beat
+            trim_smoke(plan, log)
         else:
             editorial_review(llm, plan, meta, transcript, cfg, log, stop)
-        if plan.get("editorial_warnings") and (not smoke or audience_key(cfg) == 'beginner'):
-            jargon_check(llm, plan, cfg, log, source_notes=notes)   # the review gave up: explanations still go in (protected)
-        from .writer import punch_up
-        punch_up(cfg, plan, log)   # a beat that still has no joke gets one written for it (Claude with an Anthropic key)
+            if plan.get("editorial_warnings"):
+                jargon_check(llm, plan, cfg, log, source_notes=notes)   # the review gave up: explanations still go in (protected)
+        punch_up(cfg, plan, log, force=smoke)   # smoke: every beat gets its joke here; otherwise only beats still without one
         from . import coherence
         ents = coherence.entities(cfg, Path(srcdir).parent, title, notes, log, stop, llm=llm)
         nl = 0

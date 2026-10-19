@@ -697,8 +697,8 @@ def normalize(plan):
     return plan
 
 
-PUNCH = """This beat of a snarky news Short has no joke yet. Write ONE dry, snarky, conversational joke (max {n} words) about a
-concrete consequence of what the beat says, in the style of: "Google cracked a quantum problem in one step, which is great,
+PUNCH = """Here is one beat of a news Short. Add ONE funny closing observation (max {n} words): dry, snarky, conversational,
+about a concrete consequence of what the beat says, in the style of: "Google cracked a quantum problem in one step, which is great,
 unless you're the intern who has to update the documentation." If the topic is too dry, joke about how dry it is.
 Rules: no new facts, numbers or names; punch at companies, hype or situations, never at victims or ordinary people; it is
 spoken after the beat's last sentence, so it must read naturally there.
@@ -714,10 +714,10 @@ def _has_joke(section):
     return bool(j) and len(j.split()) >= 3 and bool(_editorial_span(vo, j))
 
 
-def punch_up(cfg, plan, log):
+def punch_up(cfg, plan, log, force=False):
     """Last voice step: every content beat that still has no joke gets one appended, written by Claude when an Anthropic key is
     set (the API; the Claude chat app can't be called), else by the script provider. Never blocks the job."""
-    missing = [s for s in plan["sections"] if not s.get("cta") and not _has_joke(s)]
+    missing = [s for s in plan["sections"] if not s.get("cta") and (force or not _has_joke(s))]
     if not missing or not cfg.get("punch_up", True): return plan
     c = dict(cfg)
     if c.get("anthropic_api_key"):
