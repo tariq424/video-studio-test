@@ -197,6 +197,12 @@ def generate(cfg, sd, sec, key, log, aspect="9:16"):
                 _save(context, page, src, tmp)
                 media.ff("-i", tmp, "-an", "-c:v", "libx264", "-crf", 18, "-pix_fmt", "yuv420p", "-r", 30, out, timeout=180)
                 tmp.unlink(missing_ok=True)
+            except Exception:
+                try:   # evidence for the next fix: what Flow's page looked like when it failed
+                    (out.parent / f"{key}_fail.png").write_bytes(page.screenshot(full_page=False))
+                except Exception:
+                    pass
+                raise
             finally:
                 context.close()
         if not (media.ok(out) and media.dur(out) >= 1):
@@ -208,5 +214,6 @@ def generate(cfg, sd, sec, key, log, aspect="9:16"):
         return out
     except Exception as e:
         out.unlink(missing_ok=True)
-        log(f"  flow failed ({str(e).splitlines()[0][:160]}); next rung")
+        shot = out.parent / f"{key}_fail.png"
+        log(f"  flow failed ({str(e).splitlines()[0][:200]})" + (f"; screenshot {shot}" if shot.exists() else "") + "; next rung")
         return None

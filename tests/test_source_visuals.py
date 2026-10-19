@@ -151,12 +151,13 @@ class SourceVisualTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             dest = Path(folder) / "clip.mp4"
             process = MagicMock(returncode=0)
-            process.communicate.return_value = ("https://rr1.googlevideo.com/videoplayback?x=1\n", "")
+            process.communicate.return_value = (json.dumps({"url": "https://rr1.googlevideo.com/videoplayback?x=1",
+                                                             "http_headers": {"User-Agent": "UA-1"}}) + "\n", "")
             def ff(*args, **kwargs): Path(args[-1]).write_bytes(b"v" * 20000)
             with patch("studio.source_visuals.subprocess.Popen", return_value=process) as spawn, patch("studio.media.ff", side_effect=ff) as fake:
                 part = source_visuals._download_range("https://youtu.be/g3toZwkrQQE", 120.5, 2.5, dest)
-            self.assertIn("-g", spawn.call_args.args[0])
-            self.assertEqual(fake.call_args.args[:4], ("-ss", 120.5, "-i", "https://rr1.googlevideo.com/videoplayback?x=1"))
+            self.assertIn("-j", spawn.call_args.args[0])
+            self.assertEqual(fake.call_args.args[:6], ("-headers", "User-Agent: UA-1\r\n", "-ss", 120.5, "-i", "https://rr1.googlevideo.com/videoplayback?x=1"))
             self.assertTrue(part.is_file())
 
     def test_downloader_timeout_cleans_up_only_its_own_process_tree(self):

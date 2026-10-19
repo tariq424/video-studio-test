@@ -33,18 +33,28 @@ def _run_downloader(command, timeout=90):
 
 
 def _stream_range(url, start, duration, dest):
-    """Fast path: ask yt-dlp only for the stream URL, then let ffmpeg seek into it over HTTP and copy 2-3 seconds.
-    Seconds instead of minutes: nothing before the cue is downloaded."""
+    """Fast path: ask yt-dlp only for the stream URL (and the HTTP headers YouTube expects with it), then let ffmpeg seek into
+    it over HTTP and copy 2-3 seconds. Without yt-dlp's headers googlevideo answers 403 Forbidden."""
     out = _run_downloader([sys.executable, "-m", "yt_dlp", "--quiet", "--no-warnings", "--no-playlist", "--socket-timeout", "20",
                            "-f", "best[height<=720][ext=mp4][vcodec!=none]/bestvideo[height<=720][ext=mp4]/best[height<=720]",
-                           "-g", url], timeout=60)
-    stream = next((l.strip() for l in out.splitlines() if l.strip().startswith("http")), "")
+                           "-j", url], timeout=60)
+    info = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try: info = json.loads(line); break
+            except ValueError: continue
+    if not info:
+        raise RuntimeError("yt-dlp returned no format info")
+    fmt = info if info.get("url") else next((f for f in info.get("requested_formats") or [] if f.get("vcodec") not in (None, "none")), {})
+    stream, headers = fmt.get("url"), fmt.get("http_headers") or info.get("http_headers") or {}
     if not stream:
         raise RuntimeError("no stream URL")
     part = dest.with_suffix(".download.mp4")
+    hdr = "".join(f"{k}: {v}\r\n" for k, v in headers.items())
     try:
-        media.ff("-ss", max(0.0, start), "-i", stream, "-t", duration + 0.3, "-an", "-c:v", "libx264", "-crf", 18,
-                 "-pix_fmt", "yuv420p", part, timeout=60)
+        media.ff(*(["-headers", hdr] if hdr else []), "-ss", max(0.0, start), "-i", stream, "-t", duration + 0.3, "-an",
+                 "-c:v", "libx264", "-crf", 18, "-pix_fmt", "yuv420p", part, timeout=60)
     except subprocess.CalledProcessError as e:   # say WHY (HTTP 403, timeout, codec...), not just the command line
         raise RuntimeError("ffmpeg could not read the stream: " + " ".join((e.stderr or e.stdout or "no output").split())[-300:])
     if not part.is_file() or part.stat().st_size < 10000:

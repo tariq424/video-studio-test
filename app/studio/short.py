@@ -161,7 +161,13 @@ def trim_smoke(plan, log, limit=SMOKE_FACT_WORDS):
         if x.get("cta"): continue
         sents = [t.strip() for t in re.split(r"(?<=[.!?])\s+", x["vo"].strip()) if t.strip()]
         if not sents: continue
-        keep = [sents[0]]
+        num = re.compile(r"\d|\b(one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|hundred|thousand|million|billion|percent|times)\b", re.I)
+        main = sents[0] if num.search(sents[0]) or len(sents) == 1 else next((t for t in sents if num.search(t)), sents[0])   # the fact with a number, not a framing line
+        first = sents[0]
+        keep = [first, main] if main != first and len((first + " " + main).split()) <= limit + 8 else [main]   # keep who/what the fact is about
+        sents = [t for t in sents if t not in keep]
+        sents = keep + sents
+        keep = [" ".join(keep)]
         take = x.get("take") or ""
         op = next((t for t in sents[1:] if (take and _quoted(take, t)) or re.match(r"(honestly|our take|which tells you)", t, re.I)), None)
         if op and len((" ".join(keep + [op])).split()) <= limit + 8: keep.append(op)
