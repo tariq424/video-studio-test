@@ -318,7 +318,7 @@ def do_stock(job, plan, cfg, log, stop):
     for s in plan["sections"]:
         if s["id"] in own: continue
         if s.get("cta"):
-            slots.append({"id": s["id"], "text": "calm, general background for the closing end card", "queries": ["city skyline dusk aerial", "night sky stars timelapse"]})
+            slots.append({"id": s["id"], "text": "calm, general background for the closing end card", "queries": ["city skyline dusk aerial", "night sky stars timelapse"], "cta": True})
             need[s["id"]] = 1
         elif s.get("subject"):
             continue   # locked to a specific subject: stock libraries don't have it; real photos / reconstruction come in short_fallback

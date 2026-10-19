@@ -398,7 +398,8 @@ def _subject_words(texts):
 NARRATION_COMMON = set("""that this with from have will just about after before their there they them then than when what which
 while were been being into onto over more most much many some such only also very really said says told make made made makes
 used uses using like even still into year years week weeks today first last could would should every other another again
-because thing things something someone people time times""".split())
+because thing things something someone people time times computer computers data technology tech digital internet online
+business work working screen software device devices system systems future modern""".split())   # too broad to prove relevance
 
 
 def narration_words(text):
@@ -411,7 +412,9 @@ def on_subject(c, slot_queries, subject=None, narration=""):
     i.e. share a content word with the slot's queries (or its locked subject). A tissue roll found by "hidden camera in office
     ceiling" shares none and is rejected."""
     want = _subject_words(list(slot_queries) + ([subject["name"]] if subject and subject.get("name") else []))
-    have = _subject_words([c.get("desc", ""), c.get("title", "")])
+    desc = str(c.get("desc", ""))
+    if desc.count(",") >= 6: desc = ",".join(desc.split(",")[:8])   # Pixabay tag lists: only the leading (most relevant) tags count
+    have = _subject_words([desc, c.get("title", "")])
     if want and not want & have: return False
     nar = narration_words(narration)   # and a concrete word of what is actually being said ("quantum", "Google", "recorder")
     return bool(nar & have) if nar else True
@@ -456,7 +459,7 @@ def fill(cfg, slots, orient, need, out_dir, log, stop, want_long_side, max_secs,
                 if len(got) >= need[s["id"]]: break
                 c = byid.get(cid)
                 if not c or cid in used: continue
-                if cfg.get("stock_subject_gate", True) and not on_subject(c, s["queries"], sj, narration=s.get("narration") or s.get("text") or ""):
+                if cfg.get("stock_subject_gate", True) and not s.get("cta") and not on_subject(c, s["queries"], sj, narration=s.get("narration") or s.get("text") or ""):
                     log(f"  {s['id']}: skipped {c['src']} clip {cid} (its description names neither the shot's subject nor anything the narration says: {c.get('desc', '')[:50]})")
                     st.setdefault("rejected", {}).setdefault(s["id"], []).append({"id": cid, "src": c["src"], "why": "off-subject description", "desc": c.get("desc", "")[:80]})
                     continue
