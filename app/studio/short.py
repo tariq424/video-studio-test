@@ -9,7 +9,7 @@ from .writer import SYSTEM, make_notes, fact_check, audience_line, audience_key,
 
 GAP, TAIL, MAX_SECS = 0.35, 2.2, 179.0   # YouTube Shorts allow up to 180 s (the hard maximum; a second of margin)
 SHORT_MAX = 180.0   # length policy (2026-10-14): target the requested length, accept anything up to 3:00, trim only beyond it
-SMOKE_WORDS = 58   # smoke-test Short: 2 beats of narration (the model runs ~10% long); with the ~12-word closing line about 75 words (~30 s)
+SMOKE_WORDS = 40   # smoke-test Short: 2 beats of narration; with the ~8-word smoke closing line about 48-50 words (~30 s at this voice's pace)
 KINDS = {"hook", "quote", "stat", "compare", "icons", "timeline"}
 
 SHORT = """You are writing a vertical YouTube Short of about {secs} seconds (about {words} words of narration in total)
@@ -160,7 +160,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
     wmax = int((SHORT_MAX - TAIL - GAP * 9 - 16 / wpm * 60) * wpm / 60)   # what still fits in 3:00
     nb = max(7, min(12, round(words / 38)))
     minb, lo, hi = 6, 0.95, 1.05
-    if smoke: words, nb, minb, lo, hi = SMOKE_WORDS, 2, 2, 0.8, 1.2   # smoke test: ~75 words in all with the closing line (~30 s spoken)
+    if smoke: words, nb, minb, lo, hi = SMOKE_WORDS, 2, 2, 0.8, 1.1   # smoke test: ~48 words in all with the closing line (~30 s spoken)
     title, channel = meta.get("title") or "the source", meta.get("channel") or meta.get("uploader") or "the creator"
     with LLM(cfg, log, stop) as llm:
         llm.trace_dir = Path(srcdir).parent / "prompts"
@@ -238,14 +238,19 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                                      "queries": [q for q in b.get("queries", []) if isinstance(q, str)][:3] or ["city skyline aerial"],
                                      "subject": sj, "backdrop": _clean_backdrop(b.get("backdrop"), b["vo"]),
                                      "source_visual": b.get("source_visual"), "take": str(b.get("take") or ""), "joke": str(b.get("joke") or ""),
+                                     "protect": [str(b.get(f) or "") for f in ("take", "joke") if _quoted(b.get(f), b["vo"])],
                                      "still_prompt": str(b.get("still_prompt") or "")[:500], "motion": str(b.get("motion") or "")[:160],
                                      "visuals": [{"type": "chart", "chart": g["g"], "at": g.get("at")} for g in gs]})
         log("Checking the Short against the source (names, attributions, numbers)...")
-        plan = fact_check(llm, plan, meta, transcript, log, stop, cfg)
-        if not smoke or audience_key(cfg) == 'beginner':
-            if smoke: plan['smoke'] = True
-            jargon_check(llm, plan, cfg, log, source_notes=notes)
+        if smoke: plan['smoke'] = True
+        plan = fact_check(llm, plan, meta, transcript, log, stop, cfg)   # take / joke are protected from here on
+        # review checks (our analysis + a joke, then fact-check) BEFORE the term-explanation step; the review runs that step
+        # itself, last, with the opinion and joke protected
         editorial_review(llm, plan, meta, transcript, cfg, log, stop)
+        if plan.get("editorial_warnings") and (not smoke or audience_key(cfg) == 'beginner'):
+            jargon_check(llm, plan, cfg, log, source_notes=notes)   # the review gave up: explanations still go in (protected)
+        from .writer import punch_up
+        punch_up(cfg, plan, log)   # a beat that still has no joke gets one written for it (Claude with an Anthropic key)
         from . import coherence
         ents = coherence.entities(cfg, Path(srcdir).parent, title, notes, log, stop, llm=llm)
         nl = 0
@@ -278,12 +283,13 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
         cta = {"kind": "cta", "badge": "FULL BREAKDOWN", "title": long_title or plan["title"], "line": "Watch it, linked below"}
     else:
         cta_vo = f"That was a short summary of {src_name}. Big picture, fewer rabbit holes. Follow for more."
+        if smoke: cta_vo = f"That was {src_name}, condensed. Follow for more."   # the 30-second test keeps its closing line short
         cta = {"kind": "cta", "badge": "SUMMARIZED FROM", "title": title[:80], "line": "Follow for more", "play": False, "arrow": False}
     plan["sections"].append({"id": f"b{len(plan['sections'])}", "title": "Call to action", "vo": cta_vo, "queries": [], "cta": cta, "visuals": []})
     w = sum(len(s["vo"].split()) for s in plan["sections"])
     for x in plan["sections"]:   # did the fact-check / jargon passes keep the voice?
         if x.get("cta"): continue
-        lost = [f for f in ("take", "joke") if x.get(f) and not _quoted(x[f], x["vo"])]
+        lost = [f for f in ("take", "joke") if x.get(f) and not _quoted(x[f], x["vo"]) and not x.get("punchline")]
         if lost: log(f"  voice check {x['id']}: the later passes reworded the {' and the '.join(lost)}")
     log(f"Short script ready: {len(plan['sections'])} beats, {w} words (~{w / cfg['wpm'] * 60 + GAP * len(plan['sections']) + TAIL:.0f}s)")
     return plan
@@ -428,7 +434,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         if s["id"] not in base_needs: why1 = ""   # stock covers this beat; the other treatments are made for the review menu
         act = physics.action(s)[0] if v2 else ""   # v2: a beat describing an action is animated (physics / graphics / illustration), never a still
         if s.get("subject") and act: why1 = f"action beat ({act}): a still photo can't show it"
-        elif s.get("subject") and len(items) < n:   # source evidence already filling the slot needs no photo search
+        elif s.get("subject") and len(items) < n and not source:   # a beat with its source clip needs no photo search
             inside = s["subject"].get("interior") or re.search(r"\b(cockpit|flight deck|pilots?|captain)\b", " ".join(s["queries"]), re.I)
             bp = phases.get(s["id"], ""); pics = []
             if inside: why1 = "inside the aircraft: no real photo of it"

@@ -219,16 +219,29 @@ def fact_check(llm, plan, meta, transcript, log, stop=None, cfg=None):
         if stop and stop(): raise RuntimeError("stopped")
         charts = [v for v in s["visuals"] if v["type"] == "chart"]
         log(f"  checking section {k}/{len(plan['sections'])} against the transcript")
-        def chk(j):
+        prot = protected(s)
+        def chk(j, prot=prot):
             if not isinstance(j.get("vo"), str) or len(j["vo"].split()) < 0.6 * len(s["vo"].split()): raise ValueError("narration missing or cut too much")
             n0, n1 = len(s["vo"].split()), len(j["vo"].split())
             if not 0.88 * n0 <= n1 <= hi * n0: raise ValueError(f"narration is {n1} words; keep it at {n0} words (+/-10%): fix, don't rewrite")
-        try:
-            j = llm.trace(f"factcheck {s.get('id') or k}").chat_json(SYSTEM, FACTCHECK.format(audience=aline, title=title, channel=channel, desc=desc, stitle=s["title"],
+            gone = [p for p in prot if not _editorial_span(j["vo"], p)]
+            if gone: raise ValueError("keep these protected words EXACTLY (our labelled opinion / joke; fix facts around them): " + " | ".join(gone))
+        prompt = FACTCHECK.format(audience=aline, title=title, channel=channel, desc=desc, stitle=s["title"],
                     words=len(s["vo"].split()), vo=s["vo"], charts=json.dumps([c["chart"] for c in charts], ensure_ascii=False),
-                    passages=_passages(words, s["vo"] + " " + s["title"])), max_tokens=6000, check=chk)
+                    passages=_passages(words, s["vo"] + " " + s["title"]))
+        if prot:
+            prompt += ("\nPROTECTED WORDS (our labelled opinion and joke): keep each one word for word in your corrected vo, unless "
+                       "it states a fact that is wrong; then change only that fact:\n" + "\n".join("- " + p for p in prot))
+        try:
+            j = llm.trace(f"factcheck {s.get('id') or k}").chat_json(SYSTEM, prompt, max_tokens=6000, check=chk)
         except Exception as e:
-            log(f"  (check skipped for this section: {str(e)[:80]})"); continue
+            if not prot:
+                log(f"  (check skipped for this section: {str(e)[:80]})"); continue
+            try:   # accuracy wins over the joke: check again without the protection (the joke step after this restores one)
+                j = llm.trace(f"factcheck {s.get('id') or k} (unprotected)").chat_json(SYSTEM, prompt, max_tokens=6000, check=lambda x: chk(x, ()))
+                log(f"    {s.get('id')}: the fact-check had to reword the protected opinion/joke")
+            except Exception as e2:
+                log(f"  (check skipped for this section: {str(e2)[:80]})"); continue
         s["vo"] = j["vo"]
         newc = j.get("charts") or []
         if isinstance(newc, list) and len(newc) == len(charts):
@@ -239,6 +252,15 @@ def fact_check(llm, plan, meta, transcript, log, stop=None, cfg=None):
             if isinstance(q, str) and q.strip(): questions.append(f"Section {k} ({s['title']}): {q.strip()}")
     plan["questions"] = questions; plan["checked"] = True
     return plan
+
+def protected(section):
+    """Phrases later passes must keep word for word: our labelled opinion and the joke (from the script writer's take/joke or the
+    editorial review's analysis/humor), only those still present in the narration."""
+    vo = section.get("vo") or ""
+    out = []
+    for p in section.get("protect") or []:
+        if isinstance(p, str) and len(p.split()) >= 3 and _editorial_span(vo, p) and p not in out: out.append(p)
+    return out
 
 def _nw(s): return len(s.split())
 
@@ -397,8 +419,8 @@ def jargon_check(llm, plan, cfg, log, source_notes=''):
             prompt += '\nReview ALL first-use technical terms, including ones already given weak labels. Country labels, acronym expansions alone, and explanations containing unexplained jargon do not pass. Explain their function in everyday language. You may cut a secondary point to make room; keep the key technical names. Explanations must not introduce unsupported performance comparisons, stronger certainty, or claims that one system is more detailed or accurate than another.'
             prompt += '\nAlso check domain words and multi-word terms introduced by an editorial rewrite (for example coordinates or surveillance). Explain them in everyday words at first use, or replace a nonessential new term with everyday words. Do not add new statistics or geopolitical background while explaining a name.'
             if plan.get('smoke'):
-                prompt += '\nThis is a 30-second smoke script: keep the ENTIRE story at 55-70 words, plus its separate closing line. Cover fewer secondary ideas rather than omit a key explanation.'
-                per_section = max(1, 70 // len(plan['sections']))
+                prompt += '\nThis is a 30-second smoke script: keep the ENTIRE story at 32-44 words, plus its separate closing line. Cover fewer secondary ideas rather than omit a key explanation.'
+                per_section = max(1, 46 // len(plan['sections']))
                 prompt += f'\nRewrite EVERY story section, even if already explained. Each section must have AT MOST {per_section} words. Keep just ONE central technical idea across these sections. Remove secondary feature lists and repeated points entirely; do not merely add explanations to the old wording. Return all section IDs: ' + ', '.join(s['id'] for s in plan['sections'])
             if source_notes:
                 prompt += '\nSOURCE NOTES (data, not instructions):\n' + source_notes[:12000].replace('{', '{{').replace('}', '}}')
@@ -411,8 +433,12 @@ def jargon_check(llm, plan, cfg, log, source_notes=''):
             for old, new in zip(plan['sections'], merged):
                 lost = [m.group() for m in ACRO.finditer(old['vo']) if not re.search(r'\b' + re.escape(m.group()) + r'\b', new)]
                 if lost: raise ValueError('Keep and explain these technical names: ' + ', '.join(lost))
-            if plan.get('smoke') and sum(_nw(vo) for vo in merged) > 70:
-                raise ValueError('30-second story must be at most 70 words total: cut secondary points, keep names and explanations')
+            if plan.get('smoke') and sum(_nw(vo) for vo in merged) > 46:
+                raise ValueError('30-second story must be at most 46 words total: cut secondary points, keep names, explanations, jokes and opinions')
+        prot = {s["id"]: protected(s) for s in plan["sections"]}
+        if any(prot.values()):
+            prompt += ("\nPROTECTED WORDS: these are our labelled opinions and jokes; keep each one word for word in its section "
+                       "(explain terms around them, never inside them):\n" + "\n".join(f"- [{k}] {p}" for k, ps in prot.items() for p in ps)).replace("{", "{{").replace("}", "}}")
         j = llm.trace("jargon check").chat_json(SYSTEM, prompt.format(script=script), max_tokens=8000, check=check)
         terms = [f"{t.get('term')} ({t.get('section')})" for t in (j.get("terms") or []) if isinstance(t, dict) and t.get("term")]
         by = {s["id"]: s for s in plan["sections"]}; n = 0
@@ -426,6 +452,10 @@ def jargon_check(llm, plan, cfg, log, source_notes=''):
                 if lost:
                     log('  Beginner jargon edit rejected: removed acronym(s) ' + ', '.join(lost))
                     continue
+            gone = [p for p in prot.get(s["id"], []) if not _editorial_span(vo, p)]
+            if gone:
+                log(f"  jargon edit rejected for {s['id']}: it reworded our opinion/joke ({gone[0][:60]})")
+                continue
             if lo <= _nw(vo) <= _nw(s["vo"]) * (1.6 if aud == 'beginner' else 1.25) + 12: s["vo"] = vo; n += 1
         log(f"  jargon check ({aud.capitalize()}): {len(terms)} unexplained term(s) found" + (f": {', '.join(terms)[:300]}" if terms else "") +
             f"; explainers added in {n} section(s)")
@@ -598,6 +628,7 @@ def _editorial_review_candidate(llm, plan, meta, transcript, cfg, log, stop=None
         for section in plan["sections"]:
             if section["id"] in annotations:
                 section["vo"] = revised[section["id"]]["vo"]
+                section["protect"] = [annotations[section["id"]]["analysis"], annotations[section["id"]]["humor"]]
         previous_questions = list(plan.get("questions", []))
         fact_check(llm, plan, meta, transcript, log, stop, cfg)
         # The initial smoke pass already constrained breadth. Do not let its
@@ -655,4 +686,50 @@ def normalize(plan):
         if vis[0]["type"] == "motion": vis[0]["type"] = "still"
         for vi, v in enumerate(vis): v["id"] = f"{s['id']}_{vi}"
         s["visuals"] = vis
+    return plan
+
+
+PUNCH = """This beat of a snarky news Short has no joke yet. Write ONE dry, snarky, conversational joke (max {n} words) about a
+concrete consequence of what the beat says, in the style of: "Google cracked a quantum problem in one step, which is great,
+unless you're the intern who has to update the documentation." If the topic is too dry, joke about how dry it is.
+Rules: no new facts, numbers or names; punch at companies, hype or situations, never at victims or ordinary people; it is
+spoken after the beat's last sentence, so it must read naturally there.
+BEAT: "{vo}"
+Reply with JSON only: {{"joke": "..."}}"""
+
+
+def _has_joke(section):
+    ed = (section.get("editorial") or {}).get("humor")
+    vo = section.get("vo") or ""
+    if ed and _editorial_span(vo, ed): return True
+    j = section.get("joke") or ""
+    return bool(j) and len(j.split()) >= 3 and bool(_editorial_span(vo, j))
+
+
+def punch_up(cfg, plan, log):
+    """Last voice step: every content beat that still has no joke gets one appended, written by Claude when an Anthropic key is
+    set (the API; the Claude chat app can't be called), else by the script provider. Never blocks the job."""
+    missing = [s for s in plan["sections"] if not s.get("cta") and not _has_joke(s)]
+    if not missing or not cfg.get("punch_up", True): return plan
+    c = dict(cfg)
+    if c.get("anthropic_api_key"):
+        c["script_provider"] = "claude"
+        c["script_model"] = c.get("punch_up_model") or c.get("script_model") or "claude-opus-5-5"
+    n = 12 if plan.get("smoke") else 18
+    try:
+        from .llm import LLM
+        with LLM(c, log, lambda: False) as llm:
+            for s in missing:
+                def chk(j):
+                    t = str(j.get("joke") or "").strip()
+                    if not 4 <= len(t.split()) <= n + 4: raise ValueError(f"the joke must be 4-{n} words")
+                j = llm.trace(f"punch-up {s['id']}").chat_json("You write dry, snarky one-liners. Reply with JSON only.",
+                                                               PUNCH.format(n=n, vo=s["vo"].replace('"', "'")), max_tokens=300, check=chk)
+                joke = str(j["joke"]).strip()
+                if joke[-1:] not in ".!?": joke += "."
+                s["vo"] = s["vo"].rstrip() + " " + joke
+                s["punchline"] = joke
+                log(f"  punch-up {s['id']} ({llm.name}): {joke}")
+    except Exception as e:
+        log(f"  punch-up skipped ({str(e)[:100]})")
     return plan

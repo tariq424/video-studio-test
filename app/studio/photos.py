@@ -14,7 +14,8 @@ import requests
 from . import media
 from .llm import parse_json
 
-UA = {"User-Agent": "VideoStudio/1.0 (personal YouTube explainer tool; contact via GitHub tariq424)"}
+UA = {"User-Agent": "VideoStudio/1.1 (https://github.com/tariq424/video-studio-test; personal explainer tool) python-requests",
+      "Api-User-Agent": "VideoStudio/1.1 (https://github.com/tariq424/video-studio-test)"}   # Wikimedia's User-Agent policy: tool name + contact URL
 OK_LIC = {"cc0": 0, "pdm": 0, "by": 1, "by-sa": 2}
 LIC_NAME = {"cc0": "CC0", "pdm": "Public domain", "by": "CC BY", "by-sa": "CC BY-SA"}
 MIN_W = 900   # px; below this a photo looks soft in a 1080p frame
@@ -133,7 +134,8 @@ def _download(url):
     for wait in (0, 5, 15):
         if wait: time.sleep(wait)
         gap = time.time() - _last_dl[0]
-        if gap < 1.5: time.sleep(1.5 - gap)
+        need = 3.0 if "wikimedia.org" in url else 1.5   # Wikimedia's upload servers throttle bursts hardest
+        if gap < need: time.sleep(need - gap)
         _last_dl[0] = time.time()
         try: r = requests.get(url, headers=UA, timeout=60)
         except Exception as e: why = str(e)[:60]; continue

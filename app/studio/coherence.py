@@ -86,20 +86,18 @@ def assign(ents, text):
     avoid: descriptions of categories the clip must NOT show (for unlocked shots)."""
     things = [e for e in ents if e["kind"] != "person" and e["category_words"]]
     low = text.lower(); best, score = None, 0
-    for e in things:   # the most specific match wins: a name/brand beats "fighter jet", which beats "jet"
+    brands = {}
+    for e in things: brands[e["brand"].lower()] = brands.get(e["brand"].lower(), 0) + 1
+    for e in things:   # LOCK only on the subject's exact name (or its brand, when only one subject has that brand).
+        # Generic category words ("camera", "chip", "metallic") never lock a shot: they matched the wrong product before.
         brand = e["brand"].lower()
-        # whole words only: the brand "Meta" must not match "metallic", nor "Apple" "pineapple"
-        if (brand and re.search(r"\b" + re.escape(brand) + r"\b", low)) or re.search(r"\b" + re.escape(e["name"].lower()) + r"\b", low): sc = 1000 + len(e["name"])
-        else:
-            hits = [w for w in e["category_words"] if _mentions(text, [w])]
-            sc = max((len(w) for w in hits), default=0)
-            # words that are this entity's OWN (not shared with another entity) count double
-            own = [w for w in hits if not any(w in o["category_words"] for o in things if o is not e)]
-            sc += 100 * bool(own)
+        if re.search(r"\b" + re.escape(e["name"].lower()) + r"\b", low): sc = 2000 + len(e["name"])
+        elif brand and brands.get(brand) == 1 and re.search(r"\b" + re.escape(brand) + r"\b", low): sc = 1000 + len(brand)
+        else: sc = 0
         if sc > score: best, score = e, sc
     if best:
         sj = {"name": best["name"], "brand": best["brand"], "kind": best["kind"], "colors": best["colors"]}
-        if score < 1000 and INTERIOR.search(text) and not EXTERIOR.search(text) and \
+        if INTERIOR.search(text) and not EXTERIOR.search(text) and \
                 not re.search(r"\b(jets?|planes?|airplanes?|airliners?|aircraft|cars?|suvs?|vehicles?|ships?|trains?)\b", text, re.I):
             # inside the subject (its cabin, its cockpit): stock or AI interiors would be some other airline's cabin, so this is
             # locked too and shown as the cabin/cockpit reconstruction
