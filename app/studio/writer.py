@@ -4,6 +4,7 @@
   3. SECTIONS - each section's narration + visuals is written separately (small, reliable JSON)
 Works with Claude, z.ai GLM, or the local Qwen3-8B (see llm.py)."""
 import json, math, re
+from copy import deepcopy
 from pathlib import Path
 from .llm import LLM
 
@@ -507,6 +508,31 @@ def _editorial_span(vo, phrase):
 
 
 def editorial_review(llm, plan, meta, transcript, cfg, log, stop=None):
+    """Best-effort style improvement; never block a source-checked script on wit.
+
+    Review a private candidate so failed checks cannot leak partial rewrites.
+    Cancellation remains fatal; editorial/model failures are advisory.
+    """
+    if stop and stop():
+        raise RuntimeError("stopped")
+    candidate = deepcopy(plan)
+    try:
+        _editorial_review_candidate(llm, candidate, meta, transcript, cfg, log, stop)
+        if stop and stop():
+            raise RuntimeError("stopped")
+    except Exception as exc:
+        if (stop and stop()) or str(exc).strip().lower() in {"stopped", "cancelled", "canceled"}:
+            raise
+        warning = f"Editorial review advisory: {type(exc).__name__}: {exc}. Keeping the previously source-checked narration; continuing."
+        log(warning)
+        plan.setdefault("editorial_warnings", []).append(warning)
+        return plan
+    plan.clear()
+    plan.update(candidate)
+    return plan
+
+
+def _editorial_review_candidate(llm, plan, meta, transcript, cfg, log, stop=None):
     """Require visible original interpretation and restrained wit in generated content beats.
 
     Model annotations are an editorial audit trail, not a legal assessment.
@@ -515,7 +541,7 @@ def editorial_review(llm, plan, meta, transcript, cfg, log, stop=None):
     """
     feedback = ""
     budgets = {s["id"]: _nw(s["vo"]) for s in plan["sections"] if not s.get("cta")}
-    for attempt in range(3):
+    for attempt in range(1):
         sections = [{"id": s["id"], "vo": s["vo"], "max_words": int(1.7 * budgets[s["id"]] + 15)}
                     for s in plan["sections"] if not s.get("cta")]
         prompt = ("Final editorial pass for generated TLDR narration. Every content beat needs substantial, original analysis "
@@ -556,7 +582,7 @@ def editorial_review(llm, plan, meta, transcript, cfg, log, stop=None):
             annotations[section["id"]] = {"analysis": analysis, "humor": humor}
         if len(annotations) != len(sections):
             feedback = "PREVIOUS ATTEMPT FAILED:\n" + "\n".join(failures)
-            log(f"  editorial review attempt {attempt + 1}: incomplete or invalid analysis/wit annotations; retrying")
+            log(f"  editorial review: incomplete or invalid analysis/wit annotations for {', '.join(s.split(':', 1)[0] for s in failures)}")
             continue
         for section in plan["sections"]:
             if section["id"] in annotations:

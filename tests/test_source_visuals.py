@@ -86,8 +86,37 @@ class SourceVisualTests(unittest.TestCase):
             writer.editorial_review(llm, plan, {}, "The source uses invented positions.", {}, print)
         self.assertIn("editorial", plan["sections"][0])
         llm.chat_json.return_value["sections"][0]["humor"] = "This is not in the narration"
-        with self.assertRaises(RuntimeError):
-            writer.editorial_review(llm, plan, {}, "Source facts", {}, print)
+        before = plan["sections"][0]["vo"]
+        writer.editorial_review(llm, plan, {}, "Source facts", {}, print)
+        self.assertEqual(plan["sections"][0]["vo"], before)
+        self.assertIn("Keeping the previously source-checked narration", plan["editorial_warnings"][0])
+
+    def test_editorial_failure_rolls_back_partial_rewrites(self):
+        plan = {"sections": [{"id": "s0", "vo": "Checked narration"}]}
+        def fail(llm, candidate, *args):
+            candidate["sections"][0]["vo"] = "Unchecked replacement"
+            raise ValueError("Malformed model response")
+        with patch.object(writer, "_editorial_review_candidate", side_effect=fail):
+            self.assertIs(writer.editorial_review(None, plan, {}, "source", {}, lambda _: None), plan)
+        self.assertEqual(plan["sections"][0]["vo"], "Checked narration")
+        self.assertTrue(plan["editorial_warnings"])
+
+    def test_editorial_cancellation_is_not_suppressed(self):
+        with self.assertRaisesRegex(RuntimeError, "stopped"):
+            writer.editorial_review(None, {}, {}, "", {}, print, stop=lambda: True)
+        with patch.object(writer, "_editorial_review_candidate", side_effect=RuntimeError("stopped")):
+            with self.assertRaisesRegex(RuntimeError, "stopped"):
+                writer.editorial_review(None, {}, {}, "", {}, print)
+
+    def test_editorial_malformed_model_output_is_advisory(self):
+        from unittest.mock import MagicMock
+        for response in (None, {"sections": []}, {"sections": "invalid"}):
+            llm = MagicMock(); llm.trace.return_value = llm
+            llm.chat_json.return_value = response
+            plan = {"sections": [{"id": "s0", "vo": "Previously checked narration"}]}
+            writer.editorial_review(llm, plan, {}, "Source", {}, lambda _: None)
+            self.assertEqual(plan["sections"][0]["vo"], "Previously checked narration")
+            self.assertTrue(plan["editorial_warnings"])
 
     def test_remote_timestamp_must_be_a_real_caption_cue(self):
         with tempfile.TemporaryDirectory() as folder:

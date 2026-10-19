@@ -1,5 +1,34 @@
 # Original commentary, mild wit, and source evidence
 
+## Advisory review regression — 2026-10-18
+
+The strict style gate stopped real job `20261018_213727` (AI news). Replaying
+its saved model response now preserves all 11 checked sections, records a
+warning and returns normally. Reproduce with:
+
+```powershell
+.\app\env\Scripts\python.exe scripts/replay_editorial_failure.py F:\videos_test\jobs\20261018_213727 --evidence F:\videos_test\evidence\editorial-failure-replay.json
+```
+
+Live DeepSeek job `20261018_215337` used the complete 5,621-word God's Eye
+View transcript from production job `20261016_190435` (read-only), Beginner,
+both outputs, three-minute explainer target, 165-second Short target, and
+script approval required. Its six explainer sections and nine initial Short
+beats both triggered advisory warnings instead of exceptions. The existing
+Short length pass reduced the final plan to seven beats including attribution.
+The job completed `script` and `short_script` and reached `awaiting_review`
+with an empty error. Rendering was deliberately not started.
+
+41 offline tests pass, including failed-annotation fallback, malformed model
+responses, partial rewrite rollback, successful review, and cancellation.
+Evidence: `F:\videos_test\evidence\editorial-live-regression.json` and
+`editorial-failure-replay.json`. This regression used temporary fork port
+42022 because automatic approval review rejected restarting the existing
+42021 process; that process still requires a restart to load the fix.
+Production code and port 42020 remain untouched.
+
+## Original feature implementation
+
 Implemented only in `F:\code\video-studio-test`. Production code, production
 jobs, and port 42020 were not modified or restarted. The isolated server on
 42021 was restarted and reports jobs under `F:\videos_test\jobs`.
@@ -21,9 +50,12 @@ A final editorial pass stores actual `analysis` and `humor` quotations in each
 content section's `editorial` object. It checks the revised narration against
 the source, reviews jargon, and source-checks any jargon additions again. If
 definitions interrupt a quoted sentence, it refreshes the annotations without
-rewriting the checked narration. Retries have a fixed word budget and are
-bounded; an unresolved editorial failure produces a clear generation error,
-not a false passing annotation. These annotations are an audit aid, not a
+rewriting the checked narration. The editorial pass now makes one bounded
+attempt on a private copy. Unresolved style checks or model errors log an
+advisory warning and preserve the previously source-checked narration instead
+of stopping the pipeline. Cancellation still stops the job. Failed partial
+rewrites are discarded; warnings are saved in `editorial_warnings`, without
+inventing passing annotations. These annotations are an audit aid, not a
 semantic or legal certificate.
 
 The generated closing line keeps source attribution and adds the mild phrase
