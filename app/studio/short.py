@@ -85,7 +85,7 @@ Also give "title" (max 60 chars, YouTube title), "tag" (max 28 chars, small labe
 name the source in a sentence, e.g. "the Moonshots podcast, episode two ninety-three" or "a NotebookLM briefing on battery recycling".
 
 Reply with ONLY JSON:
-{{"title":"...","tag":"...","description":"...","source_spoken":"...","covered":false,"beats":[{{"vo":"...","graphics":[{{"at":null,"g":{{...}}}},{{"at":"word","g":{{...}}}}],"queries":["...","..."],"subject":null,"backdrop":{{...}},"still_prompt":"...","motion":"..."}}]}}"""
+{{"title":"...","tag":"...","description":"...","source_spoken":"...","covered":false,"beats":[{{"vo":"...","take":"EXACT words copied from vo: our opinion","joke":"EXACT words copied from vo: the dry joke","graphics":[{{"at":null,"g":{{...}}}},{{"at":"word","g":{{...}}}}],"queries":["...","..."],"subject":null,"backdrop":{{...}},"still_prompt":"...","motion":"..."}}]}}"""
 
 def _log_none(m): pass
 
@@ -137,6 +137,10 @@ def verify_quotes(plan, transcript, log):
     return plan
 
 # ---------------------------------------------------------------- script
+def _norm(t):
+    return re.sub(r"[^a-z0-9 ]+", "", re.sub(r"\s+", " ", str(t or "").lower().replace("\u2019", "'"))).strip()
+
+
 def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir, smoke=False):
     wpm = tts.wpm(cfg)
     # target = narration + a pause after each beat + the end tail + the closing line (~16 words); size the story to fill the rest
@@ -157,6 +161,11 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             if not isinstance(b, list) or len(b) < minb: raise ValueError(f"need at least {minb} beats")
             for x in b:
                 if not isinstance(x.get("vo"), str) or not x.get("queries"): raise ValueError("beat missing vo or queries")
+            for k, x in enumerate(b):   # VOICE: every beat carries our opinion and a dry joke, quoted back exactly from its narration
+                for f, what in (("take", "an opinion of ours"), ("joke", "a dry, snarky joke")):
+                    v = _norm(x.get(f))
+                    if len(v.split()) < 3 or v not in _norm(x["vo"]):
+                        raise ValueError(f"beat {k + 1} needs {what} in its narration, with \"{f}\" copied EXACTLY from that narration")
             n = sum(len(x["vo"].split()) for x in b)
             tries.append((abs(n - words), j))
             if smoke:   # the smoke test keeps its tight ~30 s band
@@ -175,7 +184,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
         if audience_key(cfg) == 'beginner':
             prompt += '\nBEGINNER PRIORITY: depth over breadth. Explain one core technical idea per beat instead of listing many features. Keep the technical names of the chosen idea, and explain what they mean immediately. Omit secondary features that would introduce more terms than you have room to explain.'
             if smoke:
-                prompt += f'\nFor this 30-second test, use the TWO beats to explain ONE technical idea from the title/notes, in {int(words * lo)}-{int(words * hi)} words TOTAL. Do not introduce API keys, radar, lightning density or other secondary jargon unless that is the chosen topic. Keep source_spoken to 2-4 words so the closing line stays short.'
+                prompt += f'\nFor this 30-second test, use the TWO beats to explain ONE technical idea from the title/notes, in {int(words * lo)}-{int(words * hi)} words TOTAL. Do not introduce API keys, radar, lightning density or other secondary jargon unless that is the chosen topic. Keep source_spoken to 2-4 words so the closing line stays short. The VOICE rules still apply to both beats: one opinion of ours and one dry joke each.'
         try: j = llm.trace("short script").chat_json(SYSTEM, prompt, max_tokens=8000, check=chk)
         except RuntimeError:
             if tries:
@@ -208,7 +217,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             plan["sections"].append({"id": f"b{i}", "title": f"Beat {i + 1}", "vo": re.sub(r"\s+", " ", b["vo"]).strip(),
                                      "queries": [q for q in b.get("queries", []) if isinstance(q, str)][:3] or ["city skyline aerial"],
                                      "subject": sj, "backdrop": _clean_backdrop(b.get("backdrop"), b["vo"]),
-                                     "source_visual": b.get("source_visual"),
+                                     "source_visual": b.get("source_visual"), "take": str(b.get("take") or ""), "joke": str(b.get("joke") or ""),
                                      "still_prompt": str(b.get("still_prompt") or "")[:500], "motion": str(b.get("motion") or "")[:160],
                                      "visuals": [{"type": "chart", "chart": g["g"], "at": g.get("at")} for g in gs]})
         log("Checking the Short against the source (names, attributions, numbers)...")
@@ -249,6 +258,10 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
         cta = {"kind": "cta", "badge": "SUMMARIZED FROM", "title": title[:80], "line": "Follow for more", "play": False, "arrow": False}
     plan["sections"].append({"id": f"b{len(plan['sections'])}", "title": "Call to action", "vo": cta_vo, "queries": [], "cta": cta, "visuals": []})
     w = sum(len(s["vo"].split()) for s in plan["sections"])
+    for x in plan["sections"]:   # did the fact-check / jargon passes keep the voice?
+        if x.get("cta"): continue
+        lost = [f for f in ("take", "joke") if x.get(f) and _norm(x[f]) not in _norm(x["vo"])]
+        if lost: log(f"  voice check {x['id']}: the later passes reworded the {' and the '.join(lost)}")
     log(f"Short script ready: {len(plan['sections'])} beats, {w} words (~{w / cfg['wpm'] * 60 + GAP * len(plan['sections']) + TAIL:.0f}s)")
     return plan
 

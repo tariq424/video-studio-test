@@ -259,13 +259,15 @@ class Studio:
             return meta_from_elsewhere(), text
         # 3) another job already has this video's transcript
         if vid:
-            for d in sorted(self.jobs_dir().iterdir(), reverse=True):
+            for d in sorted(self.jobs_dir().iterdir(), key=lambda x: ((x / "src" / "source_cues.json").exists(), x.name), reverse=True):   # jobs with timed cues first
                 o, om = d / "src" / "transcript.txt", d / "src" / "meta.json"
                 if d == j.dir or not (o.exists() and om.exists()): continue
                 try: m = json.loads(om.read_text(encoding="utf-8"))
                 except Exception: continue
                 if m.get("id") == vid and len(o.read_text(encoding="utf-8").split()) > 100:
                     text = o.read_text(encoding="utf-8"); tf.write_text(text, encoding="utf-8"); mf.write_text(json.dumps(m, indent=1), encoding="utf-8")
+                    if (d / "src" / "source_cues.json").exists():   # the timed captions too: the Source Clip rung needs them
+                        shutil.copy2(d / "src" / "source_cues.json", tf.parent / "source_cues.json")
                     log(f"Transcript: reusing the transcript of the same video from job {d.name} ({len(text.split())} words); YouTube not contacted")
                     return m, text
         # 4) YouTube recently blocked this PC: don't ask again yet
