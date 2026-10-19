@@ -248,6 +248,9 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             cut = promise.sub("", x["vo"]).strip()
             if cut != x["vo"].strip() and len(cut.split()) >= 6:
                 log(f"  {x.get('id', 'beat')}: removed a line promising a longer video (this job makes no long video)"); x["vo"] = cut
+        d = promise.sub("", plan.get("description") or "").strip()
+        if d != (plan.get("description") or "").strip():
+            log("  description: removed a line promising a longer video"); plan["description"] = d
     # closing call-to-action beat
     src_name = plan.get("source_spoken") or title
     if mode == "both":
