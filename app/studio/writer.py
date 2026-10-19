@@ -546,7 +546,9 @@ def _editorial_review_candidate(llm, plan, meta, transcript, cfg, log, stop=None
     """
     feedback = ""
     budgets = {s["id"]: _nw(s["vo"]) for s in plan["sections"] if not s.get("cta")}
-    for attempt in range(1):
+    tries = max(1, int(cfg.get("editorial_attempts", 5)))   # regenerate with the failure as feedback until every beat passes
+    for attempt in range(tries):
+        if attempt: log(f"  editorial review: attempt {attempt + 1} of {tries}")
         sections = [{"id": s["id"], "vo": s["vo"], "max_words": int(1.7 * budgets[s["id"]] + 15)}
                     for s in plan["sections"] if not s.get("cta")]
         prompt = ("Final editorial pass for generated TLDR narration. Every content beat needs substantial, original analysis "
@@ -631,10 +633,12 @@ def _editorial_review_candidate(llm, plan, meta, transcript, cfg, log, stop=None
                     break
                 section["editorial"] = annotation
         if valid:
-            log(f"Editorial review: {len(annotations)} content beats retain original analysis and mild wit after source checking")
+            log(f"Editorial review: passed on attempt {attempt + 1}; {len(annotations)} content beats keep original analysis and a joke after source checking")
+            for section in plan["sections"]:
+                if section.get("editorial"): log(f"    {section['id']} analysis: {section['editorial']['analysis'][:140]} | joke: {section['editorial']['humor'][:120]}")
             return plan
         feedback = "The source checker changed an annotated phrase. Supply new brief analysis and wit that are source-grounded and survive checking."
-    raise RuntimeError("Editorial review could not preserve original analysis and mild wit in every content beat")
+    raise RuntimeError(f"Editorial review could not preserve original analysis and a joke in every content beat after {tries} attempts")
 
 
 def normalize(plan):
