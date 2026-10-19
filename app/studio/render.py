@@ -313,8 +313,18 @@ def do_stills(job, plan, cfg, wg, log, stop):
             lock = illustrate.wangp_lock({"id": v["id"], "vo": vo, "still_prompt": v.get("prompt", "")}, _ents(job))
             from . import physics
             if not lock and physics.action({"vo": vo, "subject": v.get("subject")})[0]: lock = "action"   # animate an action, no still
-            if lock or not wg.alive() or not _still(cfg, wg, log, v["prompt"], out, seed, stop, f"still {v['id']}"):
-                v2_after_wangp(cfg, job, v, vo, log)
+            try: alive = (not lock) and wg.alive()
+            except Exception: alive = False
+            try: made = alive and _still(cfg, wg, log, v["prompt"], out, seed, stop, f"still {v['id']}")
+            except Exception as e:
+                if str(e) == "cancelled": raise
+                log(f"  still {v['id']} failed ({str(e)[:120]}); next rung"); made = False
+            if not made:
+                try: v2_after_wangp(cfg, job, v, vo, log)
+                except Exception as e:   # a rung must never stop the job: the headline card is the floor
+                    if str(e) == "cancelled": raise
+                    log(f"  {v['id']}: ladder failed ({type(e).__name__}: {str(e)[:120]}); headline card")
+                    v["type"] = "motion"; v["g"] = {"kind": "headline", "kicker": "", "text": " ".join(vo.split()[:12]), "sub": ""}
             n += 1; continue
         if illustration_still(cfg, job, v, vo, log): continue   # then illustration / silhouette; WanGP only for atmospheric filler
         if not _still(cfg, wg, log, v["prompt"], out, seed, stop, f"still {v['id']}"):

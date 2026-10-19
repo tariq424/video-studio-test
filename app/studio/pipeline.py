@@ -439,10 +439,10 @@ class Studio:
                         from . import footage
                         footage.long_broll(j.dir, plan, cfg, log, stop); j.save_plan(plan)
                 elif st == "motion":
-                    if any(v["type"] == "motion" and not v.get("stock") for x in plan["sections"] for v in x["visuals"]): _need_wangp(wg)
+                    if any(v["type"] == "motion" and not v.get("stock") for x in plan["sections"] for v in x["visuals"]): _want_wangp(wg, cfg, log)
                     render.do_motion(j.dir, plan, cfg, wg, log, stop); j.save_plan(plan)
                 elif st == "stills":
-                    if any(v["type"] == "still" and not v.get("stock") for x in plan["sections"] for v in x["visuals"]): _need_wangp(wg)
+                    if any(v["type"] == "still" and not v.get("stock") for x in plan["sections"] for v in x["visuals"]): _want_wangp(wg, cfg, log)
                     render.do_stills(j.dir, plan, cfg, wg, log, stop); j.save_plan(plan)   # illustrations turn stills into motion clips
                 elif st == "assemble":
                     if j.state.get("refresh_fallbacks"):   # Full re-render with "rebuild text-card fallbacks"
@@ -470,6 +470,15 @@ def _need_tts(wg, cfg):
         if not cfg.get("tts_fallback", True): raise RuntimeError(f"Narration engine is Kokoro but {why}. Install it, or set tts_engine back to wanGP.")
         cfg["tts_engine"] = "wanGP"   # fallback: this job narrates with WanGP
     _need_wangp(wg)
+
+def _want_wangp(wg, cfg, log):
+    """Long-video motion / stills: with ladder v2 a missing WanGP is not fatal - each visual drops down its ladder
+    (still, graphics, physics, illustration, headline). Without v2 WanGP is required, as before."""
+    try: ok = wg.alive()
+    except Exception: ok = False
+    if ok: return
+    if cfg.get("ladder_v2"): log("WanGP is not reachable: these visuals drop to the next rung (graphics / illustration / headline)"); return
+    raise RuntimeError("WanGP is not running. Start Wan2GP in Pinokio, then press Resume.")
 
 def _need_wangp(wg):
     if not wg.alive(): raise RuntimeError("WanGP is not running. Start Wan2GP in Pinokio, then press Resume.")
