@@ -88,7 +88,8 @@ def assign(ents, text):
     low = text.lower(); best, score = None, 0
     for e in things:   # the most specific match wins: a name/brand beats "fighter jet", which beats "jet"
         brand = e["brand"].lower()
-        if (brand and brand in low) or e["name"].lower() in low: sc = 1000 + len(e["name"])
+        # whole words only: the brand "Meta" must not match "metallic", nor "Apple" "pineapple"
+        if (brand and re.search(r"\b" + re.escape(brand) + r"\b", low)) or re.search(r"\b" + re.escape(e["name"].lower()) + r"\b", low): sc = 1000 + len(e["name"])
         else:
             hits = [w for w in e["category_words"] if _mentions(text, [w])]
             sc = max((len(w) for w in hits), default=0)

@@ -32,13 +32,37 @@ def _run_downloader(command, timeout=90):
     return stdout
 
 
+def _stream_range(url, start, duration, dest):
+    """Fast path: ask yt-dlp only for the stream URL, then let ffmpeg seek into it over HTTP and copy 2-3 seconds.
+    Seconds instead of minutes: nothing before the cue is downloaded."""
+    out = _run_downloader([sys.executable, "-m", "yt_dlp", "--quiet", "--no-warnings", "--no-playlist", "--socket-timeout", "20",
+                           "-f", "best[height<=720][ext=mp4][vcodec!=none]/bestvideo[height<=720][ext=mp4]/best[height<=720]",
+                           "-g", url], timeout=60)
+    stream = next((l.strip() for l in out.splitlines() if l.strip().startswith("http")), "")
+    if not stream:
+        raise RuntimeError("no stream URL")
+    part = dest.with_suffix(".download.mp4")
+    media.ff("-ss", max(0.0, start), "-i", stream, "-t", duration + 0.3, "-an", "-c:v", "libx264", "-crf", 18,
+             "-pix_fmt", "yuv420p", part, timeout=60)
+    if not part.is_file() or part.stat().st_size < 10000:
+        raise RuntimeError("stream seek produced no video")
+    return part
+
+
 def _download_range(url, start, duration, dest):
+    try:
+        return _stream_range(url, start, duration, dest)
+    except Exception as e:   # fall back to yt-dlp's own section download (slower)
+        fast_error = str(e)[:120]
     command = [sys.executable, "-m", "yt_dlp", "--quiet", "--no-warnings", "--no-playlist",
                "--retries", "0", "--fragment-retries", "0", "--socket-timeout", "20",
                "--force-overwrites", "--download-sections", f"*{start}-{start + duration}",
                "--force-keyframes-at-cuts", "-f", "bestvideo[height<=720][ext=mp4]/best[height<=720]",
                "-o", str(dest.with_suffix(".download.%(ext)s")), "--print", "after_move:%(filepath)j", url]
-    stdout = _run_downloader(command)
+    try:
+        stdout = _run_downloader(command)
+    except RuntimeError as e:
+        raise RuntimeError(f"stream seek failed ({fast_error}); section download failed ({str(e)[:120]})")
     for line in reversed(stdout.splitlines()):
         try:
             path = Path(json.loads(line))

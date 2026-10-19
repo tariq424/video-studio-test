@@ -76,3 +76,14 @@ class FlowRungTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VoiceCheckTests(unittest.TestCase):
+    def test_quoted_tolerates_punctuation_and_small_edits(self):
+        self.assertTrue(short._quoted("Our take: real engineering, but not proven yet",
+                                      "Willow cut errors. Our take - real engineering, but it's not proven yet."))
+        self.assertFalse(short._quoted("hype cycle cashing a check", "nothing like it here"))
+        self.assertFalse(short._quoted("too short", "too short"))   # a two-word 'joke' is not a joke
+
+    def test_vnorm_is_not_shadowed(self):
+        self.assertEqual(short._vnorm("It's a dry, joke!"), "its a dry joke")

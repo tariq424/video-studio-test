@@ -355,6 +355,8 @@ that aren't spelled out, names of models / systems / tools / datasets / organisa
 A term counts as explained if a short phrase right next to its first use says what it is.
 For each section that has such a term, return the section's narration with a short explainer added at the term's FIRST use
 (acronym spelled out, or 4-8 words saying what it is). Change nothing else: same facts, same order, same voice.
+Never reword, shorten or drop the jokes or the opinions ("our take", "honestly", "which tells you..."); put explainers next to
+terms, not inside a joke. Skip explaining a term that only appears inside a joke.
 Only return sections you changed.
 
 SCRIPT:

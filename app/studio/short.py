@@ -137,8 +137,20 @@ def verify_quotes(plan, transcript, log):
     return plan
 
 # ---------------------------------------------------------------- script
-def _norm(t):
-    return re.sub(r"[^a-z0-9 ]+", "", re.sub(r"\s+", " ", str(t or "").lower().replace("\u2019", "'"))).strip()
+def _vnorm(t):
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", str(t or "").lower().replace("\u2019", "").replace("'", "")).split())
+
+
+def _quoted(phrase, vo):
+    """True when the phrase's words appear in vo in the same order (punctuation, dashes, quotes and small edits
+    such as an inserted comma clause don't matter); at least 80% of its words must line up."""
+    p, v = _vnorm(phrase).split(), _vnorm(vo).split()
+    if len(p) < 3: return False
+    if " ".join(p) in " ".join(v): return True
+    i = hit = 0
+    for w in v:
+        if i < len(p) and w == p[i]: i += 1; hit += 1
+    return hit >= 0.8 * len(p)
 
 
 def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir, smoke=False):
@@ -161,10 +173,10 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             if not isinstance(b, list) or not b: raise ValueError("no beats")
             for k, x in enumerate(b):
                 for f, what in (("take", "an opinion of ours"), ("joke", "a dry, snarky joke")):
-                    v = _norm(x.get(f))
-                    if len(v.split()) < 3 or v not in _norm(x.get("vo")):
+                    if not _quoted(x.get(f), x.get("vo")):
+                        got = str(x.get(f) or "")[:70]
                         raise ValueError(f"beat {k + 1} needs {what} IN its vo, and \"{f}\" must repeat those words exactly as written in vo "
-                                         f"(write the sentence into vo first, then copy it into \"{f}\")")
+                                         f"(write the sentence into vo first, then copy it into \"{f}\"; you gave \"{got}\")")
         def chk(j):
             b = j.get("beats")
             if not isinstance(b, list) or len(b) < minb: raise ValueError(f"need at least {minb} beats")
@@ -271,7 +283,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
     w = sum(len(s["vo"].split()) for s in plan["sections"])
     for x in plan["sections"]:   # did the fact-check / jargon passes keep the voice?
         if x.get("cta"): continue
-        lost = [f for f in ("take", "joke") if x.get(f) and _norm(x[f]) not in _norm(x["vo"])]
+        lost = [f for f in ("take", "joke") if x.get(f) and not _quoted(x[f], x["vo"])]
         if lost: log(f"  voice check {x['id']}: the later passes reworded the {' and the '.join(lost)}")
     log(f"Short script ready: {len(plan['sections'])} beats, {w} words (~{w / cfg['wpm'] * 60 + GAP * len(plan['sections']) + TAIL:.0f}s)")
     return plan
