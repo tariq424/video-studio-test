@@ -146,10 +146,7 @@ def generate(cfg, sd, sec, key, log, aspect="9:16"):
                 if "accounts.google.com" in page.url or _first(page, ["text=/sign in/i"], 1500) and not _first(page, ["textarea", "[contenteditable=true]"], 1500):
                     _down["why"] = "the Flow profile is not signed in to Google; run scripts\\flow-login.ps1"
                     raise RuntimeError(_down["why"])
-                new = _first(page, ["button:has-text('New project')", "a:has-text('New project')", "[aria-label*='New project' i]"], 6000)
-                if new:
-                    new.click()
-                    page.wait_for_timeout(3000)
+                # (no "New project" click: in the 2026 Flow UI that control sits in the Library and only creates an empty collection)
                 box = _first(page, ["textarea", "[contenteditable=true]", "[role=textbox]"], 15000)
                 if not box:
                     _down["why"] = "Flow's prompt box was not found (the page may have changed)"
@@ -166,12 +163,30 @@ def generate(cfg, sd, sec, key, log, aspect="9:16"):
                 before = set(_videos(page))
                 box.click()
                 box.fill(prompt) if box.evaluate("e => e.tagName") == "TEXTAREA" else page.keyboard.insert_text(prompt)
-                send = _first(page, ["button[aria-label*='Create' i]", "button[aria-label*='Generate' i]", "button[aria-label*='Send' i]",
-                                     "button:has-text('arrow_forward')", "button:has-text('Create')", "button:has-text('Generate')"], 3000)
+                send = _first(page, ["button[aria-label*='Send' i]", "button[aria-label*='Submit' i]", "button[aria-label*='Generate' i]",
+                                     "button[aria-label*='Create' i]", "button:has-text('arrow_forward')", "button:has-text('arrow_upward')"], 2000)
+                if not send:   # the 2026 UI: a round arrow button at the bottom-right of the prompt panel; take the panel's last button
+                    try:
+                        panel = box.locator("xpath=ancestor::*[.//button][1]")
+                        cand = panel.locator("button:not([disabled])")
+                        send = cand.nth(cand.count() - 1) if cand.count() else None
+                    except Exception:
+                        send = None
                 if send:
                     send.click()
-                else:
-                    page.keyboard.press("Enter")
+                page.wait_for_timeout(2500)
+                try:
+                    still = box.input_value() if box.evaluate("e => e.tagName") == "TEXTAREA" else box.inner_text()
+                except Exception:
+                    still = ""
+                if prompt[:40] in (still or ""):   # not sent yet: Enter, then Ctrl+Enter
+                    box.press("Enter"); page.wait_for_timeout(2000)
+                    try:
+                        still = box.input_value() if box.evaluate("e => e.tagName") == "TEXTAREA" else box.inner_text()
+                    except Exception:
+                        still = ""
+                    if prompt[:40] in (still or ""): box.press("Control+Enter")
+                log("  flow: prompt submitted; waiting for the clip")
                 src = None
                 while time.time() - t0 < timeout:
                     page.wait_for_timeout(5000)
