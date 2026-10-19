@@ -42,8 +42,11 @@ def _stream_range(url, start, duration, dest):
     if not stream:
         raise RuntimeError("no stream URL")
     part = dest.with_suffix(".download.mp4")
-    media.ff("-ss", max(0.0, start), "-i", stream, "-t", duration + 0.3, "-an", "-c:v", "libx264", "-crf", 18,
-             "-pix_fmt", "yuv420p", part, timeout=60)
+    try:
+        media.ff("-ss", max(0.0, start), "-i", stream, "-t", duration + 0.3, "-an", "-c:v", "libx264", "-crf", 18,
+                 "-pix_fmt", "yuv420p", part, timeout=60)
+    except subprocess.CalledProcessError as e:   # say WHY (HTTP 403, timeout, codec...), not just the command line
+        raise RuntimeError("ffmpeg could not read the stream: " + " ".join((e.stderr or e.stdout or "no output").split())[-300:])
     if not part.is_file() or part.stat().st_size < 10000:
         raise RuntimeError("stream seek produced no video")
     return part
@@ -53,7 +56,7 @@ def _download_range(url, start, duration, dest):
     try:
         return _stream_range(url, start, duration, dest)
     except Exception as e:   # fall back to yt-dlp's own section download (slower)
-        fast_error = str(e)[:120]
+        fast_error = str(e)[:400]
     command = [sys.executable, "-m", "yt_dlp", "--quiet", "--no-warnings", "--no-playlist",
                "--retries", "0", "--fragment-retries", "0", "--socket-timeout", "20",
                "--force-overwrites", "--download-sections", f"*{start}-{start + duration}",
@@ -62,7 +65,7 @@ def _download_range(url, start, duration, dest):
     try:
         stdout = _run_downloader(command)
     except RuntimeError as e:
-        raise RuntimeError(f"stream seek failed ({fast_error}); section download failed ({str(e)[:120]})")
+        raise RuntimeError(f"stream seek failed ({fast_error}); section download failed ({str(e)[:300]})")
     for line in reversed(stdout.splitlines()):
         try:
             path = Path(json.loads(line))
@@ -246,7 +249,7 @@ def make(cfg, job, workspace, sec, log):
                 dest.unlink(missing_ok=True)
             except OSError:
                 pass
-        log(f"  source evidence unavailable ({str(error)[:160]}); continuing visual ladder")
+        log(f"  source evidence unavailable: {' '.join(str(error).split())[:900]}; continuing visual ladder")
         return None
 
 

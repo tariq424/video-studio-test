@@ -386,6 +386,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
     ff = sd / "fallback.json"; out = json.loads(ff.read_text(encoding="utf-8")) if ff.exists() else {}
     cf = fd / "chains.json"; chs = json.loads(cf.read_text(encoding="utf-8")) if cf.exists() else {}
     def save_out(): ff.write_text(json.dumps(out, indent=1), encoding="utf-8"); cf.write_text(json.dumps(chs, indent=1), encoding="utf-8")
+    demoted = {}   # beat -> the stock set aside for its source clip (given back if the clip fails)
     if v2 and cfg.get("source_clips_auto", True) and cfg.get("source_visuals", True) and cfg.get("source_over_stock", True):
         # A beat about a specific story moment the source itself shows: its own footage beats a generic stock clip
         # (a laptop for a model launch, test tubes for an enzyme). The strongest caption matches (within the source-clip
@@ -397,11 +398,10 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
             r = source_visuals.auto_request(job, x, min_overlap=int(cfg.get("source_over_stock_min", 4)))
             if r: cand.append((r["match"], x["id"], r["start"]))
         cap = max(0, min(2, int(cfg.get("source_visual_max_uses", 2))))
-        demoted = False
         for score, bid, start in sorted(cand, reverse=True)[:cap]:
             if pick.get(bid):
                 log(f"  {bid}: generic stock set aside: the source itself covers this beat (caption cue at {start:.1f}s, {score} shared words)")
-                pick[bid] = []; demoted = True
+                demoted[bid] = pick[bid]; pick[bid] = []
         if demoted: (sd / "stock" / "pick.json").write_text(json.dumps(pick, indent=1), encoding="utf-8")
     allneeds = base_needs = _needs(plan, tm, pick, sd, cfg)
     if full:   # Review every beat: every beat gets the whole menu, also the ones stock footage already covers (one slot)
@@ -420,7 +420,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         c = chs.get(sec["id"], {})
         return {"bid": sec["id"], "n": int(sec["id"][1:]) + 1, "vo": sec["vo"], "stock_found": c.get("stock_found", len(pick.get(sec["id"], []))),
                 "uses": c.get("uses", []), "failed": c.get("failed", [])}
-    if v2: log("Visual ladder v2 per beat (1 stock -> 2 source clip -> 3 real photos -> 4 cloud still -> 5 WanGP still (atmospheric only) -> 6 Google Flow -> "
+    if v2: log("Visual ladder v2 per beat (1 stock -> 2 source clip -> 3 Google Flow -> 4 real photos -> 5 cloud still -> 6 WanGP still (atmospheric only) -> "
                "7 physics data (real / script map / synthetic) -> 8 Remotion graphics (draws the physics data, else template / Claude) -> 9 CapCut (hard failures, per video) -> 10 parallax -> 11 illustration / silhouette -> 12 headline; animate on click):")
     else: log("Visual ladder per beat (1 stock/photo -> 2 cloud still -> 3 WanGP still -> 4 parallax -> 5 illustration / silhouette -> 6 reconstruction / headline; animate on click):")
     for s in beats:   # beats step 1 covered on its own
@@ -438,6 +438,19 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         source = source_visuals.make(cfg, job, sd, s, log)
         if source:
             items.append(source)
+        elif s["id"] in demoted:   # the source clip failed: the beat gets back the stock set aside for it
+            pick[s["id"]] = demoted.pop(s["id"])
+            (sd / "stock" / "pick.json").write_text(json.dumps(pick, indent=1), encoding="utf-8")
+            log(f"  {s['id']}: source clip failed; the stock set aside for it is back ({len(pick[s['id']])} clip(s))")
+            needs.pop(s["id"], None)
+            _safe(log, f"{s['id']} stock", lambda: stock_beat(s))
+            return
+        if v2 and cfg.get("flow_on", True) and len(items) < n:   # rung 3: Google Flow (falls through to photos -> cloud -> WanGP)
+            from . import flow
+            clip = _safe(log, "flow", lambda: flow.generate(cfg, sd, s, f"{s['id']}_flow", log, aspect="9:16"))
+            if clip:
+                items.append({"type": "video", "src": _rel_sd(clip, sd), "secs": round(media.dur(clip), 2), "rate": 1.0, "freeze": True,
+                              "tag": "GENERATED · FLOW", "rung": "flow"})
         bd = s.get("backdrop") or {"kind": "headline", "kicker": "", "text": s["vo"][:60], "sub": ""}
         if bd.get("kind") == "map" and len(items) < n: items.append({"type": "graphic", "g": bd, "rung": "map"})
         have = len(pick.get(s["id"], []))
@@ -575,6 +588,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
     pause = (lambda: dbg.manual("short_fallback: AI stills")) if dbg else None
 
     def finalize_safe(s, st):   # one beat failing to finalize must never stop the job: it gets a headline card and the log says why
+        if s["id"] not in needs: return   # given back to stock in prepare (its source clip failed)
         if _safe(log, f"{s['id']} visual ladder", lambda: finalize(s, st) or True) is None:
             out[s["id"]] = [{"type": "graphic", "g": {"kind": "headline", "kicker": "", "text": s["vo"][:70], "sub": ""}, "rung": "headline"}]
             chs[s["id"]] = {"n": int(s["id"][1:]) + 1, "vo": s["vo"], "chain": ["ladder failed -> headline"], "uses": ["headline"], "failed": ["ladder"]}
@@ -631,21 +645,12 @@ def _safe(log, rung, fn, default=None):
 def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill, log, pos=None):
     """Visual ladder v2, rungs 5-10 for one slot whose cloud / WanGP still didn't pass. -> the bg item. Appends to chain / why /
     failed. vb carries per-beat state: physics and graphics run once per beat (a second slot of the same beat goes on down).
-    5. Google Flow: one generated clip per beat (flow.py; skipped when not set up)
-    5b. physics = DATA PROVIDER: when the slot describes physical motion it returns a payload (real data, the narration's numbers,
+    5. physics = DATA PROVIDER: when the slot describes physical motion it returns a payload (real data, the narration's numbers,
        the script's map coordinates, or a labelled synthetic path), saved to short/physics/<slot>.json
     6. Remotion graphics: draws that payload as a motion-graphics clip; without a payload, a template / Claude composition
     7. CapCut (hard failures)   8. parallax   9. illustration / silhouette   10. headline card
     Every rung is isolated (_safe): a failure is logged and the next rung runs."""
-    from . import graphics, physics, capcut, illustrate, flow
-    if cfg.get("flow_on", True) and not vb.get("f"):   # Google Flow (one generated clip per beat; falls through on any failure)
-        vb["f"] = True
-        clip = _safe(log, "flow", lambda: flow.generate(cfg, sd, s, sl["key"], log, aspect="9:16"))
-        if clip:
-            chain.append("flow")
-            return {"type": "video", "src": _rel_sd(clip, sd), "secs": round(media.dur(clip), 2), "rate": 1.0, "freeze": True,
-                    "tag": "GENERATED · FLOW", "rung": "flow"}
-        chain.append("flow"); failed.append("flow")
+    from . import graphics, physics, capcut, illustrate
     payload = None
     if cfg.get("physics_auto", True) and not vb["p"]:   # 5. physics -> data
         vb["p"] = True

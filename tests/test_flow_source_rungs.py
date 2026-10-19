@@ -50,28 +50,16 @@ class FlowRungTests(unittest.TestCase):
         self.assertTrue(any("no signed-in Flow profile" in l for l in logs))
         self.assertTrue(any("flow skipped" in l for l in logs))
 
-    def test_flow_clip_is_used_before_physics_and_graphics(self):
-        clip = self.sd / "flow" / "b1_0.mp4"
-        with patch.object(flow, "generate", return_value=clip), patch.object(short.media, "dur", return_value=8.0), \
-             patch("app.studio.physics.provide") as provide, patch("app.studio.graphics.make") as make:
-            chain = []
-            it = short._v2_rungs({"flow_on": True}, self.sd, {"id": "b1", "vo": "x"}, {"key": "b1_0"}, {}, [], {}, {}, vb(),
-                                 chain, [], [], 0, print)
-        self.assertEqual(it["rung"], "flow")
-        self.assertEqual(chain, ["flow"])
-        provide.assert_not_called(); make.assert_not_called()
-
-    def test_flow_failure_falls_through(self):
-        def boom(*a, **k): raise RuntimeError("page changed")
-        with patch.object(flow, "generate", side_effect=boom), \
+    def test_flow_is_no_longer_in_the_late_rungs(self):
+        # Flow is rung 3 (prepare, right after the source clip); rungs 7+ must not call it
+        with patch.object(flow, "generate") as gen, \
              patch("app.studio.physics.provide", return_value=None), \
              patch("app.studio.graphics.make", return_value={"ok": False, "why": "x", "hard": False}), \
              patch("app.studio.illustrate.aircraft_for", return_value=None), patch("app.studio.illustrate.pick", return_value=None):
-            chain = []
             it = short._v2_rungs({"flow_on": True}, self.sd, {"id": "b1", "vo": "a beat"}, {"key": "b1_0"}, {}, [], {}, {}, vb(),
-                                 chain, [], [], 0, lambda m: None)
+                                 [], [], [], 0, lambda m: None)
+        gen.assert_not_called()
         self.assertEqual(it["rung"], "headline")
-        self.assertEqual(chain[0], "flow")
 
 
 if __name__ == "__main__":

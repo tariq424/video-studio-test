@@ -75,3 +75,6 @@ class SmokeTrimAndStockGateTests(unittest.TestCase):
         q = ["hidden camera in office ceiling"]
         self.assertFalse(footage.on_subject({"desc": "animation of an unrolled tissue paper"}, q))
         self.assertTrue(footage.on_subject({"desc": "security cameras on an office ceiling"}, q))
+        nar = "Google says its Willow quantum chip got more reliable."
+        self.assertFalse(footage.on_subject({"desc": "futuristic circuit board with glowing neon"}, ["glowing quantum chip"], None, nar))
+        self.assertTrue(footage.on_subject({"desc": "quantum computer chip close up"}, ["glowing quantum chip"], None, nar))
