@@ -177,6 +177,9 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                         got = str(x.get(f) or "")[:70]
                         raise ValueError(f"beat {k + 1} needs {what} IN its vo, and \"{f}\" must repeat those words exactly as written in vo "
                                          f"(write the sentence into vo first, then copy it into \"{f}\"; you gave \"{got}\")")
+                t, jk = _vnorm(x.get("take")), _vnorm(x.get("joke"))
+                if t in jk or jk in t:
+                    raise ValueError(f"beat {k + 1}: \"take\" (our opinion) and \"joke\" must be two DIFFERENT sentences of its vo")
         def chk(j):
             b = j.get("beats")
             if not isinstance(b, list) or len(b) < minb: raise ValueError(f"need at least {minb} beats")

@@ -387,6 +387,11 @@ SCRIPT:
 Reply with ONLY JSON: {{"terms":[{{"term":"...","section":"<id>"}}],"sections":[{{"id":"<id>","vo":"edited narration"}}]}}"""
 
 ACRO = re.compile(r"\b[A-Z][A-Z0-9]{1,6}s?\b")
+EVERYDAY = {"AI", "TV", "US", "USA", "UK", "EU", "CEO", "FBI", "CIA", "USB", "OK", "PC", "GPS", "NASA", "UN", "DNA", "IT"}   # a rewrite may drop these
+
+
+def _tech_acros(text):
+    return {a for a in ACRO.findall(text) if a.rstrip("s") not in EVERYDAY}
 
 def unexplained_acronyms(plan):
     """Acronyms whose first use isn't followed (or preceded) by a spelled-out phrase: a cheap log-only check."""
@@ -431,7 +436,7 @@ def jargon_check(llm, plan, cfg, log, source_notes=''):
             merged = [proposed.get(s['id'], s['vo']) for s in plan['sections']]
             if not all(isinstance(vo, str) and vo.strip() for vo in merged): raise ValueError('Narration must be nonempty text')
             for old, new in zip(plan['sections'], merged):
-                lost = [m.group() for m in ACRO.finditer(old['vo']) if not re.search(r'\b' + re.escape(m.group()) + r'\b', new)]
+                lost = [a for a in _tech_acros(old['vo']) if not re.search(r'\b' + re.escape(a) + r'\b', new)]
                 if lost: raise ValueError('Keep and explain these technical names: ' + ', '.join(lost))
             if plan.get('smoke') and sum(_nw(vo) for vo in merged) > 46:
                 raise ValueError('30-second story must be at most 46 words total: cut secondary points, keep names, explanations, jokes and opinions')
@@ -448,7 +453,7 @@ def jargon_check(llm, plan, cfg, log, source_notes=''):
             if not isinstance(vo, str): continue
             lo = 1 if aud == 'beginner' else _nw(s['vo'])
             if aud == 'beginner':
-                lost = [m.group() for m in ACRO.finditer(s['vo']) if not re.search(r'\b' + re.escape(m.group()) + r'\b', vo)]
+                lost = [a for a in _tech_acros(s['vo']) if not re.search(r'\b' + re.escape(a) + r'\b', vo)]
                 if lost:
                     log('  Beginner jargon edit rejected: removed acronym(s) ' + ', '.join(lost))
                     continue
@@ -614,16 +619,18 @@ def _editorial_review_candidate(llm, plan, meta, transcript, cfg, log, stop=None
             vo = str(revision.get("vo") or "").strip()
             analysis = _editorial_span(vo, str(revision.get("analysis") or ""))
             humor = _editorial_span(vo, str(revision.get("humor") or ""))
-            if (not analysis or not humor or analysis not in vo or humor not in vo or
-                    (audience_key(cfg) == "beginner" and set(ACRO.findall(section["vo"])) - set(ACRO.findall(vo))) or
-                    " ".join(analysis.lower().split()) in " ".join(transcript.lower().split()) or
-                    not 0.5 * budgets[section["id"]] <= _nw(vo) <= section["max_words"]):
-                failures.append(f"{section['id']}: return vo within max_words={section['max_words']}, with analysis and humor copied EXACTLY from contiguous text in vo; no recycled source sentences")
+            why = ("analysis or humor is not an exact quote from vo" if not analysis or not humor or analysis not in vo or humor not in vo else
+                   "analysis and humor must be DIFFERENT sentences (one opinion, one joke)" if analysis.lower() in humor.lower() or humor.lower() in analysis.lower() else
+                   "dropped technical name(s) " + ", ".join(sorted(_tech_acros(section["vo"]) - _tech_acros(vo))) if audience_key(cfg) == "beginner" and _tech_acros(section["vo"]) - _tech_acros(vo) else
+                   "analysis is copied from the source; it must be our own" if " ".join(analysis.lower().split()) in " ".join(transcript.lower().split()) else
+                   f"vo is {_nw(vo)} words; it must be {int(0.5 * budgets[section['id']])}-{section['max_words']}" if not 0.5 * budgets[section["id"]] <= _nw(vo) <= section["max_words"] else "")
+            if why:
+                failures.append(f"{section['id']}: {why}")
                 continue
             annotations[section["id"]] = {"analysis": analysis, "humor": humor}
         if len(annotations) != len(sections):
             feedback = "PREVIOUS ATTEMPT FAILED:\n" + "\n".join(failures)
-            log(f"  editorial review: incomplete or invalid analysis/wit annotations for {', '.join(s.split(':', 1)[0] for s in failures)}")
+            log("  editorial review: " + "; ".join(failures)[:300])
             continue
         for section in plan["sections"]:
             if section["id"] in annotations:
