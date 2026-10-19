@@ -220,6 +220,26 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
         if j.get("covered") is True and nw0 < words * lo: log(f"  the AI says the source is fully covered at {nw0} of {words} words; kept short (no padding)")
         if not smoke: log(f"  script: {nw0} words (target {words}, hard limit {wmax} = 3:00){'; over the target, accepted' if nw0 > words * 1.05 else ''}")
         if smoke: j["beats"] = j["beats"][:2]   # a smoke test stays ~30 s even if the length check gave up
+        if smoke and sum(len(x["vo"].split()) for x in j["beats"]) > words * hi:   # still too long: shorten, keeping take + joke verbatim
+            per = int(words * hi) // len(j["beats"])
+            def chk_short(r):
+                bs = r.get("beats")
+                if not isinstance(bs, list) or len(bs) != len(j["beats"]): raise ValueError(f"return exactly {len(j['beats'])} beats")
+                for k, (o, nb_) in enumerate(zip(j["beats"], bs)):
+                    vo = str((nb_ or {}).get("vo") or "")
+                    if len(vo.split()) > per: raise ValueError(f"beat {k + 1} is {len(vo.split())} words; at most {per}")
+                    for f in ("take", "joke"):
+                        if o.get(f) and _quoted(o[f], o["vo"]) and not _quoted(o[f], vo): raise ValueError(f"beat {k + 1} must keep its {f} word for word: {o[f]}")
+            try:
+                r = llm.trace("shorten smoke script").chat_json(SYSTEM,
+                    f"Shorten each beat of this 30-second Short to AT MOST {per} words. Keep each beat's \"take\" and \"joke\" sentences "
+                    f"word for word; cut background, secondary facts and explanations of minor terms instead. Keep the beat's main fact and "
+                    f"its numbers exact. Reply with JSON only: {{\"beats\":[{{\"vo\":\"...\"}}]}}\nBEATS:\n" +
+                    json.dumps([{"vo": x["vo"], "take": x.get("take"), "joke": x.get("joke")} for x in j["beats"]]), max_tokens=2000, check=chk_short)
+                for o, nb_ in zip(j["beats"], r["beats"]): o["vo"] = nb_["vo"]
+                log(f"  shortened to {sum(len(x['vo'].split()) for x in j['beats'])} words for the 30-second test (opinion and joke kept)")
+            except Exception as e:
+                log(f"  couldn't shorten the smoke script ({str(e)[:100]})")
         else:   # hard cut: still more than 10% long -> drop whole middle beats (keep the hook and the payoff)
             while len(j["beats"]) > minb and sum(len(x["vo"].split()) for x in j["beats"]) > wmax:
                 cut = j["beats"].pop(-2); log(f"  script too long; dropped a middle beat ({len(cut['vo'].split())} words)")

@@ -598,7 +598,8 @@ def _editorial_review_candidate(llm, plan, meta, transcript, cfg, log, stop=None
                   "Preserve first-use term explanations. A normal factual sentence is not humor, and a joke never changes a fact. "
                   "and all factual qualifiers; do not add new external facts. Cover fewer facts if needed. "
                   "Do not claim copyright clearance or independent verification. " + audience_line(cfg) +
-                  "\nReturn JSON {sections:[{id,vo,analysis,humor}]}. analysis and humor must each be exact excerpts of "
+                  "\nReturn JSON {sections:[{id,vo,analysis,humor}]}. analysis (our opinion) and humor (the joke) must be TWO DIFFERENT "
+                  "sentences of vo, and each must be an exact excerpt of "
                   "your revised vo, not descriptions of what you did. Copy ONE CONTIGUOUS sentence for analysis; "
                   "never skip an analogy in the middle or join two separate clauses in the annotation. "
                   "Analysis must be your new interpretation, not copied from the source. Do not exceed each beat's "
