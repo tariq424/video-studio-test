@@ -129,6 +129,7 @@ def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False, animate=F
             if not st[s["key"]].get("still_ok"): st[s["key"]].setdefault("still_why", "WanGP not available")
         save(); return st
     # step 2b: WanGP stills (only where the cloud gave nothing usable)
+    from .wangp import is_down, UNREACHABLE
     for i, s in enumerate(slots):
         if stop(): raise RuntimeError("cancelled")
         r = st[s["key"]]; img = fd / f"{s['key']}.jpg"
@@ -138,15 +139,20 @@ def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False, animate=F
         pause()
         if "still" in r and (r["still"] is None or img.exists()): continue
         if not s.get("still_prompt"): r["still"] = None; r["still_why"] = "no scene prompt"; save(); continue
-        if not img.exists():
+        why = "WanGP failed"
+        if not img.exists() and is_down():
+            why = "WanGP not reachable: skipped"
+        elif not img.exists():
             try:
                 g = wg.gen({"model_type": cfg["still_model"], "prompt": s["still_prompt"] + render.STYLE, "resolution": space(sd)["still_res"],
                             "num_inference_steps": 4, "seed": seed + i}, log, f"still {s['key']}", stop=stop)
                 if g["ok"]: shutil.copy(g["file"], img)
+                elif UNREACHABLE in str(g.get("err")):
+                    why = "WanGP not reachable: skipped"; log("  WanGP is not reachable: skipping WanGP for the remaining slots")
             except Exception as e: log(f"  still {s['key']} failed ({str(e)[:100]})")
         r["still"] = _rel(img, sd) if img.exists() else None
         if r["still"] is not None: r["src"] = "wangp"
-        if r["still"] is None: r["still_why"] = "WanGP failed"
+        if r["still"] is None: r["still_why"] = why
         save()
     check_all()
     # step 3: image-to-video of the stills that passed

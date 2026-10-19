@@ -335,12 +335,12 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         c = chs.get(sec["id"], {})
         return {"bid": sec["id"], "n": int(sec["id"][1:]) + 1, "vo": sec["vo"], "stock_found": c.get("stock_found", len(pick.get(sec["id"], []))),
                 "uses": c.get("uses", []), "failed": c.get("failed", [])}
-    if v2: log("Visual ladder v2 per beat (1 stock -> 2 real photos -> 3 cloud still -> 4 WanGP still (atmospheric only) -> 5 Remotion graphics -> "
-               "6 physics module -> 7 CapCut (hard failures, per video) -> 8 parallax -> 9 illustration / silhouette -> 10 headline; animate on click):")
+    if v2: log("Visual ladder v2 per beat (1 stock -> 2 real photos -> 3 cloud still -> 4 WanGP still (atmospheric only) -> 5 physics data (real / script map / synthetic) -> "
+               "6 Remotion graphics (draws the physics data, else template / Claude) -> 7 CapCut (hard failures, per video) -> 8 parallax -> 9 illustration / silhouette -> 10 headline; animate on click):")
     else: log("Visual ladder per beat (1 stock/photo -> 2 cloud still -> 3 WanGP still -> 4 parallax -> 5 illustration / silhouette -> 6 reconstruction / headline; animate on click):")
     for s in beats:   # beats step 1 covered on its own
         if s["id"] in base_needs: continue
-        log(f"  {s['id']}: " + ("your footage" if any(c.get("own") for c in pick.get(s["id"], [])) else f"stock ({len(pick.get(s['id'], []))} clip(s), coherent)")); stock_beat(s)
+        log(f"  {s['id']}: " + ("your footage" if any(c.get("own") for c in pick.get(s["id"], [])) else f"stock ({len(pick.get(s['id'], []))} clip(s), coherent)")); _safe(log, f"{s['id']} stock", lambda: stock_beat(s))
     if not needs and not dbg:
         log("  no other beats need visuals"); save_out(); return
     ents = json.loads((job / "entities.json").read_text(encoding="utf-8")) if (job / "entities.json").exists() else []
@@ -488,16 +488,22 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         save_out()
 
     pause = (lambda: dbg.manual("short_fallback: AI stills")) if dbg else None
+
+    def finalize_safe(s, st):   # one beat failing to finalize must never stop the job: it gets a headline card and the log says why
+        if _safe(log, f"{s['id']} visual ladder", lambda: finalize(s, st) or True) is None:
+            out[s["id"]] = [{"type": "graphic", "g": {"kind": "headline", "kicker": "", "text": s["vo"][:70], "sub": ""}, "rung": "headline"}]
+            chs[s["id"]] = {"n": int(s["id"][1:]) + 1, "vo": s["vo"], "chain": ["ladder failed -> headline"], "uses": ["headline"], "failed": ["ladder"]}
+            save_out()
     if dbg and dbg.active():   # debug: one beat at a time, so a breakpoint stops right after the beat it is about
         log("  debug on: beats run one at a time; breakpoints are checked after each beat")
         for s in beats:
             if stop(): raise RuntimeError("cancelled")
             if s["id"] in needs and s["id"] not in out:
                 first = len(slots); prepare(s); sl = slots[first:]
-                st = ladder.run(cfg, wg, sd, fd, sl, log, stop, bool(sl) and wg.alive(), seed=5100 + first, full=full, pause=pause) if sl else {}
-                if sl and not wg.alive(): log("  WanGP isn't reachable: cloud stills only")
-                finalize(s, st)
-            elif s["id"] not in needs: stock_beat(s)
+                st = _ladder_safe(ladder, cfg, wg, sd, fd, sl, log, stop, bool(sl) and _safe(log, "WanGP check", wg.alive, False), seed=5100 + first, full=full, pause=pause) if sl else {}
+                if sl and not _safe(log, "WanGP check", wg.alive, False): log("  WanGP isn't reachable: cloud stills only")
+                finalize_safe(s, st)
+            elif s["id"] not in needs: _safe(log, f"{s['id']} stock", lambda: stock_beat(s))
             save_out(); dbg.point(info(s))
         return
     for s in beats:
@@ -505,72 +511,96 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
             if stop(): raise RuntimeError("cancelled")
             prepare(s)
     run_slots = slots
-    gpu = bool(run_slots) and wg.alive()
+    gpu = bool(run_slots) and bool(_safe(log, "WanGP check", wg.alive, False))
     if run_slots and not gpu: log("  WanGP isn't reachable: cloud stills only" if cfg.get("cloud_on", True) else "  WanGP isn't reachable: skipping steps 2-4")
-    st = ladder.run(cfg, wg, sd, fd, run_slots, log, stop, gpu, full=full, pause=pause) if run_slots else {}
+    st = _ladder_safe(ladder, cfg, wg, sd, fd, run_slots, log, stop, gpu, full=full, pause=pause) if run_slots else {}
     for s in beats:
-        if s["id"] in needs: finalize(s, st)
-        elif s["id"] not in out: stock_beat(s)
+        if s["id"] in needs: finalize_safe(s, st)
+        elif s["id"] not in out: _safe(log, f"{s['id']} stock", lambda: stock_beat(s))
         if dbg: save_out(); dbg.point(info(s))
     save_out()
 
+def _ladder_safe(ladder, cfg, wg, sd, fd, slots, log, stop, gpu, **kw):
+    """Rungs 2-4 (cloud still, WanGP still, checks). If they fail, log it and use whatever they had saved in ladder.json, so every
+    slot still goes down rungs 5-10."""
+    out = _safe(log, "AI stills (cloud / WanGP)", lambda: ladder.run(cfg, wg, sd, fd, slots, log, stop, gpu, **kw))
+    if out is not None: return out
+    f = fd / "ladder.json"
+    try: return json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+    except Exception: return {}
+
+def _safe(log, rung, fn, default=None):
+    """Run one rung; any failure is logged and the ladder moves on (a rung must never stop the job or the server).
+    Pause (debugger) and cancel still propagate."""
+    from .debug import Paused
+    try:
+        return fn()
+    except Paused:
+        raise
+    except RuntimeError as e:
+        if str(e) == "cancelled": raise
+        log(f"  {rung} failed ({str(e)[:160]}); next rung"); return default
+    except Exception as e:
+        log(f"  {rung} failed ({type(e).__name__}: {str(e)[:160]}); next rung"); return default
+
 def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill, log, pos=None):
     """Visual ladder v2, rungs 5-10 for one slot whose cloud / WanGP still didn't pass. -> the bg item. Appends to chain / why /
-    failed. vb carries per-beat state: graphics and physics run once per beat (a second slot of the same beat goes on down)."""
+    failed. vb carries per-beat state: physics and graphics run once per beat (a second slot of the same beat goes on down).
+    5. physics = DATA PROVIDER: when the slot describes physical motion it returns a payload (real data, the narration's numbers,
+       the script's map coordinates, or a labelled synthetic path), saved to short/physics/<slot>.json
+    6. Remotion graphics: draws that payload as a motion-graphics clip; without a payload, a template / Claude composition
+    7. CapCut (hard failures)   8. parallax   9. illustration / silhouette   10. headline card
+    Every rung is isolated (_safe): a failure is logged and the next rung runs."""
     from . import graphics, physics, capcut, illustrate
-    verb, amod = physics.action(s, physics.slot_text(s.get("vo", ""), pos)) if cfg.get("physics_auto", True) else ("", None)
-    if not amod and not vb["p"] and cfg.get("physics_auto", True):
-        # the beat's action may sit in a part of the narration no generated slot covers (a map backdrop takes slot 0, so slot 1 of 3
-        # reads the middle third and misses "dropped" in the first): the first slot to get here animates the beat-level action.
-        # Non-events ("tried to crash") are already filtered by physics.action, so this can't put the beat's airliner over "...scrambled F-35s".
-        verb, amod = physics.action(s)
-    if amod and not vb["p"]:   # action beat (item 5, 2026-10-13): the matching physics module before graphics - it shows the action itself
+    payload = None
+    if cfg.get("physics_auto", True) and not vb["p"]:   # 5. physics -> data
         vb["p"] = True
         from . import liveries
-        g6 = physics.run(amod, physics.fill(cfg, amod, {**s, "_story": liveries.story_text(ents)}, log), cfg)
-        chain.append(f"simulation ({amod}, action: {verb})")
-        if g6: vb["pok"] = True; return {"type": "graphic", "g": g6, "tag": "SIMULATION", "rung": "simulation"}
-        why.append(f"simulation: {amod} had no usable data"); failed.append("simulation")
-    motion = physics.synthetic_motion({**s, "vo": physics.slot_text(s.get("vo", ""), pos)})
-    if motion:
+        story = _safe(log, "physics", lambda: liveries.story_text(ents), "")
+        payload = _safe(log, "physics", lambda: physics.provide(cfg, s, bd, log, pos=pos, story=story))
+        if payload:
+            pdir = sd / "physics"; pdir.mkdir(exist_ok=True)
+            _safe(log, "physics", lambda: (pdir / f"{sl['key']}.json").write_text(json.dumps(payload, indent=1, default=str), encoding="utf-8"))
+            chain.append(f"physics data ({payload['module']}, {payload['source']})")
+        else:
+            why.append("physics: no physical motion to model"); failed.append("simulation")
+    if payload:   # 6. Remotion draws the physics payload
+        tag = "SYNTHETIC" if payload["source"] == "synthetic" else "SIMULATION"
+        clip = _safe(log, "graphics (physics payload)", lambda: graphics.render_payload(cfg, sd, payload, sl["key"], log))
         vb["pok"] = True
-        chain.append("synthetic motion")
-        return {"type": "graphic", "g": motion, "tag": "SYNTHETIC", "rung": "simulation"}
-    ac = illustrate.aircraft_for(s, pos)
+        if clip:
+            chain.append("graphics (physics payload)")
+            return {"type": "video", "src": _rel_sd(clip, sd), "secs": round(media.dur(clip), 2), "rate": 1.0, "freeze": True,
+                    "textbg": True, "tag": tag, "rung": "simulation"}
+        chain.append("graphics (physics payload, drawn live)")   # pre-render failed: the final render draws the same spec
+        return {"type": "graphic", "g": payload["spec"], "tag": tag, "rung": "simulation"}
+    ac = _safe(log, "illustration", lambda: illustrate.aircraft_for(s, pos))
     if ac and ac["type"] == "fighter" and re.search(illustrate.FIGHTER, physics.slot_text(s.get("vo", ""), pos), re.I):
         # the slot's narration names fighters ("scrambled F-35s"): the fighter drawing IS the specific picture; a text card isn't
-        ill = illustrate.pick(s, ents, phases.get(s["id"], ""), kill, pos=pos)
+        ill = _safe(log, "illustration", lambda: illustrate.pick(s, ents, phases.get(s["id"], ""), kill, pos=pos))
         if ill and ill["g"].get("aircraft") == "fighter": chain.append(f"{ill['rung']} (fighters named)"); return ill
-    if not vb["g"]:   # 5. Remotion graphics (template, else Claude-generated)
+    if not vb["g"]:   # 6. Remotion graphics (template, else Claude-generated)
         vb["g"] = True
-        try: g5 = graphics.make(cfg, sd, s, sl["key"], log)
-        except Exception as e: g5 = {"ok": False, "why": f"crash ({str(e)[:120]})", "hard": True, "how": "?"}
+        g5 = _safe(log, "graphics", lambda: graphics.make(cfg, sd, s, sl["key"], log)) or {"ok": False, "why": "crashed (see log)", "hard": True, "how": "?"}
         if g5["ok"]:
             secs = round(media.dur(g5["path"]), 2)
             chain.append(f"graphics ({g5['how']})")
             return {"type": "video", "src": _rel_sd(g5["path"], sd), "secs": secs, "rate": 1.0, "freeze": True, "textbg": True,
                     "tag": "GRAPHICS", "rung": "graphics"}
         chain.append("graphics"); why.append(f"graphics: {g5['why']}"); failed.append("graphics"); vb["hard"] = bool(g5.get("hard"))
-    if cfg.get("physics_auto", True) and not vb["p"]:   # 6. physics module, only when THIS slot's narration has an action it can show
-        vb["p"] = True                                   # (whole-beat matching drew the beat's airliner over "...scrambled F-35s")
-        mod = amod
-        if mod:
-            from . import liveries
-            g6 = physics.run(mod, physics.fill(cfg, mod, {**s, "_story": liveries.story_text(ents)}, log), cfg)
-            chain.append(f"simulation ({mod})")
-            if g6: vb["pok"] = True; return {"type": "graphic", "g": g6, "tag": "SIMULATION", "rung": "simulation"}
-            why.append(f"simulation: {mod} had no usable data"); failed.append("simulation")
-    if vb["hard"] and not vb["pok"] and not vb["capcut"]:   # 7. CapCut: graphics HARD-failed and no physics module fit
+    if vb["hard"] and not vb["pok"] and not vb["capcut"]:   # 7. CapCut: graphics HARD-failed and no physics payload
         if capcut.enabled(cfg):
-            vb["capcut"] = "pending"; capcut.mark(sd, s["id"], why[-1] if why else "graphics failed")
-            chain.append("capcut (pending: one CapCut session after the render)")
+            if _safe(log, "capcut", lambda: capcut.mark(sd, s["id"], why[-1] if why else "graphics failed") or True):
+                vb["capcut"] = "pending"; chain.append("capcut (pending: one CapCut session after the render)")
         else: vb["capcut"] = "off"
     # 8-10: the beat's visual for the render (provisional when CapCut is pending)
     sw = str(r.get("still_why") or "")
     if r.get("still") and "unavailable" in sw:   # 8. parallax: a still the check couldn't judge (never one rejected for its content)
-        chain.append("parallax"); lay = depth_free(sd / r["still"], sd / "fallback" / f"{sl['key']}_p8")
-        return {"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED · PARALLAX", "rung": "parallax"}
-    ill = illustrate.pick(s, ents, phases.get(s["id"], ""), kill, pos=pos)   # 9. illustration / silhouette (aircraft by slot position)
+        lay = _safe(log, "parallax", lambda: depth_free(sd / r["still"], sd / "fallback" / f"{sl['key']}_p8"))
+        if lay:
+            chain.append("parallax")
+            return {"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED · PARALLAX", "rung": "parallax"}
+    ill = _safe(log, "illustration", lambda: illustrate.pick(s, ents, phases.get(s["id"], ""), kill, pos=pos))   # 9. illustration / silhouette
     if ill: chain.append(ill["rung"]); return ill
     chain.append("headline")   # 10. headline card
     return {"type": "graphic", "g": bd if bd.get("kind") == "headline" else {"kind": "headline", "kicker": "", "text": s["vo"][:70], "sub": ""}, "rung": "headline"}

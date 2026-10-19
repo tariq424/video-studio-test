@@ -425,3 +425,57 @@ def synthetic_motion(sec):
             "angles": [i * 6 for i in range(121)],
             "points": [[0.15 + i * 0.7 / 60, 0.5 + 0.16 * math.sin(i / 60 * math.pi * 2)] for i in range(61)],
             "targets": [[0.25, 0.3], [0.7, 0.4], [0.55, 0.75]]}
+
+
+MOTION_WORDS = (r"\b(flew|fly|flying|flight|sail\w*|travel\w*|drove|driv\w*|head(ed|ing)|en route|route|diverted|crossed|cross\w*|"
+                r"transit\w*|moved|moving|went|returned|landed|took off|departed|arrived|bound for|spread|swept|tracked|track\w*)\b")
+
+
+def _map_route(sec, backdrop, text):
+    """The script's own map (real coordinates the script AI wrote for this beat) as a track, when the slot describes travel."""
+    pts = [p for p in (backdrop or {}).get("points") or [] if isinstance(p, dict) and p.get("lat") is not None and p.get("lon") is not None]
+    if (backdrop or {}).get("kind") != "map" or len(pts) < 2 or not re.search(MOTION_WORDS, text, re.I): return None
+    order = {"origin": 0, "stop": 1, "planned": 3, "actual": 2, "place": 1}
+    act = [p for p in pts if p.get("role") != "planned"] if any(p.get("role") == "actual" for p in pts) else pts
+    act = sorted(act, key=lambda p: order.get(p.get("role"), 1))
+    try: way = [{"lat": float(p["lat"]), "lon": float(p["lon"]), "name": str(p.get("name") or "")[:22]} for p in act]
+    except (TypeError, ValueError): return None
+    if len(way) < 2: return None
+    track = []
+    for a, b in zip(way, way[1:]):
+        for i in range(16): k = i / 16; track.append({"lat": a["lat"] + (b["lat"] - a["lat"]) * k, "lon": a["lon"] + (b["lon"] - a["lon"]) * k})
+    track.append({"lat": way[-1]["lat"], "lon": way[-1]["lon"]})
+    subj = (sec.get("subject") or {}).get("kind")
+    return {"kind": "simmap", "module": "route", "title": backdrop.get("title") or "Route", "icon": "ship" if subj == "ship" else None,
+            "label": " -> ".join(w["name"] for w in way if w["name"])[:80], "track": track, "places": [w for w in way if w["name"]],
+            "notes": "route from the script's coordinates", "source": "script map"}
+
+
+def provide(cfg, sec, backdrop, log, pos=None, story=""):
+    """Physics as a DATA PROVIDER (visual ladder rung 5). -> payload or None:
+    {"module", "source": "real data" | "narration" | "script map" | "synthetic", "verb", "spec": <Remotion graphic spec>, "params"}.
+    Order: a matching module with real data / the narration's numbers (NOAA storm tracks, AIS, altitude/depth profiles) ->
+    the script's own map coordinates when the slot describes travel -> a labelled synthetic motion path.
+    Rung 6 (Remotion graphics) draws the spec; nothing here renders."""
+    text = slot_text(sec.get("vo", ""), pos)
+    verb, mod = action(sec, text)
+    if not mod: verb, mod = action(sec)
+    if mod:
+        params = fill(cfg, mod, {**sec, "_story": story}, log)
+        spec = run(mod, params, cfg)
+        if spec:
+            src = spec.get("source") or ""
+            kind = "real data" if any(k in src for k in ("NOAA", "AIS", "HURDAT")) else ("synthetic" if spec.get("synthetic") else "narration")
+            return {"module": mod, "source": kind, "verb": verb, "spec": spec, "params": params}
+    spec = _map_route(sec, backdrop, text)
+    if spec: return {"module": "route", "source": "script map", "verb": "travel", "spec": spec, "params": {}}
+    spec = synthetic_motion({**sec, "vo": text})
+    if not spec and re.search(MOTION_WORDS + r"|\b(dive[sd]?|diving|launch\w*|fired|struck|strike|charg\w*|chas\w*|fell|falling|rose|climb\w*|accelerat\w*)\b", text, re.I) \
+            and re.search(r"\b(drones?|jets?|aircraft|planes?|ships?|vessels?|boats?|missiles?|rockets?|troops|convoy|cars?|trucks?|trains?|storm|satellites?|helicopters?|submarines?)\b", text, re.I):
+        # physical motion the specific modules don't cover: a labelled schematic path, never passed off as real tracking
+        spec = {"kind": "motion", "module": "physical_flow", "title": (backdrop or {}).get("title") or "Physical motion", "synthetic": True,
+                "source": "synthetic", "label": "SYNTHETIC \u2022 schematic, not live tracking",
+                "points": [[0.12 + i * 0.76 / 60, 0.62 - 0.22 * (i / 60) + 0.06 * math.sin(i / 60 * math.pi * 3)] for i in range(61)],
+                "angles": [i * 6 for i in range(121)], "targets": []}
+    if spec: return {"module": spec.get("module", "motion"), "source": "synthetic", "verb": "motion", "spec": spec, "params": {}}
+    return None

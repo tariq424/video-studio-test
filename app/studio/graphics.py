@@ -272,3 +272,19 @@ def make(cfg, sd, sec, key, log, tag=None, ctx=""):
         return {"ok": False, "path": None, "how": "none", "why": f"no template fits ({c['why']}); Claude-generated off", "hard": False, "template": None}
     g = claude_generate(cfg, sd, sec, secs, out, log, tag=tag, ctx=ctx)
     return {**g, "how": "claude", "template": None, "why": g["why"] or c["why"]}
+
+
+def render_payload(cfg, sd, payload, key, log, tag=None):
+    """Rung 6 for a physics payload: Remotion renders the payload's spec (route map, storm track, altitude / depth profile,
+    synthetic motion) into an MP4 like any other GRAPHICS clip. -> path, or raises."""
+    from . import review
+    secs = max(6, min(10, int(cfg.get("graphics_secs", 8))))
+    out = Path(sd) / "graphics" / f"{key}_physics.mp4"; out.parent.mkdir(parents=True, exist_ok=True)
+    if media.ok(out): return out
+    bg = {"type": "graphic", "g": payload["spec"]}
+    if tag: bg["tag"] = tag
+    raw = out.with_name(out.stem + "_raw.mp4")
+    review._remotion(sd, bg, secs, raw, cfg, log, frames=(0, int(secs * FPS) - 1), scale=1, crf=16, timeout=int(cfg.get("graphics_timeout", 300)))
+    _normalise(raw, out)
+    if not (media.ok(out) and media.dur(out) >= 1): raise RuntimeError("Remotion produced no usable physics clip")
+    return out

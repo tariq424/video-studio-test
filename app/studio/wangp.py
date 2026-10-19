@@ -6,6 +6,14 @@ import json, re, time, requests
 from pathlib import Path
 
 _found = {"url": None, "t": 0.0}
+_down = {"until": 0.0, "why": ""}   # after WanGP proves unreachable, skip it for DOWN_SECS instead of retrying every slot
+DOWN_SECS = 600
+UNREACHABLE = "WanGP not reachable"
+
+def is_down(): return time.time() < _down["until"]
+
+def mark_down(why=UNREACHABLE):
+    _down.update(until=time.time() + DOWN_SECS, why=why)
 
 def _from_pinokio_log(cfg):
     d = Path(cfg.get("wangp_dir") or "C:/pinokio/api/wan.git") / "logs" / "api" / "start.js"
@@ -51,7 +59,7 @@ class WanGP:
     def _post(self, body, timeout=120):
         h = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
         if self.sid: h["mcp-session-id"] = self.sid
-        r = requests.post(self.url, headers=h, data=json.dumps(body), timeout=timeout)
+        r = requests.post(self.url, headers=h, data=json.dumps(body), timeout=(5, timeout))   # connect fast, read long
         if r.headers.get("mcp-session-id"): self.sid = r.headers["mcp-session-id"]
         return r
 
@@ -64,10 +72,13 @@ class WanGP:
         self._post({"jsonrpc": "2.0", "method": "notifications/initialized"})
 
     def alive(self):
+        if is_down(): return False
         try: self.init(); return True
-        except Exception: return False
+        except Exception: mark_down(); return False
 
     def call(self, name, args):
+        if is_down(): return {"error": f"{UNREACHABLE} (skipped: it failed less than {DOWN_SECS // 60} min ago)"}
+        conn_fail = 0
         for _ in range(5):
             try:
                 if not self.sid: self.init()
@@ -82,9 +93,14 @@ class WanGP:
                 if res.get("isError"): return {"error": (res.get("content") or [{}])[0].get("text", "error")}
                 if "error" in j: return {"error": str(j["error"])}
                 return res
+            except (requests.ConnectionError, requests.ConnectTimeout):
+                self.sid = None; conn_fail += 1
+                if conn_fail >= 2: break   # nothing is listening: don't burn minutes retrying
+                time.sleep(3)
             except (requests.RequestException, ValueError):
                 self.sid = None; time.sleep(5)
-        return {"error": "WanGP not reachable"}
+        mark_down()
+        return {"error": UNREACHABLE}
 
     def run(self, src, stop=lambda: False, stall_min=15, wait_start_min=45):
         """Start a generation, wait for it. Returns dict(ok, file, err)."""
@@ -121,9 +137,11 @@ class WanGP:
         seed = int(src.get("seed", 1))
         for t in range(tries):
             s = dict(src); s["seed"] = seed + t * 1000
-            r = self.run(s, stop=stop)
+            try: r = self.run(s, stop=stop)
+            except Exception as e: r = {"ok": False, "err": f"error: {str(e)[:200]}"}
             if r["ok"]: return r
             log(f"  {tag}: attempt {t+1} failed ({r['err'][:160]})")
             if r["err"] == "cancelled": return r
+            if UNREACHABLE in r["err"]: return r   # no point in more attempts: the ladder moves on to the next rung
             time.sleep(10)
         return r
