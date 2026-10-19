@@ -156,16 +156,21 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
         log_audience(cfg, log)
         notes = make_notes(llm, meta, transcript, max(words, 1500), log, stop, srcdir)
         tries = []   # every parsed attempt, so a near miss can be kept instead of an unchecked re-ask
+        def voice(j):   # VOICE: every beat carries our opinion and a dry joke, quoted back exactly from its narration
+            b = j.get("beats")
+            if not isinstance(b, list) or not b: raise ValueError("no beats")
+            for k, x in enumerate(b):
+                for f, what in (("take", "an opinion of ours"), ("joke", "a dry, snarky joke")):
+                    v = _norm(x.get(f))
+                    if len(v.split()) < 3 or v not in _norm(x.get("vo")):
+                        raise ValueError(f"beat {k + 1} needs {what} IN its vo, and \"{f}\" must repeat those words exactly as written in vo "
+                                         f"(write the sentence into vo first, then copy it into \"{f}\")")
         def chk(j):
             b = j.get("beats")
             if not isinstance(b, list) or len(b) < minb: raise ValueError(f"need at least {minb} beats")
             for x in b:
                 if not isinstance(x.get("vo"), str) or not x.get("queries"): raise ValueError("beat missing vo or queries")
-            for k, x in enumerate(b):   # VOICE: every beat carries our opinion and a dry joke, quoted back exactly from its narration
-                for f, what in (("take", "an opinion of ours"), ("joke", "a dry, snarky joke")):
-                    v = _norm(x.get(f))
-                    if len(v.split()) < 3 or v not in _norm(x["vo"]):
-                        raise ValueError(f"beat {k + 1} needs {what} in its narration, with \"{f}\" copied EXACTLY from that narration")
+            voice(j)
             n = sum(len(x["vo"].split()) for x in b)
             tries.append((abs(n - words), j))
             if smoke:   # the smoke test keeps its tight ~30 s band
@@ -191,8 +196,11 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                 j = min(tries, key=lambda x: x[0])[1]
                 log(f"  length still off after 3 tries; keeping the closest ({sum(len(x['vo'].split()) for x in j['beats'])} words, target {words})")
             else:
-                log("  no usable script after 3 tries; asking once more without the length check")
-                j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=lambda x: None if x.get("beats") else (_ for _ in ()).throw(ValueError("no beats")))
+                log("  no usable script after 3 tries; asking again without the length check (the opinion + joke check stays)")
+                try: j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=voice)
+                except RuntimeError:
+                    log("  VOICE CHECK FAILED: no beat set with an opinion and a joke in every beat; keeping the last script, the editorial review must add them")
+                    j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=lambda x: None if x.get("beats") else (_ for _ in ()).throw(ValueError("no beats")))
         nw0 = sum(len(x["vo"].split()) for x in j["beats"])
         if j.get("covered") is True and nw0 < words * lo: log(f"  the AI says the source is fully covered at {nw0} of {words} words; kept short (no padding)")
         if not smoke: log(f"  script: {nw0} words (target {words}, hard limit {wmax} = 3:00){'; over the target, accepted' if nw0 > words * 1.05 else ''}")
@@ -349,6 +357,23 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
     ff = sd / "fallback.json"; out = json.loads(ff.read_text(encoding="utf-8")) if ff.exists() else {}
     cf = fd / "chains.json"; chs = json.loads(cf.read_text(encoding="utf-8")) if cf.exists() else {}
     def save_out(): ff.write_text(json.dumps(out, indent=1), encoding="utf-8"); cf.write_text(json.dumps(chs, indent=1), encoding="utf-8")
+    if v2 and cfg.get("source_clips_auto", True) and cfg.get("source_visuals", True) and cfg.get("source_over_stock", True):
+        # A beat about a specific story moment the source itself shows: its own footage beats a generic stock clip
+        # (a laptop for a model launch, test tubes for an enzyme). The strongest caption matches (within the source-clip
+        # budget) set their generic stock aside, so the Source Clip rung (2) runs for them.
+        from . import source_visuals
+        cand = []
+        for x in plan["sections"]:
+            if x.get("cta") or x["id"] not in tm or any(c.get("own") for c in pick.get(x["id"], [])): continue
+            r = source_visuals.auto_request(job, x, min_overlap=int(cfg.get("source_over_stock_min", 4)))
+            if r: cand.append((r["match"], x["id"], r["start"]))
+        cap = max(0, min(2, int(cfg.get("source_visual_max_uses", 2))))
+        demoted = False
+        for score, bid, start in sorted(cand, reverse=True)[:cap]:
+            if pick.get(bid):
+                log(f"  {bid}: generic stock set aside: the source itself covers this beat (caption cue at {start:.1f}s, {score} shared words)")
+                pick[bid] = []; demoted = True
+        if demoted: (sd / "stock" / "pick.json").write_text(json.dumps(pick, indent=1), encoding="utf-8")
     allneeds = base_needs = _needs(plan, tm, pick, sd, cfg)
     if full:   # Review every beat: every beat gets the whole menu, also the ones stock footage already covers (one slot)
         allneeds = {s["id"]: allneeds.get(s["id"], 1) for s in plan["sections"] if not s.get("cta") and s["id"] in tm}

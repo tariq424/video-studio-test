@@ -549,7 +549,8 @@ def _editorial_review_candidate(llm, plan, meta, transcript, cfg, log, stop=None
     tries = max(1, int(cfg.get("editorial_attempts", 5)))   # regenerate with the failure as feedback until every beat passes
     for attempt in range(tries):
         if attempt: log(f"  editorial review: attempt {attempt + 1} of {tries}")
-        sections = [{"id": s["id"], "vo": s["vo"], "max_words": int(1.7 * budgets[s["id"]] + 15)}
+        grow = (1.15, 3) if plan.get("smoke") else (1.7, 15)   # a 30-second smoke test must stay ~30 s after this pass
+        sections = [{"id": s["id"], "vo": s["vo"], "max_words": int(grow[0] * budgets[s["id"]] + grow[1])}
                     for s in plan["sections"] if not s.get("cta")]
         prompt = ("Final editorial pass for generated TLDR narration. Every content beat needs substantial, original analysis "
                   "and unique commentary: explain the implication, limitation, or evidential strength of EACH selected fact, "
@@ -599,7 +600,7 @@ def _editorial_review_candidate(llm, plan, meta, transcript, cfg, log, stop=None
         fact_check(llm, plan, meta, transcript, log, stop, cfg)
         # The initial smoke pass already constrained breadth. Do not let its
         # 70-word ceiling erase the analysis this final pass just added.
-        smoke = plan.pop("smoke", None)
+        smoke = None   # (was: popped so jargon review could exceed the smoke ceiling; a smoke test now stays ~30 s)
         before_jargon = [s["vo"] for s in plan["sections"]]
         try:
             jargon_check(llm, plan, cfg, log, source_notes=transcript[:16000])
