@@ -1,0 +1,212 @@
+"""Google Flow rung (visual ladder v2, rung 6: after the AI stills, before physics / Remotion graphics).
+
+Drives Google Flow (labs.google) in a dedicated, signed-in Chrome profile with Playwright: types a visual prompt for the
+beat, waits for the generated clip and downloads it. Any failure (Playwright missing, profile not signed in, the page
+changed, generation refused or slow) is logged and the ladder falls through to the next rung. After a failure that would
+repeat for every beat (no profile / not signed in / page not recognised) the rung is skipped for the rest of the job.
+
+One-time setup on the PC: run scripts\\flow-login.ps1 (opens Chrome with the Flow profile; sign in to Google, open Flow
+once, close Chrome). Settings: flow_on, flow_profile, flow_url, flow_timeout, flow_max_per_video, flow_chrome.
+"""
+import base64
+import json
+import re
+import time
+from pathlib import Path
+
+from . import media
+
+URL = "https://labs.google/fx/tools/flow"
+_down = {"why": ""}   # job-wide: a failure that would repeat for every beat
+
+
+def reset():
+    _down["why"] = ""
+
+
+def profile_dir(cfg):
+    p = cfg.get("flow_profile")
+    if p:
+        return Path(p)
+    return Path(cfg.get("jobs_dir") or ".").parent / "flow_profile"
+
+
+def _ledger(sd):
+    f = Path(sd) / "flow" / "usage.json"
+    try:
+        return f, (json.loads(f.read_text(encoding="utf-8")) if f.exists() else {})
+    except (ValueError, OSError):
+        return f, {}
+
+
+PROMPT = """Write ONE prompt for an AI video generator (Google Flow / Veo) for an 8-second clip that illustrates this beat of
+a news explainer. Narration: "{vo}"
+{hint}
+Rules: describe a single concrete, filmable scene (subject, action, setting, camera move, lighting). Photorealistic,
+documentary look. No text, captions, logos, brand names, real people's names or likenesses, and no screens showing words.
+Max 60 words. Reply with JSON only: {{"prompt": "..."}}"""
+
+
+def visual_prompt(cfg, sec, log):
+    """A Flow prompt for the beat: the script's own still prompt / motion when present, else one short model call."""
+    base = str(sec.get("still_prompt") or "").strip()
+    motion = str(sec.get("motion") or "").strip()
+    if base:
+        p = base + (". " + motion if motion else ". Slow cinematic camera move")
+        return re.sub(r"\s+", " ", p)[:600] + ". Photorealistic, no text, no logos."
+    hint = ("Stock-search ideas for the beat: " + "; ".join(sec.get("queries") or [])) if sec.get("queries") else ""
+    try:
+        from .llm import LLM
+        with LLM(dict(cfg), log, lambda: False) as llm:
+            j = llm.chat_json("You write prompts for AI video generators. Reply with JSON only.",
+                              PROMPT.format(vo=str(sec.get("vo", ""))[:600].replace('"', "'"), hint=hint), max_tokens=300,
+                              check=lambda j: None if len(str(j.get("prompt") or "").split()) >= 8 else (_ for _ in ()).throw(ValueError("prompt too short")))
+        return str(j["prompt"]).strip()[:600]
+    except Exception as e:
+        q = "; ".join(sec.get("queries") or []) or str(sec.get("vo", ""))[:160]
+        log(f"  flow: prompt model unavailable ({str(e)[:80]}); using the beat's stock ideas")
+        return f"Cinematic documentary shot: {q}. Slow camera move, natural light, photorealistic, no text, no logos."
+
+
+def _first(page, selectors, timeout=4000):
+    for sel in selectors:
+        loc = page.locator(sel).first
+        try:
+            loc.wait_for(state="visible", timeout=timeout)
+            return loc
+        except Exception:
+            continue
+    return None
+
+
+def _videos(page):
+    try:
+        return page.eval_on_selector_all("video", "els => els.map(e => e.currentSrc || e.src || (e.querySelector('source')||{}).src || '').filter(Boolean)")
+    except Exception:
+        return []
+
+
+def _save(context, page, src, out):
+    if src.startswith("blob:") or src.startswith("data:"):
+        b64 = page.evaluate("""async (u) => { const r = await fetch(u); const b = new Uint8Array(await r.arrayBuffer());
+            let s = ''; for (let i = 0; i < b.length; i += 32768) s += String.fromCharCode.apply(null, b.subarray(i, i + 32768));
+            return btoa(s); }""", src)
+        out.write_bytes(base64.b64decode(b64))
+    else:
+        r = context.request.get(src, timeout=120000)
+        if not r.ok:
+            raise RuntimeError(f"download HTTP {r.status}")
+        out.write_bytes(r.body())
+
+
+def generate(cfg, sd, sec, key, log, aspect="9:16"):
+    """-> path of the downloaded clip, or None (logged) so the ladder falls through."""
+    if not cfg.get("flow_on", True):
+        return None
+    if _down["why"]:
+        log(f"  flow skipped ({_down['why']})")
+        return None
+    f, used = _ledger(sd)
+    cap = int(cfg.get("flow_max_per_video", 4))
+    if len(used) >= cap and key not in used:
+        log(f"  flow: {cap} clips already made for this video; next rung")
+        return None
+    out = Path(sd) / "flow" / f"{key}.mp4"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if media.ok(out):
+        return out
+    prof = profile_dir(cfg)
+    if not prof.exists() or not any(prof.iterdir()):
+        _down["why"] = f"no signed-in Flow profile at {prof}; run scripts\\flow-login.ps1 once"
+        log(f"  flow: {_down['why']}; next rung")
+        return None
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        _down["why"] = "Playwright is not installed in this environment"
+        log(f"  flow: {_down['why']}; next rung")
+        return None
+    prompt = visual_prompt(cfg, sec, log)
+    timeout = int(cfg.get("flow_timeout", 360))
+    t0 = time.time()
+    log(f"  flow: generating ({prompt[:90]}...)")
+    try:
+        with sync_playwright() as pw:
+            kw = dict(user_data_dir=str(prof), headless=bool(cfg.get("flow_headless", False)), accept_downloads=True,
+                      viewport={"width": 1440, "height": 900}, args=["--disable-blink-features=AutomationControlled"])
+            if cfg.get("flow_chrome"):
+                kw["executable_path"] = cfg["flow_chrome"]
+            else:
+                kw["channel"] = "chrome"
+            context = pw.chromium.launch_persistent_context(**kw)
+            try:
+                page = context.pages[0] if context.pages else context.new_page()
+                page.goto(cfg.get("flow_url") or URL, wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(4000)
+                if "accounts.google.com" in page.url or _first(page, ["text=/sign in/i"], 1500) and not _first(page, ["textarea", "[contenteditable=true]"], 1500):
+                    _down["why"] = "the Flow profile is not signed in to Google; run scripts\\flow-login.ps1"
+                    raise RuntimeError(_down["why"])
+                new = _first(page, ["button:has-text('New project')", "a:has-text('New project')", "[aria-label*='New project' i]"], 6000)
+                if new:
+                    new.click()
+                    page.wait_for_timeout(3000)
+                box = _first(page, ["textarea", "[contenteditable=true]", "[role=textbox]"], 15000)
+                if not box:
+                    _down["why"] = "Flow's prompt box was not found (the page may have changed)"
+                    raise RuntimeError(_down["why"])
+                if aspect and cfg.get("flow_set_aspect", True):   # best effort: portrait for Shorts
+                    try:
+                        sel = _first(page, ["button:has-text('16:9')", "button:has-text('Landscape')", "[aria-label*='aspect' i]"], 1500)
+                        if sel and aspect == "9:16":
+                            sel.click(); page.wait_for_timeout(800)
+                            opt = _first(page, ["text=/9:16|Portrait/"], 2000)
+                            if opt: opt.click(); page.wait_for_timeout(800)
+                    except Exception:
+                        pass
+                before = set(_videos(page))
+                box.click()
+                box.fill(prompt) if box.evaluate("e => e.tagName") == "TEXTAREA" else page.keyboard.insert_text(prompt)
+                send = _first(page, ["button[aria-label*='Create' i]", "button[aria-label*='Generate' i]", "button[aria-label*='Send' i]",
+                                     "button:has-text('arrow_forward')", "button:has-text('Create')", "button:has-text('Generate')"], 3000)
+                if send:
+                    send.click()
+                else:
+                    page.keyboard.press("Enter")
+                src = None
+                while time.time() - t0 < timeout:
+                    page.wait_for_timeout(5000)
+                    body = ""
+                    try:
+                        body = page.locator("body").inner_text(timeout=3000)
+                    except Exception:
+                        pass
+                    if re.search(r"(couldn.t generate|violat|policy|try a different prompt|out of credits|not enough credits|limit reached)", body, re.I):
+                        m = re.search(r"[^\n]*(couldn.t generate|violat|policy|try a different prompt|credits|limit reached)[^\n]*", body, re.I)
+                        if m and re.search("credit|limit", m.group(0), re.I):
+                            _down["why"] = "Flow credits / daily limit reached"
+                        raise RuntimeError("Flow refused: " + (m.group(0)[:140] if m else "generation failed"))
+                    fresh = [v for v in _videos(page) if v not in before]
+                    if fresh:
+                        page.wait_for_timeout(3000)   # let the element settle on its final source
+                        fresh = [v for v in _videos(page) if v not in before] or fresh
+                        src = fresh[-1]
+                        break
+                if not src:
+                    raise RuntimeError(f"no clip after {timeout}s")
+                tmp = out.with_suffix(".dl")
+                _save(context, page, src, tmp)
+                media.ff("-i", tmp, "-an", "-c:v", "libx264", "-crf", 18, "-pix_fmt", "yuv420p", "-r", 30, out, timeout=180)
+                tmp.unlink(missing_ok=True)
+            finally:
+                context.close()
+        if not (media.ok(out) and media.dur(out) >= 1):
+            raise RuntimeError("downloaded clip is not a usable video")
+        used[key] = {"prompt": prompt, "secs": round(media.dur(out), 2), "made": time.strftime("%Y-%m-%d %H:%M")}
+        f.write_text(json.dumps(used, indent=1), encoding="utf-8")
+        (out.with_suffix(".prompt.txt")).write_text(prompt, encoding="utf-8")
+        log(f"  flow: clip ready ({media.dur(out):.1f}s, {time.time() - t0:.0f}s)")
+        return out
+    except Exception as e:
+        out.unlink(missing_ok=True)
+        log(f"  flow failed ({str(e).splitlines()[0][:160]}); next rung")
+        return None

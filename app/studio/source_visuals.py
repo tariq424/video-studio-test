@@ -86,6 +86,50 @@ def _request(sec):
     return {"kind": kind, "start": start, "duration": min(3.0, max(2.0, duration)), "purpose": purpose[:350]}
 
 
+STOP = set("the a an and or but of to in on at for with from by is are was were be been it its this that these those as "
+           "about into over than then so just very really also not no yes you your we our they their he she his her i "
+           "what which who whom how why when where there here can could will would should may might do does did has have had "
+           "says said like one two three more most some any all".split())
+
+
+def _words(text):
+    import re
+    return {w for w in re.findall(r"[a-z0-9]+", str(text).lower()) if len(w) > 2 and w not in STOP}
+
+
+def auto_request(job, sec, min_overlap=3):
+    """Source Clip rung (visual ladder v2, right after stock): when the script didn't ask for source evidence, pick the
+    source caption cue whose words best match this beat's narration -> a 2.5-second clip request, or None.
+    Uses only real cue timestamps (never a guessed time); a weak match (< min_overlap shared content words) is skipped."""
+    path = Path(job) / "src" / "source_cues.json"
+    if not path.exists():
+        return None
+    try:
+        cues = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+    beat = _words(sec.get("vo", ""))
+    if not beat or not isinstance(cues, list):
+        return None
+    best, score = None, 0
+    for i, c in enumerate(cues):
+        try:
+            start = float(c["start"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if start < 15:   # skip the intro / channel bumper
+            continue
+        window = " ".join(str(x.get("text") or "") for x in cues[i:i + 3])   # a cue plus the next two (~6-9 s of speech)
+        sc = len(beat & _words(window))
+        if sc > score:
+            best, score = (start, window), sc
+    if not best or score < min_overlap:
+        return None
+    start, text = best
+    purpose = "The source discussing it: " + " ".join(text.split())[:200]
+    return {"kind": "clip", "start": start, "duration": 2.5, "purpose": purpose, "auto": True, "match": score}
+
+
 def _extract(job, req, dest, meta, log):
     local = job / "src" / "source_video.mp4"
     start, duration = req["start"], req["duration"]
@@ -129,6 +173,10 @@ def make(cfg, job, workspace, sec, log):
     if not cfg.get("source_visuals", True):
         return None
     req = _request(sec)
+    if not req and cfg.get("source_clips_auto", True):
+        req = auto_request(job, sec)
+        if req:
+            log(f"  {sec.get('id', 'beat')}: source clip rung: cue at {req['start']:.1f}s matches the narration ({req['match']} shared words)")
     if not req:
         return None
     job, workspace = Path(job), Path(workspace)

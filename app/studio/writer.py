@@ -22,9 +22,14 @@ grounded in the supplied evidence. Cover fewer facts if necessary to leave room 
 Distinguish 'the source claims' from 'this suggests' and from established evidence. Checking a transcript establishes
 faithfulness to that source, not independent verification of its claims. Do not claim independent fact-checking unless
 independent evidence is actually supplied. Never invent counterarguments, outside facts, quotes, numbers or certainty.
-Give EVERY content beat/section one mild, lighthearted turn of phrase or witty explanatory analogy, especially for Beginner.
-Keep it natural and restrained, never slapstick, insulting, or a joke at the expense of victims. Do not recycle source jokes.
-Humor and analysis must survive editing, resizing and jargon review without weakening first-use explanations.
+VOICE: snarky, conversational and dry, like a sharp friend explaining the news over coffee, not a documentary narrator.
+EVERY content beat/section needs (1) one clearly original OPINION or take of ours (what we think it means, who should worry,
+what is overhyped or underrated), marked as ours ("our take:", "honestly,", "which tells you..."), and (2) one dry,
+snarky joke built on a concrete consequence, e.g. "Google cracked a quantum problem in one step, which is great, unless
+you're the intern who has to update the documentation." Punch at companies, hype, products and situations; never at
+victims, ordinary people, or anyone's identity. Never let a joke change or blur a fact; facts stay exact and attributed.
+No slapstick, no puns-for-puns'-sake, no recycled source jokes, no "buckle up" / "let's dive in" clichés.
+Humor, opinion and analysis must survive editing, resizing and jargon review without weakening first-use explanations.
 These instructions apply to generated narration, NOT source notes, quotations, credits, or a supplied verbatim script.
 Original commentary and brief excerpts do not guarantee fair use, copyright clearance, or YouTube monetization;
 never assert legal compliance or monetization eligibility in the narration."""
@@ -68,7 +73,7 @@ THIS SECTION: "{stitle}"{role}
 Must cover these points (use only these facts; never invent numbers, quotes or names):
 {points}
 
-NARRATION: about {words} words. That is a target, not a cap: take the room plain explanations need, and stop when the points are covered. Longer sections should add detail, examples and context from the points, never padding. Calm, clear documentary voice-over. Short sentences, plain words.
+NARRATION: about {words} words. That is a target, not a cap: take the room plain explanations need, and stop when the points are covered. Longer sections should add detail, examples and context from the points, never padding. Snarky, conversational voice-over (see VOICE): clear, short sentences, plain words, one opinion of ours and one dry joke per section.
 AUDIENCE: {audience}
 Attribute opinions and predictions to the speaker ("Diamandis argues...", "his guest predicts..."); present predictions
 as predictions. Write numbers as spoken ("four point seven percent", "twenty thirty", "ten billion dollars").
@@ -114,10 +119,10 @@ Check the narration against the transcript and fix it:
 - statements that misrepresent what was meant (e.g. a joke, a steelman, a question from a listener)
 - explanations must not sneak in unsupported background facts: remove new statistics, strategic importance,
   geographical comparisons or performance claims not present in the source; keep only the plain meaning needed.
-- grammar and awkward phrasing; keep the calm documentary voice and numbers written as spoken words
+- grammar and awkward phrasing; keep the snarky, conversational voice and numbers written as spoken words
 - preserve substantial original analysis and unique commentary: clearly marked interpretations grounded in the source
   are not unsupported factual claims. Correct their reasoning if needed, but do not flatten them into paraphrases.
-- preserve the mild wit or explanatory analogy in each beat; distinguish figurative humor from literal claims.
+- preserve the snarky joke and our opinion in each beat; distinguish figurative humor and opinion from literal claims.
 {audience}
 Keep roughly the same length ({words} words). Do not add new facts.
 If something is important but you cannot resolve it from the transcript, keep the safest wording and list it in "questions"
@@ -546,10 +551,11 @@ def _editorial_review_candidate(llm, plan, meta, transcript, cfg, log, stop=None
                     for s in plan["sections"] if not s.get("cta")]
         prompt = ("Final editorial pass for generated TLDR narration. Every content beat needs substantial, original analysis "
                   "and unique commentary: explain the implication, limitation, or evidential strength of EACH selected fact, "
-                  "rather than merely retelling it. Add one unmistakable but mild witty phrase or familiar humorous analogy "
-                  "per beat, never slapstick or mockery. Do not copy the source's jokes. Preserve first-use term explanations "
-                  "A normal factual sentence is not humor: use a genuinely playful analogy or witty metaphor, without "
-                  "turning it into a literal assertion. For example a drawn track is 'a coloring-book map, not a witness'. "
+                  "rather than merely retelling it. Every beat needs one original opinion of ours (marked as ours) and one dry, "
+                  "snarky, conversational joke about a concrete consequence (e.g. 'Google cracked a quantum problem in one "
+                  "step, which is great, unless you're the intern who has to update the documentation'). Punch at companies, "
+                  "hype and situations, never at victims or ordinary people; no slapstick. Do not copy the source's jokes. "
+                  "Preserve first-use term explanations. A normal factual sentence is not humor, and a joke never changes a fact. "
                   "and all factual qualifiers; do not add new external facts. Cover fewer facts if needed. "
                   "Do not claim copyright clearance or independent verification. " + audience_line(cfg) +
                   "\nReturn JSON {sections:[{id,vo,analysis,humor}]}. analysis and humor must each be exact excerpts of "

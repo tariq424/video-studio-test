@@ -66,7 +66,7 @@ class SourceVisualTests(unittest.TestCase):
             self.assertIn("EVERY content beat", writer.SYSTEM)
             self.assertIn("substantial, original analysis and unique commentary", writer.SYSTEM)
             self.assertTrue(writer.audience_line({"audience": audience}))
-        self.assertIn("preserve the mild wit", writer.FACTCHECK)
+        self.assertIn("preserve the snarky joke and our opinion", writer.FACTCHECK)
         self.assertIn("not independent verification", writer.SYSTEM)
 
     def test_owned_long_visual_is_not_replaced(self):

@@ -7,6 +7,13 @@ CFG = ROOT / "settings.json"
 DEFAULTS = {
     "source_visuals": True,           # opt-in per beat via a timestamp + original commentary purpose
     "source_visual_max_uses": 2,      # editorial cap per output, not a legal safe harbor
+    "source_clips_auto": True,        # Source Clip rung: when the script asked for none, match the beat to a caption cue (2.5 s clip)
+    "flow_on": True,                  # Google Flow rung (flow.py): skipped by itself until scripts\flow-login.ps1 has been run once
+    "flow_profile": "",               # Chrome profile for Flow ("" = <jobs_dir parent>\flow_profile)
+    "flow_url": "https://labs.google/fx/tools/flow",
+    "flow_timeout": 360,              # seconds to wait for one generated clip
+    "flow_max_per_video": 4,          # Flow clips per output (credits)
+    "flow_headless": False,
     "script_provider": "deepseek",
     "qa_provider": "off",
     "anthropic_api_key": "",

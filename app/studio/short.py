@@ -32,6 +32,10 @@ Hard limit: {wmax} words (YouTube Shorts are cut off at 3 minutes). If the notes
   Attribute opinions and predictions to who said them (first name is fine in narration).
 - Last beat: the payoff / biggest takeaway, ending on a strong line.
 Narration: spoken, punchy, short sentences, plain words, numbers written as spoken words ("ten billion dollars", "twenty thirty").
+VOICE: snarky and conversational, like a sharp friend, not a narrator. EVERY beat has (1) one original opinion of ours, marked
+as ours ("honestly,", "our take:"), and (2) one dry joke about a concrete consequence, e.g. "Google cracked a quantum problem in
+one step, which is great, unless you're the intern who has to update the documentation." Jokes punch at companies, hype and
+situations, never at victims or ordinary people, and never change a fact.{cta_rule}
 AUDIENCE: {audience}
 No markdown, no stage directions. Never invent numbers, quotes or names.
 
@@ -161,7 +165,11 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             elif n > wmax: raise ValueError(f"narration is {n} words in total; the hard limit is {wmax} (YouTube's 3:00): cut the weakest point, keep the explanations of terms")
             # shorter than the target, or longer but within 3:00: accepted as written (no padding, no trimming)
         prompt = SHORT.format(secs=int(secs), words=words, wmax=wmax if not smoke else int(words * hi), title=title, channel=channel, notes=notes[:24000], nb=nb, audience=audience_line(cfg),
-                              people=(meta.get("description") or "")[:1200] or "(see notes)")
+                              people=(meta.get("description") or "")[:1200] or "(see notes)",
+                              cta_rule=("\nThis Short has NO longer companion video: never mention, promise or point to a longer / full video, "
+                                        "a full breakdown, a link below or 'part two'." if mode != "both" else
+                                        "\nA full-length explainer goes out with this Short; the closing line pointing to it is added "
+                                        "separately, so don't write your own link or 'watch the full video' line."))
         from . import source_visuals
         prompt += source_visuals.prompt(srcdir)
         if audience_key(cfg) == 'beginner':
@@ -225,6 +233,12 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
         for i, x in enumerate(plan["sections"]): x["id"], x["title"] = f"b{i}", f"Beat {i + 1}"
     n = sum(len(x["vo"].split()) for x in plan["sections"])
     if not smoke and n > wmax: log(f"  NOTE: script is {n} words (target {words}); past the 3:00 limit; it will be sped up to fit")
+    if mode != "both":   # no companion explainer: a promise of one must not survive (the model sometimes adds it anyway)
+        promise = re.compile(r"[^.!?]*\b(full (breakdown|video|episode|explainer)|longer video|link(ed)? below|part two|watch the full)\b[^.!?]*[.!?]?\s*", re.I)
+        for x in plan["sections"]:
+            cut = promise.sub("", x["vo"]).strip()
+            if cut != x["vo"].strip() and len(cut.split()) >= 6:
+                log(f"  {x.get('id', 'beat')}: removed a line promising a longer video (this job makes no long video)"); x["vo"] = cut
     # closing call-to-action beat
     src_name = plan.get("source_spoken") or title
     if mode == "both":
@@ -301,6 +315,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
     Also writes short/fallback/chains.json (every beat's decision chain: stock found, what was tried and why it failed, what is used)
     for the debugger and the trace. dbg (debug.Debugger): safe points for 'Pause now'; with breakpoints on, beats run one at a time
     and each is checked after its visuals are decided (normal runs keep the batched GPU order)."""
+    from . import flow as _flow; _flow.reset()   # Flow's job-wide skip starts clear for every run
     from . import depth, coherence, photos, ladder, cloudgen, illustrate, physics
     v2 = bool(cfg.get("ladder_v2"))   # visual ladder v2 (graphics / physics / CapCut); off = the ladder below, unchanged
     sd = job / "short"; fd = sd / "fallback"; fd.mkdir(parents=True, exist_ok=True)
@@ -335,8 +350,8 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         c = chs.get(sec["id"], {})
         return {"bid": sec["id"], "n": int(sec["id"][1:]) + 1, "vo": sec["vo"], "stock_found": c.get("stock_found", len(pick.get(sec["id"], []))),
                 "uses": c.get("uses", []), "failed": c.get("failed", [])}
-    if v2: log("Visual ladder v2 per beat (1 stock -> 2 real photos -> 3 cloud still -> 4 WanGP still (atmospheric only) -> 5 physics data (real / script map / synthetic) -> "
-               "6 Remotion graphics (draws the physics data, else template / Claude) -> 7 CapCut (hard failures, per video) -> 8 parallax -> 9 illustration / silhouette -> 10 headline; animate on click):")
+    if v2: log("Visual ladder v2 per beat (1 stock -> 2 source clip -> 3 real photos -> 4 cloud still -> 5 WanGP still (atmospheric only) -> 6 Google Flow -> "
+               "7 physics data (real / script map / synthetic) -> 8 Remotion graphics (draws the physics data, else template / Claude) -> 9 CapCut (hard failures, per video) -> 10 parallax -> 11 illustration / silhouette -> 12 headline; animate on click):")
     else: log("Visual ladder per beat (1 stock/photo -> 2 cloud still -> 3 WanGP still -> 4 parallax -> 5 illustration / silhouette -> 6 reconstruction / headline; animate on click):")
     for s in beats:   # beats step 1 covered on its own
         if s["id"] in base_needs: continue
@@ -403,7 +418,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         for item in items:
             if item.get("rung") == "source":
                 lines.append(f"source evidence ({item['g']['media']} at {item['g']['timestamp']:.2f}s) beside original analysis / graphics")
-        vb = {"g": False, "hard": False, "p": False, "pok": False, "capcut": ""}   # v2, once per beat: graphics tried / hard-failed, physics tried / fitted
+        vb = {"g": False, "hard": False, "p": False, "pok": False, "capcut": "", "f": False}   # v2, once per beat: graphics tried / hard-failed, physics tried / fitted
         if v2:
             from . import capcut
             capcut.mark(sd, s["id"], None)   # re-deciding this beat: a CapCut mark from an earlier run no longer applies
@@ -546,12 +561,21 @@ def _safe(log, rung, fn, default=None):
 def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill, log, pos=None):
     """Visual ladder v2, rungs 5-10 for one slot whose cloud / WanGP still didn't pass. -> the bg item. Appends to chain / why /
     failed. vb carries per-beat state: physics and graphics run once per beat (a second slot of the same beat goes on down).
-    5. physics = DATA PROVIDER: when the slot describes physical motion it returns a payload (real data, the narration's numbers,
+    5. Google Flow: one generated clip per beat (flow.py; skipped when not set up)
+    5b. physics = DATA PROVIDER: when the slot describes physical motion it returns a payload (real data, the narration's numbers,
        the script's map coordinates, or a labelled synthetic path), saved to short/physics/<slot>.json
     6. Remotion graphics: draws that payload as a motion-graphics clip; without a payload, a template / Claude composition
     7. CapCut (hard failures)   8. parallax   9. illustration / silhouette   10. headline card
     Every rung is isolated (_safe): a failure is logged and the next rung runs."""
-    from . import graphics, physics, capcut, illustrate
+    from . import graphics, physics, capcut, illustrate, flow
+    if cfg.get("flow_on", True) and not vb.get("f"):   # Google Flow (one generated clip per beat; falls through on any failure)
+        vb["f"] = True
+        clip = _safe(log, "flow", lambda: flow.generate(cfg, sd, s, sl["key"], log, aspect="9:16"))
+        if clip:
+            chain.append("flow")
+            return {"type": "video", "src": _rel_sd(clip, sd), "secs": round(media.dur(clip), 2), "rate": 1.0, "freeze": True,
+                    "tag": "GENERATED · FLOW", "rung": "flow"}
+        chain.append("flow"); failed.append("flow")
     payload = None
     if cfg.get("physics_auto", True) and not vb["p"]:   # 5. physics -> data
         vb["p"] = True

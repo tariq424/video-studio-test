@@ -213,6 +213,13 @@ def v2_after_wangp(cfg, job, v, vo, log):
     sec = {"id": v["id"], "vo": vo, "still_prompt": v.get("prompt", ""), "visuals": [x for x in [v.get("chart") and {"chart": v["chart"]}] if x]}
     md = job / "motion"; md.mkdir(exist_ok=True)
     sec["subject"] = v.get("subject")
+    if cfg.get("flow_on", True):   # Google Flow: a generated clip before physics / graphics; any failure falls through
+        from . import flow
+        try: clip = flow.generate(cfg, _ws(job), {**sec, "queries": v.get("queries") or []}, "L_" + v["id"], log, aspect="16:9")
+        except Exception as e: log(f"  {v['id']}: flow failed ({str(e)[:100]}); next rung"); clip = None
+        if clip:
+            shutil.copy(clip, md / f"{v['id']}.mp4"); v["type"] = "motion"; v["tag"] = "GENERATED · FLOW"; v.pop("g", None)
+            log(f"  {v['id']}: Google Flow clip"); return "flow"
     verb, amod = physics.action(sec) if cfg.get("physics_auto", True) else ("", None)
     if amod:   # action (2026-10-13): the module that animates it before graphics
         from . import liveries
