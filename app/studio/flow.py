@@ -146,7 +146,12 @@ def generate(cfg, sd, sec, key, log, aspect="9:16"):
                 if "accounts.google.com" in page.url or _first(page, ["text=/sign in/i"], 1500) and not _first(page, ["textarea", "[contenteditable=true]"], 1500):
                     _down["why"] = "the Flow profile is not signed in to Google; run scripts\\flow-login.ps1"
                     raise RuntimeError(_down["why"])
-                # (no "New project" click: in the 2026 Flow UI that control sits in the Library and only creates an empty collection)
+                box0 = _first(page, ["textarea", "[contenteditable=true]", "[role=textbox]"], 3000)
+                if not box0:   # landing page: open a new project (its prompt panel has the text box)
+                    new = _first(page, ["button:has-text('New project')", "a:has-text('New project')", "[aria-label*='New project' i]"], 8000)
+                    if new:
+                        new.click()
+                        page.wait_for_timeout(4000)
                 box = _first(page, ["textarea", "[contenteditable=true]", "[role=textbox]"], 15000)
                 if not box:
                     _down["why"] = "Flow's prompt box was not found (the page may have changed)"
