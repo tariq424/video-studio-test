@@ -129,7 +129,7 @@ def run(cfg, wg, sd, fd, slots, log, stop, gpu, seed=5100, full=False, animate=F
             if not st[s["key"]].get("still_ok"): st[s["key"]].setdefault("still_why", "WanGP not available")
         save(); return st
     # step 2b: WanGP stills (only where the cloud gave nothing usable)
-    from .wangp import is_down, UNREACHABLE
+    from . import wangp as _wg; is_down = getattr(_wg, "is_down", lambda: False); UNREACHABLE = getattr(_wg, "UNREACHABLE", "WanGP not reachable")   # tolerate an older wangp already loaded in a running server
     for i, s in enumerate(slots):
         if stop(): raise RuntimeError("cancelled")
         r = st[s["key"]]; img = fd / f"{s['key']}.jpg"
