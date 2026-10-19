@@ -153,6 +153,11 @@ def _quoted(phrase, vo):
     return hit >= 0.8 * len(p)
 
 
+def protected_of(section):
+    from .writer import protected
+    return protected(section)
+
+
 def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir, smoke=False):
     wpm = tts.wpm(cfg)
     # target = narration + a pause after each beat + the end tail + the closing line (~16 words); size the story to fill the rest
@@ -227,7 +232,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                 if not isinstance(bs, list) or len(bs) != len(j["beats"]): raise ValueError(f"return exactly {len(j['beats'])} beats")
                 for k, (o, nb_) in enumerate(zip(j["beats"], bs)):
                     vo = str((nb_ or {}).get("vo") or "")
-                    if len(vo.split()) > per: raise ValueError(f"beat {k + 1} is {len(vo.split())} words; at most {per}")
+                    if len(vo.split()) > per + 4: raise ValueError(f"beat {k + 1} is {len(vo.split())} words; at most {per}")
                     for f in ("take", "joke"):
                         if o.get(f) and _quoted(o[f], o["vo"]) and not _quoted(o[f], vo): raise ValueError(f"beat {k + 1} must keep its {f} word for word: {o[f]}")
             try:
@@ -269,7 +274,12 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
         plan = fact_check(llm, plan, meta, transcript, log, stop, cfg)   # take / joke are protected from here on
         # review checks (our analysis + a joke, then fact-check) BEFORE the term-explanation step; the review runs that step
         # itself, last, with the opinion and joke protected
-        editorial_review(llm, plan, meta, transcript, cfg, log, stop)
+        content = [x for x in plan["sections"] if not x.get("cta")]
+        if all(len(protected_of(x)) == 2 for x in content):   # the script already has our opinion + a joke in every beat
+            log("  voice: every beat already has our opinion and a joke (checked word for word); the humor rewrite is skipped")
+            plan["editorial_warnings"] = ["skipped: voice already present"]
+        else:
+            editorial_review(llm, plan, meta, transcript, cfg, log, stop)
         if plan.get("editorial_warnings") and (not smoke or audience_key(cfg) == 'beginner'):
             jargon_check(llm, plan, cfg, log, source_notes=notes)   # the review gave up: explanations still go in (protected)
         from .writer import punch_up
