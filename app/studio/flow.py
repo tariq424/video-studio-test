@@ -204,9 +204,9 @@ def generate(cfg, sd, sec, key, log, aspect="9:16"):
                     if not approved and cfg.get("flow_auto_approve", True):
                         # Flow's agent asks before spending credits ("costing 15 credits? Approve / Always approve / Reject").
                         # The owner chose: click Approve each time (never "Always approve", which changes the account setting).
-                        btn = page.get_by_role("button", name=re.compile(r"^\s*Approve\s*$"))
-                        if not btn.count():
-                            btn = page.locator("button, [role=button]").filter(has_text=re.compile(r"^\s*(check\s*)?Approve\s*$"))
+                        btn = page.get_by_role("button", name=re.compile(r"^\s*(check\s*)?Approve\s*$"))
+                        if not btn.count():   # the 2026 panel renders the choices as plain elements: exact text "Approve" only
+                            btn = page.get_by_text("Approve", exact=True)
                         if btn.count():
                             cost = re.search(r"costing\s+(\d+)\s+credits", body, re.I)
                             btn.first.click()
