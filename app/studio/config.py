@@ -15,6 +15,7 @@ DEFAULTS = {
     "flow_timeout": 360,              # seconds to wait for one generated clip
     "flow_max_per_video": 4,          # Flow clips per output (credits)
     "flow_headless": False,
+    "flow_auto_approve": True,        # click Flow's "Approve" (spend the quoted credits) for each clip; never "Always approve"
     "script_provider": "deepseek",
     "qa_provider": "off",
     "anthropic_api_key": "",

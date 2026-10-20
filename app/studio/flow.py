@@ -193,6 +193,7 @@ def generate(cfg, sd, sec, key, log, aspect="9:16"):
                     if prompt[:40] in (still or ""): box.press("Control+Enter")
                 log("  flow: prompt submitted; waiting for the clip")
                 src = None
+                approved = False
                 while time.time() - t0 < timeout:
                     page.wait_for_timeout(5000)
                     body = ""
@@ -200,6 +201,18 @@ def generate(cfg, sd, sec, key, log, aspect="9:16"):
                         body = page.locator("body").inner_text(timeout=3000)
                     except Exception:
                         pass
+                    if not approved and cfg.get("flow_auto_approve", True):
+                        # Flow's agent asks before spending credits ("costing 15 credits? Approve / Always approve / Reject").
+                        # The owner chose: click Approve each time (never "Always approve", which changes the account setting).
+                        btn = page.get_by_role("button", name=re.compile(r"^\s*Approve\s*$"))
+                        if not btn.count():
+                            btn = page.locator("button, [role=button]").filter(has_text=re.compile(r"^\s*(check\s*)?Approve\s*$"))
+                        if btn.count():
+                            cost = re.search(r"costing\s+(\d+)\s+credits", body, re.I)
+                            btn.first.click()
+                            approved = True
+                            log(f"  flow: approved the generation ({cost.group(1) + ' credits' if cost else 'credits as quoted'})")
+                            continue
                     if re.search(r"(couldn.t generate|violat|policy|try a different prompt|out of credits|not enough credits|limit reached)", body, re.I):
                         m = re.search(r"[^\n]*(couldn.t generate|violat|policy|try a different prompt|credits|limit reached)[^\n]*", body, re.I)
                         if m and re.search("credit|limit", m.group(0), re.I):
