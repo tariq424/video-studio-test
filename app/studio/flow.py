@@ -86,6 +86,15 @@ def _videos(page):
         return []
 
 
+def _tiles(page):
+    """Number of media thumbnails in Flow's grid (the main area, left of the session panel)."""
+    try:
+        return page.evaluate("""() => Array.from(document.querySelectorAll('img, video')).filter(e => {
+            const r = e.getBoundingClientRect(); return r.left > 240 && r.right < 1080 && r.width > 80 && r.height > 120; }).length""")
+    except Exception:
+        return 0
+
+
 def _save(context, page, src, out):
     if src.startswith("blob:") or src.startswith("data:"):
         b64 = page.evaluate("""async (u) => { const r = await fetch(u); const b = new Uint8Array(await r.arrayBuffer());
@@ -166,6 +175,7 @@ def generate(cfg, sd, sec, key, log, aspect="9:16"):
                     except Exception:
                         pass
                 before = set(_videos(page))
+                tiles0 = _tiles(page)
                 box.click()
                 box.fill(prompt) if box.evaluate("e => e.tagName") == "TEXTAREA" else page.keyboard.insert_text(prompt)
                 send = _first(page, ["button[aria-label*='Send' i]", "button[aria-label*='Submit' i]", "button[aria-label*='Generate' i]",
@@ -218,6 +228,19 @@ def generate(cfg, sd, sec, key, log, aspect="9:16"):
                         if m and re.search("credit|limit", m.group(0), re.I):
                             _down["why"] = "Flow credits / daily limit reached"
                         raise RuntimeError("Flow refused: " + (m.group(0)[:140] if m else "generation failed"))
+                    if approved and not [v for v in _videos(page) if v not in before]:
+                        # the media grid shows thumbnails (img), not <video>: open the newest new tile so its player loads
+                        if _tiles(page) > tiles0 and time.time() - t0 > 45:
+                            try:
+                                page.evaluate("""() => { const t = Array.from(document.querySelectorAll('img, video')).filter(e => {
+                                    const r = e.getBoundingClientRect(); return r.left > 240 && r.right < 1080 && r.width > 80 && r.height > 120; });
+                                    if (t.length) (t[0].closest('a,button,[role=button],[tabindex]') || t[0]).click(); }""")
+                                page.wait_for_timeout(4000)
+                                body2 = page.locator("body").inner_text(timeout=3000)
+                                if re.search(r"(queue|processing|generating|%)", body2, re.I) and not [v for v in _videos(page) if v not in before]:
+                                    page.keyboard.press("Escape")   # still being made: close and look again later
+                            except Exception:
+                                pass
                     fresh = [v for v in _videos(page) if v not in before]
                     if fresh:
                         page.wait_for_timeout(3000)   # let the element settle on its final source
