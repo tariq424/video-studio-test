@@ -40,12 +40,16 @@ class SourceVisualTests(unittest.TestCase):
             with patch.object(source_visuals, "_extract", side_effect=extract) as extraction, patch("studio.review.files_url", return_value="http://localhost/test.png"):
                 sec = {**self.request(kind="screenshot"), "id": "b0", "vo": "A claim needs evidence"}
                 first = source_visuals.make({}, job, job / "short", sec, lambda _: None)
-                self.assertEqual(first["g"]["credit"], "Test creator")
-                self.assertEqual(first["g"]["kind"], "source_excerpt")
+                self.assertEqual(first["credit"], "Test creator")
+                self.assertEqual(first["type"], "image")   # full-frame item, no longer a source_excerpt graphic
+                self.assertTrue(first["tag"].startswith("SOURCE"))
                 source_visuals.make({}, job, job / "short", sec, lambda _: None)
                 self.assertEqual(extraction.call_count, 1)
-                self.assertIsNotNone(source_visuals.make({}, job, job / "short", {**sec, "id": "b1"}, print))
-                self.assertIsNone(source_visuals.make({}, job, job / "short", {**sec, "id": "b2"}, print))
+                self.assertIsNone(source_visuals.make({}, job, job / "short", {**sec, "id": "b1"}, print))   # same excerpt: never twice
+                sec2 = {**self.request(kind="screenshot", start=40), "id": "b1", "vo": "A claim needs evidence"}
+                self.assertIsNotNone(source_visuals.make({}, job, job / "short", sec2, print))
+                sec3 = {**self.request(kind="screenshot", start=80), "id": "b2", "vo": "A claim needs evidence"}
+                self.assertIsNone(source_visuals.make({}, job, job / "short", sec3, print))   # budget of 2
                 self.assertIsNone(source_visuals.make({"source_visual_max_uses": 0}, job, job / "short", sec, print))
 
     def test_extraction_failure_continues_ladder(self):

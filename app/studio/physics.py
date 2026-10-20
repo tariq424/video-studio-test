@@ -399,15 +399,43 @@ def run(module, params, cfg=None):
     return {"kind": "sim", "module": module, **r}
 
 
+# Physics only models things that physically move. A beat about a laptop, an app, an AI model or a website gets no
+# physics (a schematic path for a MacBook is meaningless), unless it also names a real moving thing (a car, a storm...).
+REAL_MOVERS = (r"\b(drones?|jets?|aircraft|airplanes?|planes?|airliners?|flights?|helicopters?|ships?|vessels?|boats?|tankers?|submarines?|"
+               r"missiles?|rockets?|spacecraft|satellites?|troops|convoys?|cars?|trucks?|vehicles?|evs?|buses|trains?|bikes?|"
+               r"storms?|hurricanes?|typhoons?|cyclones?|tornado\w*|winds?|rivers?|floods?|waves?|ocean|tides?|lava|wildfires?|"
+               r"radars?|balls?|fluids?|particles?|projectiles?|bullets?|asteroids?|comets?|planets?|orbits?)\b")
+NON_PHYSICAL = (r"\b(mac ?books?|macbook\w*|laptops?|notebooks?|computers?|pcs?|desktops?|macs?|imacs?|ipads?|iphones?|phones?|smartphones?|"
+                r"tablets?|screens?|monitors?|keyboards?|software|apps?|applications?|websites?|web|browsers?|windows|macos|ios|android|"
+                r"ai|chatgpt|gpt\w*|gemini|claude|llms?|models?|chatbots?|prompts?|apis?|code|coding|cloud|servers?|chips?|processors?|"
+                r"[cgt]pus?|algorithms?|data|databases?|online|internet|pinterest|youtube|tiktok|instagram|feature|updates?|ocr|"
+                r"text|images?|photos?|pixels?|files?|downloads?|uploads?|tokens?|stocks?|shares|markets?|prices?|revenue)\b")
+
+
+def non_physical(sec, text=None):
+    """-> the non-physical thing the beat is about (e.g. "MacBook"), or "" when physics may model it."""
+    text = str(text if text is not None else sec.get("vo") or "")
+    subj = sec.get("subject") or {}
+    name = " ".join(str(subj.get(k) or "") for k in ("name", "brand"))
+    if re.search(REAL_MOVERS, text, re.I) or re.search(REAL_MOVERS, name, re.I):
+        return ""
+    m = re.search(NON_PHYSICAL, name, re.I) or re.search(NON_PHYSICAL, text, re.I)
+    if m: return (subj.get("name") if re.search(NON_PHYSICAL, name, re.I) else m.group(0)) or m.group(0)
+    if str(subj.get("kind") or "").lower() in ("software", "app", "website", "company", "ai model", "model", "service"):
+        return str(subj.get("name") or subj.get("kind"))
+    return ""
+
+
 # Deterministic, offline illustrative motion. Never presented as observations.
 def synthetic_motion(sec):
     text = str(sec.get("vo") or "")
+    if non_physical(sec, text): return None
     radar = re.search(r"\b(radar|radars)\b", text, re.I)
     moving = re.search(r"\b(mov\w*|sweep\w*|flow\w*|travel\w*|sail\w*|transit\w*|cross\w*|heading|en route|route|tracking|track)\b", text, re.I)
     ship = re.search(r"\b(ships?|vessels?|tankers?|shipping)\b", text, re.I)
     if not radar and not moving: return None
     # Avoid treating financial/figurative movement as physical motion.
-    physical = ship or radar or re.search(r"\b(water|wind|aircraft|plane|vehicle|car|train|storm|river|current|traffic|particles?|fluid|satellites?|missiles?|troops|cargo|spacecraft|rocket|ball|object|signal)\b", text, re.I)
+    physical = ship or radar or re.search(r"\b(water|wind|aircraft|plane|vehicle|car|train|storm|river|current|particles?|fluid|satellites?|missiles?|troops|cargo|spacecraft|rocket|ball)\b", text, re.I)
     if not physical: return None
     if ship and re.search(r"hormuz", text, re.I):
         params = {"title": "Strait of Hormuz transit", "waypoints": [
@@ -458,6 +486,10 @@ def provide(cfg, sec, backdrop, log, pos=None, story=""):
     the script's own map coordinates when the slot describes travel -> a labelled synthetic motion path.
     Rung 6 (Remotion graphics) draws the spec; nothing here renders."""
     text = slot_text(sec.get("vo", ""), pos)
+    off = non_physical(sec, sec.get("vo", ""))
+    if off:
+        log(f"  {sec.get('id', 'beat')}: physics off: '{off}' is not a physical object")
+        return None
     verb, mod = action(sec, text)
     if not mod: verb, mod = action(sec)
     if mod:

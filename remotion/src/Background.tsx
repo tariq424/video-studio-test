@@ -25,12 +25,20 @@ export const Shot: React.FC<{ bg: Bg; dur: number; seed: number }> = (props) => 
   );
 };
 
+// A clip that fails to load is reported on the console with a fixed marker; the Python render loop copies these lines
+// into the job log, so a clip that doesn't play shows its real error instead of silently looking like a graphic.
+export const mediaError = (src: string) => (e: any) => {
+  const el = e?.currentTarget ?? e?.target; const me = el?.error;
+  console.error(`[VS-MEDIA-ERROR] ${src}: ${me ? `MediaError code ${me.code} ${me.message || ""}` : (e?.message || String(e))}`);
+};
+
 // a video background, optionally fitted to its slot (beat editing): rate = playback speed (default 0.85), start = seconds
 // into the source, freezeAt = hold the frame shown at that many seconds, loop = repeat every that many seconds
 const Vid: React.FC<{ bg: any; style: React.CSSProperties }> = ({ bg, style }) => {
   const f = useCurrentFrame(); const { fps } = useVideoConfig();
   const VideoComponent = bg.decoder === "browser" ? Html5Video : OffthreadVideo;
-  const v = <VideoComponent src={asset(bg.src)} muted playbackRate={bg.rate ?? 0.85} trimBefore={bg.start ? Math.round(bg.start * fps) : undefined} style={style} />;
+  const v = <VideoComponent src={asset(bg.src)} muted playbackRate={bg.rate ?? 0.85} trimBefore={bg.start ? Math.round(bg.start * fps) : undefined} style={style}
+    {...({ onError: mediaError(bg.src) } as any)} />;
   if (bg.loop) return <Loop durationInFrames={Math.max(1, Math.round(bg.loop * fps))} layout="none">{v}</Loop>;
   if (bg.freezeAt != null) { const n = Math.max(0, Math.round(bg.freezeAt * fps) - 1); if (f > n) return <Freeze frame={n}>{v}</Freeze>; }
   return v;
@@ -64,7 +72,7 @@ const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, s
           </div>
         </div>
         <div style={{ position: "absolute", left: "3%", top: "30%", width: "44%", height: "35%", background: "black", border: "3px solid #ffc83d" }}>
-          {g.media === "clip" ? <Html5Video src={asset(g.src)} muted style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+          {g.media === "clip" ? <Html5Video src={asset(g.src)} muted style={{ width: "100%", height: "100%", objectFit: "contain" }} onError={mediaError(g.src) as any} />
             : <Img src={asset(g.src)} style={{ width: "100%", height: "100%", objectFit: "contain" }} />}
         </div>
         <div style={{ position: "absolute", left: "4%", top: "20%", right: "4%", color: "#ffc83d", fontFamily: "Inter, sans-serif", fontSize: tall ? 31 : 26 }}>

@@ -432,7 +432,15 @@ class Studio:
                             caps = C.build_section(cfg, j.dir, sec["id"], sec["vo"], log)
                             log(f"Captions {sec['id']}: {len(caps)} lines, {sum(1 for c in caps if c.get('emoji_png'))} icons")
                 elif st == "presenter":
-                    if s.get("presenter", False): _need_wangp(wg); render.do_presenter(j.dir, plan, cfg, wg, log, stop)
+                    if s.get("presenter", False):
+                        # optional feature: a WanGP outage (or any presenter failure) skips the presenter, never the job
+                        try:
+                            _need_wangp(wg); render.do_presenter(j.dir, plan, cfg, wg, log, stop)
+                        except Exception as e:
+                            if str(e) == "cancelled" or type(e).__name__ == "Paused": raise
+                            log(f"On-screen presenter skipped ({type(e).__name__}: {' '.join(str(e).split())[:300]}); "
+                                "the explainer continues without it")
+                            s["presenter"] = False; j.save(presenter=False)
                 elif st == "broll":
                     if not cfg.get("long_broll", True):
                         from . import source_visuals

@@ -73,7 +73,7 @@ THIS SECTION: "{stitle}"{role}
 Must cover these points (use only these facts; never invent numbers, quotes or names):
 {points}
 
-NARRATION: about {words} words. That is a target, not a cap: take the room plain explanations need, and stop when the points are covered. Longer sections should add detail, examples and context from the points, never padding. Snarky, conversational voice-over (see VOICE): clear, short sentences, plain words, one opinion of ours and one dry joke per section.
+NARRATION: about {words} words. That is a target, not a cap: take the room plain explanations need, and stop when the points are covered. Longer sections should add detail, examples and context from the points, never padding. Conversational voice-over (see VOICE): a plain, clear summary in short sentences and plain words. Do NOT write jokes or add our opinion here: our take and the jokes are added to each section in a separate step afterwards.
 AUDIENCE: {audience}
 Attribute opinions and predictions to the speaker ("Diamandis argues...", "his guest predicts..."); present predictions
 as predictions. Write numbers as spoken ("four point seven percent", "twenty thirty", "ten billion dollars").
@@ -363,7 +363,12 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
         log("Checking the script against the transcript (names, attributions, claims)...")
         plan = fact_check(llm, plan, meta, transcript, log, stop, cfg)
         jargon_check(llm, plan, cfg, log, source_notes=notes_txt)
-        editorial_review(llm, plan, meta, transcript, cfg, log, stop)
+        # Same as the Short: summary first, punch-up second. The one-pass editorial rewrite (analysis + humor in every
+        # section) failed 5 of 5 attempts on DeepSeek and left the explainer with no jokes and no analysis; it is opt-in now.
+        if cfg.get("explainer_editorial_review", False):
+            editorial_review(llm, plan, meta, transcript, cfg, log, stop)
+        plan = normalize(plan)
+        punch_up_long(cfg, plan, log, stop)
         plan = normalize(plan)
         w = sum(_nw(s["vo"]) for s in plan["sections"])
         tk = f" Tokens in/out: {llm.tokens_in}/{llm.tokens_out}" if llm.tokens_in else ""
@@ -697,7 +702,7 @@ def normalize(plan):
     return plan
 
 
-PUNCH = """Here is one beat of a news Short. Add ONE funny closing observation (max {n} words): dry, snarky, conversational,
+PUNCH = """Here is one beat of a news video. Add ONE funny closing observation (max {n} words): dry, snarky, conversational,
 about a concrete consequence of what the beat says, in the style of: "Google cracked a quantum problem in one step, which is great,
 unless you're the intern who has to update the documentation." If the topic is too dry, joke about how dry it is.
 Rules: no new facts, numbers or names; punch at companies, hype or situations, never at victims or ordinary people; it is
@@ -740,4 +745,81 @@ def punch_up(cfg, plan, log, force=False):
                 log(f"  punch-up {s['id']} ({llm.name}): {joke}")
     except Exception as e:
         log(f"  punch-up skipped ({str(e)[:100]})")
+    return plan
+
+
+TAKE = """Here is one section of an explainer video's narration. Write OUR TAKE on it: ONE sentence of original analysis (max {n}
+words) that says what this means, why it matters, or what the source glosses over. Start with "Our take:" or "Honestly,".
+Rules: an interpretation, not a summary; no new facts, numbers or names; it must not repeat a sentence already in the section.
+SECTION: "{vo}"
+Reply with JSON only: {{"take": "..."}}"""
+
+
+def _sentences(text):
+    return [x for x in re.split(r"(?<=[.!?])\s+", text.strip()) if x]
+
+
+def _insert_after(vo, frac, line):
+    """Insert a sentence after the sentence boundary nearest to frac of the way through vo."""
+    ss = _sentences(vo)
+    if len(ss) < 2: return vo.rstrip() + " " + line
+    k = max(1, min(len(ss) - 1, round(len(ss) * frac)))
+    return " ".join(ss[:k] + [line] + ss[k:])
+
+
+def punch_up_long(cfg, plan, log, stop=None):
+    """Explainer voice step, after the fact and jargon checks (as in the Short): per content section one call for our take
+    (inserted about 60% of the way through), one punch-up joke at the end, and a second joke in the first half of a long
+    section (over 220 words). Each is its own small DeepSeek call. A failed call is logged and skipped; never blocks the job."""
+    if not cfg.get("punch_up", True): return plan
+    c = dict(cfg)
+    if c.get("anthropic_api_key"):
+        c["script_provider"] = "claude"
+        c["script_model"] = c.get("punch_up_model") or c.get("script_model") or "claude-opus-5-5"
+    takes = jokes = 0
+    try:
+        with LLM(c, log, stop or (lambda: False)) as llm:
+            for s in plan["sections"]:
+                if stop and stop(): raise RuntimeError("stopped")
+                if s.get("cta") or not s.get("vo"): continue
+                sid = s.get("id") or s.get("title", "")[:20]
+                vo = s["vo"]
+                def chk_take(j):
+                    t = str(j.get("take") or "").strip()
+                    if not 6 <= len(t.split()) <= 30: raise ValueError("the take must be 6-25 words")
+                    if " ".join(t.lower().split()) in " ".join(vo.lower().split()): raise ValueError("the take repeats the section")
+                try:
+                    t = str(llm.trace(f"take {sid}").chat_json("You write sharp, original one-sentence analysis. Reply with JSON only.",
+                            TAKE.format(n=25, vo=vo.replace('"', "'")), max_tokens=300, check=chk_take)["take"]).strip()
+                    if t[-1:] not in ".!?": t += "."
+                    vo = _insert_after(vo, 0.6, t); s["take"] = t; takes += 1
+                    log(f"  take {sid} ({llm.name}): {t}")
+                except Exception as e:
+                    if str(e) == "stopped": raise
+                    log(f"  take {sid} skipped ({str(e)[:120]})")
+                spots = [(1.0, " ".join(_sentences(vo)[-4:]))]
+                if len(vo.split()) > 220:
+                    ss = _sentences(vo); spots.append((0.3, " ".join(ss[:max(2, len(ss) // 3)])))
+                added = []
+                for frac, part in spots:
+                    def chk(j):
+                        t = str(j.get("joke") or "").strip()
+                        if not 4 <= len(t.split()) <= 22: raise ValueError("the joke must be 4-18 words")
+                    try:
+                        joke = str(llm.trace(f"punch-up {sid}").chat_json("You write dry, snarky one-liners. Reply with JSON only.",
+                                   PUNCH.format(n=18, vo=part.replace('"', "'")), max_tokens=300, check=chk)["joke"]).strip()
+                        if joke[-1:] not in ".!?": joke += "."
+                        vo = vo.rstrip() + " " + joke if frac >= 1.0 else _insert_after(vo, frac, joke)
+                        added.append(joke); jokes += 1
+                        log(f"  punch-up {sid} ({llm.name}): {joke}")
+                    except Exception as e:
+                        if str(e) == "stopped": raise
+                        log(f"  punch-up {sid} skipped ({str(e)[:120]})")
+                s["vo"] = vo
+                if added: s["jokes"] = added; s["punchline"] = added[0]
+    except Exception as e:
+        if str(e) == "stopped": raise
+        log(f"  explainer punch-up stopped early ({str(e)[:150]})")
+    n = sum(1 for s in plan["sections"] if not s.get("cta"))
+    log(f"Explainer voice: {takes} of {n} sections got our take, {jokes} jokes added (summary first, punch-up second)")
     return plan

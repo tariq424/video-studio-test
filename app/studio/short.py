@@ -441,8 +441,9 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
     def prepare(s):
         n = needs[s["id"]]; items = []; rej = []
         from . import source_visuals
-        source = source_visuals.make(cfg, job, sd, s, log)
+        source = _safe(log, f"{s['id']} source clip", lambda: source_visuals.make(cfg, job, sd, s, log))
         if source:
+            source = dict(source); source["src"] = _rel_sd(source.pop("path"), sd)
             items.append(source)
         elif s["id"] in demoted:   # the source clip failed: the beat gets back the stock set aside for it
             pick[s["id"]] = demoted.pop(s["id"])
@@ -506,7 +507,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         lines, k5, kill, failed = [], 0, 0, ([rung1] if why1 else [])
         for item in items:
             if item.get("rung") == "source":
-                lines.append(f"source evidence ({item['g']['media']} at {item['g']['timestamp']:.2f}s) beside original analysis / graphics")
+                lines.append(f"source clip, full frame ({item['type']} at {float(item.get('timestamp') or 0):.2f}s of the source, {item.get('tag', '')})")
         vb = {"g": False, "hard": False, "p": False, "pok": False, "capcut": "", "f": False}   # v2, once per beat: graphics tried / hard-failed, physics tried / fitted
         if v2:
             from . import capcut
@@ -1054,6 +1055,7 @@ def do_render(job, plan, cfg, meta, log, stop):
             line = line.strip()
             if line:
                 last = line; tail = (tail + [line])[-40:]
+                if "VS-MEDIA-ERROR" in line: log("  Remotion media error: " + line[line.index("VS-MEDIA-ERROR") + 15:][:300])
                 if not errline and re.search(r"\b\w*Error\b|error:", line) and "│" not in line and not line.lstrip().startswith("at "): errline = line[:300]
             if time.time() - t0 > 30 and last: log("  " + last[:160]); t0 = time.time()
             if stop(): p.kill(); raise RuntimeError("cancelled")

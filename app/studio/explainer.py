@@ -106,12 +106,15 @@ def _visual_bg(job, pub, v, slot, s, log):
             if _luma_image(src) < 6: log(f"  {v['id']}: image is black -> branded card"); return _card(title or s["vo"][:80])
             bg = {"type": "image", "src": _link(src, pub, "img")}
             if v.get("credit"): bg.update(fit="frame", credit=v.get("short_credit") or "")
+            if v.get("stock_src") == "source" and v.get("tag"): bg["tag"] = v["tag"]
             return bg
         d = media.dur(src) or 0.1
         if _luma_video(src, d / 2) < 6: log(f"  {v['id']}: clip is black -> branded card"); return _card(title or s["vo"][:80])
         rate = max(0.6, min(1.0, d / max(slot, 0.1)))
         bg = {"type": "video", "src": _link(src, pub, "vid"), "rate": round(rate, 3)}
         if d / rate < slot - 0.1: bg["freezeAt"] = round(max(0.1, d / rate - 0.12), 2)   # shorter even slowed: hold its last frame
+        if v.get("tag") and (v.get("stock_src") == "source" or v.get("tag") == "GENERATED · FLOW"): bg["tag"] = v["tag"]
+        log(f"  {v['id']}: video {src.name} ({d:.1f}s{', ' + v['tag'] if bg.get('tag') else ''}) in a {slot:.1f}s slot")
         return bg
     except Exception as e:
         log(f"  {v.get('id')}: {str(e)[:80]} -> branded card"); return _card(title or s["vo"][:80])
@@ -185,6 +188,7 @@ def render(job, plan, cfg, meta, log, stop=lambda: False, out_name=None):
         for line in p.stdout:
             line = line.strip()
             if line: last = line; tail = (tail + [line])[-40:]
+            if "VS-MEDIA-ERROR" in line: log("  Remotion media error: " + line[line.index("VS-MEDIA-ERROR") + 15:][:300])
             if time.time() - t0 > 60 and last: log("  " + last[:160]); t0 = time.time()
             if stop(): p.kill(); raise RuntimeError("cancelled")
         if p.wait() == 0: break

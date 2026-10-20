@@ -208,7 +208,7 @@ def _extract(job, req, dest, meta, log):
 
 
 def make(cfg, job, workspace, sec, log):
-    """-> graphic background item, or None so the usual ladder continues."""
+    """-> full-frame video (or screenshot image) item {"type", "path", ...}, or None so the usual ladder continues."""
     if not cfg.get("source_visuals", True):
         return None
     req = _request(sec)
@@ -236,6 +236,10 @@ def make(cfg, job, workspace, sec, log):
         stamp = [local.stat().st_size, local.stat().st_mtime_ns] if local.exists() else None
         key = hashlib.sha256(json.dumps([req, meta.get("webpage_url"), stamp], sort_keys=True).encode()).hexdigest()[:16]
         dest = directory / (key + (".png" if req["kind"] == "screenshot" else ".mp4"))
+        other = next((b for b, e in ledger.items() if b != bid and e.get("asset") == dest.name), None)
+        if other:
+            log(f"  {bid}: its matching source excerpt is already used by {other}; continuing visual ladder")
+            return None
         if not dest.exists():
             _extract(job, req, dest, meta, log)
         elif req["kind"] == "clip":
@@ -244,17 +248,21 @@ def make(cfg, job, workspace, sec, log):
             from PIL import Image
             with Image.open(dest) as image:
                 image.verify()
-        from . import physics, review
-        graphic = physics.synthetic_motion(sec) or {"kind": "headline", "kicker": "OUR ANALYSIS",
-                    "text": req["purpose"], "sub": "Source evidence alongside original commentary"}
         credit = str(meta.get("channel") or meta.get("uploader") or meta.get("title") or "Original source")
-        g = {"kind": "source_excerpt", "src": review.files_url(dest), "media": req["kind"],
-             "seconds": req["duration"], "credit": credit[:100], "purpose": req["purpose"],
-             "timestamp": req["start"], "graphic": graphic}
         ledger[bid] = {**req, "asset": dest.name, "credit": credit, "source_url": meta.get("webpage_url", ""),
                        "review": "Editorial use only; fair use and monetization are not guaranteed"}
         ledger_path.write_text(json.dumps(ledger, indent=2), encoding="utf-8")
-        return {"type": "graphic", "g": g, "rung": "source", "tag": ""}
+        tag = f"SOURCE · {credit[:40]}"
+        if req["kind"] == "clip":
+            # Full-frame video, the same item type as stock and Flow clips (copied into the render's public dir and
+            # played by <Vid>). It used to be a small picture-in-picture inside a graphic, shown for at most 3 s and
+            # then replaced by a synthetic graphic, so on screen it looked like the beat fell through to graphics.
+            secs = round(float(inspect_video(dest).get("duration") or req["duration"]), 2)
+            log(f"  {bid}: source clip ready: {dest.name} ({secs:.1f}s at {req['start']:.1f}s of the source), shown full frame")
+            return {"type": "video", "path": str(dest), "secs": secs, "rate": 1.0, "freeze": True, "tag": tag,
+                    "rung": "source", "credit": credit[:100], "timestamp": req["start"]}
+        return {"type": "image", "path": str(dest), "tag": tag, "rung": "source", "credit": credit[:100], "short_credit": credit[:40],
+                "timestamp": req["start"]}
     except Exception as error:
         if dest is not None:
             try:
@@ -266,13 +274,29 @@ def make(cfg, job, workspace, sec, log):
 
 
 def apply_long(job, plan, cfg, log):
+    """Explainer: at most one source clip per section, never the same excerpt twice. The clip becomes the visual's
+    footage (v['stock']), so it plays full frame like a stock clip, with a SOURCE tag."""
+    job = Path(job); used = set()
     for sec in plan["sections"]:
         for visual in sec.get("visuals", []):
+            if visual.get("stock_src") == "source":
+                used.add(visual.get("stock")); break
             if visual.get("stock_src") == "yours" or visual.get("edit_bgs") or visual.get("edit_clip"):
                 continue
-            item = make(cfg, job, Path(job) / "build", {**sec, "id": visual["id"],
-                        "source_visual": visual.get("source_visual")}, log)
-            if item:
-                visual.pop("stock", None)
-                visual.update(type="chart", no_stock=True, g=item["g"], tag=item["tag"],
-                              chart={"kind": "stat", "big": "SOURCE", "caption": item["g"]["purpose"]})
+            try:
+                item = make(cfg, job, job / "build", {**sec, "id": visual["id"], "source_visual": visual.get("source_visual")}, log)
+            except Exception as error:   # never stops the job
+                log(f"  {visual.get('id')}: source clip rung failed ({type(error).__name__}: {str(error)[:200]}); continuing visual ladder")
+                item = None
+            if not item:
+                continue
+            rel = str(Path(item["path"]).relative_to(job)).replace("\\", "/")
+            if rel in used:
+                log(f"  {visual['id']}: same source excerpt as an earlier section; not reused")
+                continue
+            used.add(rel)
+            for k in ("g", "chart", "illustration"):
+                visual.pop(k, None)
+            visual.update(type="motion" if item["type"] == "video" else "still", stock=rel, stock_src="source", no_stock=True,
+                          tag=item["tag"], credit=item.get("credit", ""), short_credit=item.get("short_credit", ""))
+            break   # one per section
