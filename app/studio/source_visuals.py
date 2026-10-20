@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -56,7 +57,8 @@ def _stream_range(url, start, duration, dest):
         media.ff(*(["-headers", hdr] if hdr else []), "-ss", max(0.0, start), "-i", stream, "-t", duration + 0.3, "-an",
                  "-c:v", "libx264", "-crf", 18, "-pix_fmt", "yuv420p", part, timeout=60)
     except subprocess.CalledProcessError as e:   # say WHY (HTTP 403, timeout, codec...), not just the command line
-        raise RuntimeError("ffmpeg could not read the stream: " + " ".join((e.stderr or e.stdout or "no output").split())[-300:])
+        err = re.sub(r"https?://\S+", "<url>", " ".join((e.stderr or e.stdout or "no output").split()))
+        raise RuntimeError("ffmpeg could not read the stream: " + err[-300:])
     if not part.is_file() or part.stat().st_size < 10000:
         raise RuntimeError("stream seek produced no video")
     return part

@@ -235,10 +235,14 @@ def generate(cfg, sd, sec, key, log, aspect="9:16"):
                                 page.evaluate("""() => { const t = Array.from(document.querySelectorAll('img, video')).filter(e => {
                                     const r = e.getBoundingClientRect(); return r.left > 240 && r.right < 1080 && r.width > 80 && r.height > 120; });
                                     if (t.length) (t[0].closest('a,button,[role=button],[tabindex]') || t[0]).click(); }""")
-                                page.wait_for_timeout(4000)
-                                body2 = page.locator("body").inner_text(timeout=3000)
-                                if re.search(r"(queue|processing|generating|%)", body2, re.I) and not [v for v in _videos(page) if v not in before]:
-                                    page.keyboard.press("Escape")   # still being made: close and look again later
+                                page.wait_for_timeout(5000)
+                                if not [v for v in _videos(page) if v not in before]:
+                                    try:
+                                        page.mouse.move(318, 200); page.wait_for_timeout(2500)   # hover can start a preview <video>
+                                    except Exception:
+                                        pass
+                                if not [v for v in _videos(page) if v not in before]:
+                                    page.keyboard.press("Escape")   # no player yet (still being made): close and look again later
                             except Exception:
                                 pass
                     fresh = [v for v in _videos(page) if v not in before]
@@ -254,8 +258,9 @@ def generate(cfg, sd, sec, key, log, aspect="9:16"):
                 media.ff("-i", tmp, "-an", "-c:v", "libx264", "-crf", 18, "-pix_fmt", "yuv420p", "-r", 30, out, timeout=180)
                 tmp.unlink(missing_ok=True)
             except Exception:
-                try:   # evidence for the next fix: what Flow's page looked like when it failed
+                try:   # evidence for the next fix: what Flow's page looked like when it failed (+ its HTML for selectors)
                     (out.parent / f"{key}_fail.png").write_bytes(page.screenshot(full_page=False))
+                    (out.parent / f"{key}_fail.html").write_text(page.content(), encoding="utf-8")
                 except Exception:
                     pass
                 raise
