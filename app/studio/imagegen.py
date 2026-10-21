@@ -15,7 +15,7 @@ Failures are logged and the ladder moves on (Flow is next). Not signed in or a C
 Gemini for the job (never automated); a usage-limit message cools it down for imagegen_cooldown_hours (default 6, saved
 across jobs). Each failure saves <key>_gemini_<step>_fail.png/.html for selector fixes.
 Settings: imagegen_on, gemini_profile ("" = the Flow profile), gemini_url, imagegen_timeout (240), imagegen_max_per_video (8),
-imagegen_cooldown_hours, imagegen_headless.
+imagegen_cooldown_hours, imagegen_headless (true), imagegen_delay_secs ([15, 30]: human pacing between requests).
 """
 import json
 import re
@@ -42,6 +42,22 @@ REFUSED = re.compile(r"(can.t (create|generate|make) (images|that|this)|couldn.t
                      r"against (my|our) (policies|guidelines)|unable to (create|generate))", re.I)
 
 _job_skip = {"why": ""}
+_last = {"t": 0.0}   # when Gemini last answered (any beat): requests are paced like a person, not a script
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+
+
+def _pause(cfg, log, why):
+    """Wait a human-looking 15-30 s (imagegen_delay_secs) since Gemini's last answer before the next request."""
+    import random
+    lo, hi = (cfg.get("imagegen_delay_secs") or [15, 30])[:2]
+    wait = random.uniform(float(lo), float(hi)) - (time.time() - _last["t"])
+    if wait > 0:
+        log(f"  gemini: pausing {wait:.0f}s before {why} (human pacing)")
+        time.sleep(wait)
+
+
+def _answered():
+    _last["t"] = time.time()
 
 
 def reset():
@@ -210,8 +226,11 @@ def _session(cfg, image, aspect, vo, out, timeout, log, evidence, extras=()):
     except ImportError:
         raise Skip("Playwright is not installed in this environment")
     with sync_playwright() as pw:
-        kw = dict(user_data_dir=str(prof), headless=bool(cfg.get("imagegen_headless", False)), accept_downloads=True,
+        headless = bool(cfg.get("imagegen_headless", True))   # no visible window (owner's choice 2026-10-21)
+        kw = dict(user_data_dir=str(prof), headless=headless, accept_downloads=True,
                   viewport={"width": 1440, "height": 900}, args=["--disable-blink-features=AutomationControlled"])
+        if headless:   # headless Chrome announces itself in its user agent; present as normal Chrome
+            kw["user_agent"] = UA
         if cfg.get("flow_chrome"): kw["executable_path"] = cfg["flow_chrome"]
         else: kw["channel"] = "chrome"
         context = pw.chromium.launch_persistent_context(**kw)
@@ -225,6 +244,7 @@ def _session(cfg, image, aspect, vo, out, timeout, log, evidence, extras=()):
             # 2-3: describe the screenshot and write the recreate prompt (or a prompt from the narration)
             step = "describe"
             n0 = len(_responses(page))
+            _pause(cfg, log, "this beat's first request")
             if image:
                 if not _upload(page, image): raise RuntimeError("Gemini's upload control was not found")
                 page.wait_for_timeout(4000)
@@ -233,7 +253,7 @@ def _session(cfg, image, aspect, vo, out, timeout, log, evidence, extras=()):
             else:
                 log("  gemini: no source screenshot; asking for a prompt from the narration")
                 _send(page, box, NARRATION + vo[:1200] + " " + NO_PEOPLE + " " + FORMAT)
-            answer = _wait_answer(page, n0, timeout, step)
+            answer = _wait_answer(page, n0, timeout, step); _answered()
             prompt = extract_prompt(answer)
             if not prompt: raise RuntimeError("no prompt found in Gemini's answer")
             log(f"  gemini: prompt ({len(prompt.split())} words): \"{prompt[:160]}...\"")
@@ -241,6 +261,7 @@ def _session(cfg, image, aspect, vo, out, timeout, log, evidence, extras=()):
             step = "generate"
             shape = "Tall vertical 9:16 portrait image." if aspect == "9:16" else "Wide horizontal 16:9 landscape image."
             box = _box(page)
+            _pause(cfg, log, "the image request")
             src = _ask_image(page, box, f"{GENERATE}{prompt} {shape} No text, letters, logos or brand names. No real or recognizable people.", timeout, step)
             # 5: download (Gemini's full-size download button first, else the image source)
             step = "download"
@@ -248,6 +269,7 @@ def _session(cfg, image, aspect, vo, out, timeout, log, evidence, extras=()):
             # extra images for a beat that needs more than one visual: same scene, another angle / a close-up (saves Flow credits)
             for k, extra in enumerate(extras):
                 try:
+                    _pause(cfg, log, f"image {k + 2}")
                     log(f"  gemini: image {k + 2}: {VARIANTS[k % len(VARIANTS)].split(',')[0].lower()}")
                     src = _ask_image(page, _box(page), f"{VARIANTS[k % len(VARIANTS)]} {shape} No text, letters, logos or brand names. No real or recognizable people.",
                                      timeout, "generate")
@@ -280,6 +302,7 @@ def _ask_image(page, box, text, timeout, step):
         if fresh and not _busy(page):
             page.wait_for_timeout(3000)
             fresh = [s for s in _big_images(page) if s not in before] or fresh
+            _answered()
             return fresh[-1]
     raise RuntimeError(f"no generated image after {timeout}s")
 

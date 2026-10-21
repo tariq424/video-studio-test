@@ -30,7 +30,7 @@ class GeminiAgainstAMockSite(unittest.TestCase):
         self.sd = self.root / "jobs" / "J" / "short"; self.sd.mkdir(parents=True)
         prof = self.root / "flow_profile"; prof.mkdir(); (prof / "First Run").write_text("")
         self.cfg = {"jobs_dir": str(self.root / "jobs"), "gemini_url": FIXTURE, "flow_chrome": CHROME,
-                    "imagegen_headless": True, "imagegen_timeout": 40}
+                    "imagegen_headless": True, "imagegen_timeout": 40, "imagegen_delay_secs": [0, 0]}
         from PIL import Image
         self.shot = self.root / "shot.png"; Image.new("RGB", (640, 360), "green").save(self.shot)
 
@@ -160,3 +160,22 @@ class WanGPOnDemand(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_pacing_waits_between_gemini_requests(monkeypatch):
+    from app.studio import imagegen
+    slept = []
+    monkeypatch.setattr(imagegen.time, "sleep", lambda s: slept.append(s))
+    imagegen._answered()
+    imagegen._pause({"imagegen_delay_secs": [15, 30]}, lambda m: None, "next")
+    assert slept and 14 <= slept[0] <= 30
+    slept.clear()
+    imagegen._last["t"] = 0
+    imagegen._pause({"imagegen_delay_secs": [15, 30]}, lambda m: None, "next")
+    assert not slept   # long idle already counts as the pause
+
+
+def test_gemini_defaults_headless_and_paced():
+    from app.studio import config
+    assert config.DEFAULTS["imagegen_headless"] is True
+    assert config.DEFAULTS["imagegen_delay_secs"] == [15, 30]

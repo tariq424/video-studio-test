@@ -25,7 +25,8 @@ DEFAULTS = {
     "imagegen_max_per_video": 8,      # beats per output that get Gemini images
     "imagegen_per_beat": 3,           # a beat that needs several visuals: the scene + another angle + a close-up (before Flow)
     "imagegen_cooldown_hours": 6,     # after a usage-limit message
-    "imagegen_headless": False,
+    "imagegen_headless": True,        # no visible Chrome window for Gemini (2026-10-21)
+    "imagegen_delay_secs": [15, 30],  # human pacing: a random 15-30 s between Gemini requests (one chat per beat)
     "source_snapshot_max_uses": 2,    # source screenshots taken just for describing (rung-2 clips/screenshots are reused free)
     # WanGP memory policy (wangp.py): never started with the job; launched for a generation, stopped right after
     "wangp_on_demand": True,
