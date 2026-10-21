@@ -1,11 +1,10 @@
-# One-time setup for a free AI video generator rung (vidgen.py): opens Chrome with that site's own profile.
-# Sign in, make one video by hand if the site asks you to accept terms, then close Chrome. Video Studio reuses the profile.
+# One-time setup for a free image generator rung (imagegen.py) or Flow: opens Chrome with that site's own profile.
+# Sign in, make one image by hand if the site asks you to accept terms, then close Chrome. Video Studio reuses the profile.
 # Close this Chrome window before running a job; two Chrome processes cannot share one profile.
-#   powershell -ExecutionPolicy Bypass -File scripts\vidgen-login.ps1 -Site meta     (meta | bing | sora | flow)
-param([ValidateSet('meta', 'bing', 'sora', 'flow')][string]$Site = 'meta')
+#   powershell -ExecutionPolicy Bypass -File scripts\imagegen-login.ps1 -Site meta     (bing | meta | flow)
+param([ValidateSet('bing', 'meta', 'flow')][string]$Site = 'bing')
 $ErrorActionPreference = 'Stop'
-$Urls = @{ meta = 'https://www.meta.ai/'; bing = 'https://www.bing.com/images/create?ctype=video';
-           sora = 'https://sora.chatgpt.com/'; flow = 'https://labs.google/fx/tools/flow' }
+$Urls = @{ bing = 'https://www.bing.com/images/create'; meta = 'https://www.meta.ai/'; flow = 'https://labs.google/fx/tools/flow' }
 $Profile = "F:\videos_test\${Site}_profile"
 New-Item -ItemType Directory -Force $Profile | Out-Null
 $Chrome = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",

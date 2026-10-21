@@ -374,7 +374,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
     Also writes short/fallback/chains.json (every beat's decision chain: stock found, what was tried and why it failed, what is used)
     for the debugger and the trace. dbg (debug.Debugger): safe points for 'Pause now'; with breakpoints on, beats run one at a time
     and each is checked after its visuals are decided (normal runs keep the batched GPU order)."""
-    from . import flow as _flow, vidgen as _vidgen; _flow.reset(); _vidgen.reset()   # job-wide skips start clear for every run
+    from . import flow as _flow, imagegen as _imagegen; _flow.reset(); _imagegen.reset()   # job-wide skips start clear for every run
     from . import depth, coherence, photos, ladder, cloudgen, illustrate, physics
     v2 = bool(cfg.get("ladder_v2"))   # visual ladder v2 (graphics / physics / CapCut); off = the ladder below, unchanged
     sd = job / "short"; fd = sd / "fallback"; fd.mkdir(parents=True, exist_ok=True)
@@ -426,9 +426,9 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         c = chs.get(sec["id"], {})
         return {"bid": sec["id"], "n": int(sec["id"][1:]) + 1, "vo": sec["vo"], "stock_found": c.get("stock_found", len(pick.get(sec["id"], []))),
                 "uses": c.get("uses", []), "failed": c.get("failed", [])}
-    if v2: log("Visual ladder v2 per beat (1 stock -> 2 source clip -> 3 source parallax (snapshot + OCR) -> 4 Bing Video -> 5 Meta AI video -> "
-               "6 Sora -> 7 Google Flow (paid, last) -> real photos -> cloud still -> 8 WanGP (on demand) -> 9 physics -> 10 Remotion graphics -> "
-               "CapCut -> parallax -> illustration -> 11 headline):")
+    if v2: log("Visual ladder v2 per beat (1 stock -> 2 source clip -> 3 image generators (Bing Image -> Meta AI: describe the source "
+               "screenshot, generate a new image) -> 4 source parallax (rembg + Remotion) -> 5 Google Flow (paid, last) -> real photos -> "
+               "6 WanGP (on demand) -> 7 physics -> 8 Remotion graphics -> illustration -> 9 headline):")
     else: log("Visual ladder per beat (1 stock/photo -> 2 cloud still -> 3 WanGP still -> 4 parallax -> 5 illustration / silhouette -> 6 reconstruction / headline; animate on click):")
     for s in beats:   # beats step 1 covered on its own
         if s["id"] in base_needs: continue
@@ -455,28 +455,25 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
             _safe(log, f"{s['id']} stock", lambda: stock_beat(s))
             return
         snap = None
-        if v2 and cfg.get("source_parallax", True):   # rung 3: Source Parallax (snapshot + OCR + parallax)
-            snap = _safe(log, f"{s['id']} source snapshot", lambda: source_visuals.snapshot(cfg, job, sd, s, log, source_item=raw_source))
-            if snap and (not source or source["type"] == "image") and (len(items) < n or source):
-                lay = _safe(log, f"{s['id']} source parallax", lambda: depth.layers(snap["path"], sd / "source_excerpts" / f"{s['id']}_px", log))
+        if v2 and len(items) < n and cfg.get("imagegen_on", True):   # rung 3: free image generators (describe the source screenshot -> new image)
+            from . import imagegen
+            snap = _safe(log, f"{s['id']} source screenshot", lambda: source_visuals.snapshot(cfg, job, sd, s, log, source_item=raw_source))
+            res = _safe(log, "image generators", lambda: imagegen.generate(cfg, sd, s, s["id"], log, aspect="9:16",
+                                                                              image=(snap or {}).get("path")), (None, None, None))
+            img, site, _p = res or (None, None, None)
+            if img:   # rung 4: source parallax (rembg cut-out + Remotion 2.5D)
+                lay = _safe(log, f"{s['id']} parallax", lambda: depth.cutout_layers(img, sd / "imagegen" / f"{s['id']}_px", log))
                 if lay:
-                    px = {"type": "layers", "layers": [_rel_sd(p_, sd) for p_ in lay], "rung": "source_parallax",
-                          "tag": (source or {}).get("tag") or "SOURCE · PARALLAX"}
-                    if source:   # the static screenshot becomes the same screenshot in 2.5D
-                        items[items.index(source)] = px
-                    else:
-                        items.append(px)
-                    log(f"  {s['id']}: source parallax from the {snap['from']} ({len(lay)} layers)")
-        if v2 and len(items) < n:   # rungs 4-7: free AI video generators first, Google Flow (paid) last
-            from . import vidgen
-            ocr_prompt = (snap or {}).get("prompt") or None
-            if ocr_prompt: log(f"  {s['id']}: AI video prompt = the text read from the source ({len(ocr_prompt.split())} words), snapshot as anchor")
-            res = _safe(log, "AI video", lambda: vidgen.generate(cfg, sd, s, s["id"], log, aspect="9:16", prompt=ocr_prompt,
-                                                                   image=(snap or {}).get("path") if ocr_prompt else None), (None, None))
-            clip, site = res or (None, None)
+                    items.append({"type": "layers", "layers": [_rel_sd(p_, sd) for p_ in lay], "tag": imagegen.tag(site),
+                                  "rung": "imagegen", "site": site, "described": bool(snap)})
+                else:
+                    items.append({"type": "image", "src": _rel_sd(img, sd), "tag": imagegen.tag(site), "rung": "imagegen", "site": site})
+        if v2 and cfg.get("flow_on", True) and len(items) < n:   # rung 5: Google Flow (paid credits): the last resort for AI video
+            from . import flow
+            clip = _safe(log, "flow", lambda: flow.generate(cfg, sd, s, f"{s['id']}_flow", log, aspect="9:16"))
             if clip:
                 items.append({"type": "video", "src": _rel_sd(clip, sd), "secs": round(media.dur(clip), 2), "rate": 1.0, "freeze": True,
-                              "tag": vidgen.tag(site), "rung": site, **({"ocr_prompt": True} if ocr_prompt else {})})
+                              "tag": "GENERATED · FLOW", "rung": "flow"})
         bd = s.get("backdrop") or {"kind": "headline", "kicker": "", "text": s["vo"][:60], "sub": ""}
         if bd.get("kind") == "map" and len(items) < n: items.append({"type": "graphic", "g": bd, "rung": "map"})
         have = len(pick.get(s["id"], []))
@@ -527,10 +524,11 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         for item in items:
             if item.get("rung") == "source":
                 lines.append(f"source clip, full frame ({item['type']} at {float(item.get('timestamp') or 0):.2f}s of the source, {item.get('tag', '')})")
-            elif item.get("rung") == "source_parallax":
-                lines.append(f"source parallax ({item.get('tag', '')})")
-            elif item.get("rung") in ("bing", "meta", "sora", "flow"):
-                lines.append(f"AI video from {item['rung']}" + (" (prompt read from the source by OCR)" if item.get("ocr_prompt") else ""))
+            elif item.get("rung") == "imagegen":
+                lines.append(f"new image from {item.get('site')}" + (" (described from the source screenshot)" if item.get("described") else "")
+                             + (", rembg parallax" if item["type"] == "layers" else ""))
+            elif item.get("rung") == "flow":
+                lines.append("Google Flow clip")
         vb = {"g": False, "hard": False, "p": False, "pok": False, "capcut": "", "f": False}   # v2, once per beat: graphics tried / hard-failed, physics tried / fitted
         if v2:
             from . import capcut

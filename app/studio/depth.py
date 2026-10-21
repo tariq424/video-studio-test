@@ -112,3 +112,43 @@ def layers(still, out_prefix, log, size=(1080, 1920)):
         lay = im.copy(); lay.putalpha(m)
         p = Path(f"{out_prefix}_L{i}.png"); lay.save(p); paths.append(p)
     return paths
+
+
+_rembg = {"session": None}
+
+
+def cutout_layers(still, out_prefix, log, size=(1080, 1920)):
+    """Source Parallax (rung 4): the generated image cut with rembg into a background (subject painted out) and the
+    subject as one rigid RGBA layer, for Remotion's 2.5D parallax. Falls back to depth layers when rembg is missing.
+    The rembg model (u2net, ~170 MB) is downloaded once into <project>/models/u2net."""
+    import os
+    from PIL import Image, ImageFilter
+    try:
+        os.environ.setdefault("U2NET_HOME", str(config.ROOT / "models" / "u2net"))
+        from rembg import remove, new_session
+    except ImportError:
+        log("  parallax: rembg is not installed; using depth layers")
+        return layers(still, out_prefix, log, size)
+    im = Image.open(still).convert("RGB")
+    W, H = size; r = max(W / im.width, H / im.height)
+    im = im.resize((int(im.width * r + 0.5), int(im.height * r + 0.5)), Image.LANCZOS)
+    x0, y0 = (im.width - W) // 2, (im.height - H) // 2; im = im.crop((x0, y0, x0 + W, y0 + H))
+    if _rembg["session"] is None:
+        _rembg["session"] = new_session("u2net")
+    fg = remove(im, session=_rembg["session"])   # RGBA, alpha = subject
+    alpha = np.asarray(fg.split()[-1], dtype=np.float32) / 255
+    share = float((alpha > 0.5).mean())
+    if share < 0.02 or share > 0.9:   # nothing (or everything) is "subject": a cut-out would look wrong
+        log(f"  parallax: rembg found no clear subject ({share:.0%} of the frame); using depth layers")
+        return layers(still, out_prefix, log, size)
+    hole = Image.fromarray(((alpha > 0.3) * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(21))
+    keep = np.asarray(Image.eval(hole, lambda v: 255 - v), dtype=np.float32) / 255
+    a = np.asarray(im, dtype=np.float32)
+    bl = lambda x: np.asarray(Image.fromarray(x.clip(0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(40)), dtype=np.float32)
+    num = np.stack([bl(a[..., c] * keep) for c in range(3)], -1); den = bl(keep * 255)[..., None] / 255 + 1e-3
+    bg = np.where(np.asarray(hole)[..., None] > 127, num / den, a)
+    p0, p1 = Path(f"{out_prefix}_L0.jpg"), Path(f"{out_prefix}_L1.png")
+    Image.fromarray(bg.clip(0, 255).astype(np.uint8)).save(p0, "JPEG", quality=92)
+    fg.save(p1)
+    log(f"  parallax: rembg cut-out ({share:.0%} of the frame is the subject) over a filled background")
+    return [p0, p1]

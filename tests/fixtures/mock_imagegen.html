@@ -1,0 +1,31 @@
+<!doctype html><html><body>
+<!-- A stand-in for Bing Image Creator / Meta AI: upload button, prompt box, streamed text answer or generated images. -->
+<div id="feed"></div>
+<button aria-label="Upload image" id="up">Upload image</button><input type="file" id="file" style="display:none">
+<textarea placeholder="Describe the image you want to create"></textarea>
+<button aria-label="Create" id="go">Create</button>
+<script>
+let uploaded = false;
+document.getElementById('up').onclick = () => document.getElementById('file').click();
+document.getElementById('file').onchange = () => { uploaded = true; };
+document.getElementById('go').onclick = () => {
+  const t = document.querySelector('textarea').value; const feed = document.getElementById('feed');
+  const q = document.createElement('p'); q.textContent = t; feed.appendChild(q);
+  if (/^Describe/.test(t)) {
+    if (!uploaded) { const e = document.createElement('p'); e.textContent = 'Please upload an image first please'; feed.appendChild(e); return; }
+    const words = 'The image shows a golden retriever sitting upright on a sunlit lawn in a park with trees behind it, soft warm afternoon light, shallow depth of field, the dog looks calm and attentive with its tongue slightly out, photographed at eye level.'.split(' ');
+    const p = document.createElement('p'); feed.appendChild(p); let i = 0;
+    const iv = setInterval(() => { p.textContent += (i ? ' ' : '') + words[i++]; if (i >= words.length) clearInterval(iv); }, 60);
+  } else if (/^Generate/.test(t)) {
+    if (/BLOCKME/.test(t)) { const e = document.createElement('p'); e.textContent = 'Content warning: this prompt was blocked'; feed.appendChild(e); return; }
+    setTimeout(() => {
+      for (let k = 0; k < 4; k++) {
+        const c = document.createElement('canvas'); c.width = 768; c.height = 1024; const g = c.getContext('2d');
+        g.fillStyle = ['#3a6','#a63','#36a','#a36'][k]; g.fillRect(0, 0, 768, 1024); g.fillStyle = '#fff'; g.beginPath(); g.arc(384, 520, 200, 0, 7); g.fill();
+        const img = new Image(); img.style.width = '300px'; img.src = c.toDataURL('image/png'); feed.appendChild(img);
+      }
+    }, 2500);
+  }
+  document.querySelector('textarea').value = '';
+};
+</script></body></html>

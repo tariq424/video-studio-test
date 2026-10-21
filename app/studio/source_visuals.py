@@ -309,11 +309,11 @@ def apply_long(job, plan, cfg, log):
 
 
 def snapshot(cfg, job, workspace, sec, log, source_item=None):
-    """Source Parallax rung (v2 rung 3) input: one still of the source at the beat's matched moment, plus any prompt text
-    baked into it (OCR). -> {"path", "ocr", "prompt", "engine", "from"} or None.
+    """Image-generator rung (v2 rung 3) input: one still of the source at the beat's matched moment, which the generator
+    describes and then re-creates as a new image. -> {"path", "from"} or None.
     The still is the rung-2 screenshot, else a frame of the rung-2 clip, else a fresh screenshot at the matched caption cue
     (its own budget: source_snapshot_max_uses, default 2 per output). Never guesses a timestamp."""
-    if not cfg.get("source_visuals", True) or not cfg.get("source_parallax", True):
+    if not cfg.get("source_visuals", True):
         return None
     job, workspace = Path(job), Path(workspace)
     directory = workspace / "source_excerpts"
@@ -354,13 +354,5 @@ def snapshot(cfg, job, workspace, sec, log, source_item=None):
     except Exception as error:
         log(f"  {bid}: source snapshot unavailable ({' '.join(str(error).split())[:300]}); continuing visual ladder")
         return None
-    from . import ocr
-    text, engine = ocr.read(still, cfg, log)
-    prompt_text = ocr.prompt_from(text)
-    if prompt_text:
-        log(f"  {bid}: OCR ({engine}) found a prompt in the {origin}: \"{prompt_text[:120]}...\" ({len(prompt_text.split())} words)")
-    elif text.strip():
-        log(f"  {bid}: OCR ({engine}) read {len(text.split())} words in the {origin}, no prompt paragraph")
-    else:
-        log(f"  {bid}: OCR ({engine}): no text in the {origin}")
-    return {"path": str(still), "ocr": text, "prompt": prompt_text, "engine": engine, "from": origin}
+    log(f"  {bid}: source screenshot for the image generators: {origin}")
+    return {"path": str(still), "from": origin}

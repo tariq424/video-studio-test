@@ -320,19 +320,19 @@ def do_stills(job, plan, cfg, wg, log, stop):
     d = job / "stills"; d.mkdir(exist_ok=True); seed = 1000; n = 0
     todo = [(v, vo_slice(plan, s, v) if cfg.get("ladder_v2") else s.get("vo", "")) for s in plan["sections"] for v in s["visuals"] if v["type"] == "still" and not v.get("stock")]
     sec_of = {v["id"]: s for s in plan["sections"] for v in s["visuals"]}
-    ocr_cache = {}
-    def section_ocr(sec):
-        """The prompt text read (OCR) from a frame of this section's source clip, with that frame as the anchor image."""
-        if sec["id"] in ocr_cache: return ocr_cache[sec["id"]]
+    snap_cache = {}
+    def section_snapshot(sec):
+        """A frame of this section's source clip, for the image generators to describe (rung 3)."""
+        if sec["id"] in snap_cache: return snap_cache[sec["id"]]
         res = None
         sv = next((x for x in sec["visuals"] if x.get("stock_src") == "source" and x.get("stock")), None)
-        if sv and cfg.get("source_parallax", True):
+        if sv:
             from . import source_visuals
             clip = job / sv["stock"]
             item = {"type": "video" if clip.suffix == ".mp4" else "image", "path": str(clip), "secs": media.dur(clip) if clip.suffix == ".mp4" else 0}
             try: res = source_visuals.snapshot(cfg, job, _ws(job), {"id": sec["id"]}, log, source_item=item)
-            except Exception as e: log(f"  {sec['id']}: source snapshot failed ({str(e)[:100]})")
-        ocr_cache[sec["id"]] = res
+            except Exception as e: log(f"  {sec['id']}: source screenshot failed ({str(e)[:100]})")
+        snap_cache[sec["id"]] = res
         return res
     from .pipeline import progress
     for i, (v, vo) in enumerate(todo):
@@ -340,20 +340,32 @@ def do_stills(job, plan, cfg, wg, log, stop):
         seed += 1; out = d / f"{v['id']}.jpg"
         if out.exists(): continue
         if stop(): raise RuntimeError("cancelled")
-        if cfg.get("ladder_v2"):   # AI video: free generators first (Bing, Meta AI, Sora), Google Flow (paid) last; any failure falls through
-            from . import vidgen
-            snap = section_ocr(sec_of[v["id"]]) if v["id"] in sec_of else None
-            ocr_prompt = (snap or {}).get("prompt") or None
-            if ocr_prompt: log(f"  {v['id']}: AI video prompt = the text read from the source ({len(ocr_prompt.split())} words)")
-            try: clip, site = vidgen.generate(cfg, _ws(job), {"id": v["id"], "vo": vo, "still_prompt": v.get("prompt", ""), "queries": v.get("queries") or []},
-                                              "L_" + v["id"], log, aspect="16:9", prompt=ocr_prompt, image=(snap or {}).get("path") if ocr_prompt else None)
+        if cfg.get("ladder_v2") and cfg.get("imagegen_on", True):   # rung 3: free image generators, rung 4: rembg parallax
+            from . import imagegen, depth
+            snap = section_snapshot(sec_of[v["id"]]) if v["id"] in sec_of else None
+            beat = {"id": v["id"], "vo": vo, "still_prompt": v.get("prompt", ""), "queries": v.get("queries") or []}
+            try: img, site, _p = imagegen.generate(cfg, _ws(job), beat, "L_" + v["id"], log, aspect="16:9", image=(snap or {}).get("path"))
             except Exception as e:
                 if str(e) == "cancelled": raise
-                log(f"  {v['id']}: AI video failed ({str(e)[:100]}); next rung"); clip, site = None, None
+                log(f"  {v['id']}: image generators failed ({str(e)[:100]}); next rung"); img = None
+            if img:
+                shutil.copy(img, out); v["tag"] = imagegen.tag(site); v.pop("g", None)
+                try:
+                    lay = depth.cutout_layers(out, d / f"{v['id']}_px", log, size=(1920, 1080))
+                    v["layers"] = [str(Path(x).relative_to(job)).replace("\\", "/") for x in lay]
+                except Exception as e: log(f"  {v['id']}: parallax failed ({str(e)[:100]}); the image is shown as a still")
+                log(f"  {v['id']}: new image from {site}" + (" (described from the source)" if snap else "")); n += 1; continue
+        if cfg.get("ladder_v2") and cfg.get("flow_on", True):   # rung 5: Google Flow (paid credits), last resort for AI video
+            from . import flow
+            try: clip = flow.generate(cfg, _ws(job), {"id": v["id"], "vo": vo, "still_prompt": v.get("prompt", ""), "queries": v.get("queries") or []},
+                                      "L_" + v["id"], log, aspect="16:9")
+            except Exception as e:
+                if str(e) == "cancelled": raise
+                log(f"  {v['id']}: flow failed ({str(e)[:100]}); next rung"); clip = None
             if clip:
                 md = job / "motion"; md.mkdir(exist_ok=True)
-                shutil.copy(clip, md / f"{v['id']}.mp4"); v["type"] = "motion"; v["tag"] = vidgen.tag(site); v.pop("g", None)
-                log(f"  {v['id']}: AI video clip from {site}"); n += 1; continue
+                shutil.copy(clip, md / f"{v['id']}.mp4"); v["type"] = "motion"; v["tag"] = "GENERATED · FLOW"; v.pop("g", None)
+                log(f"  {v['id']}: Google Flow clip"); n += 1; continue
         if cloud_still(cfg, job, v, vo, log): continue   # cloud first
         if cfg.get("ladder_v2"):   # v2: WanGP still for atmospheric beats, then graphics -> physics -> illustration -> headline
             from . import illustrate

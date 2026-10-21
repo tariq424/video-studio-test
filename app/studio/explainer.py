@@ -87,6 +87,8 @@ def _visual_bg(job, pub, v, slot, s, log):
     title = s.get("title") or ""
     if v.get("g") and not v.get("edit_clip"):   # illustration / silhouette / card / simulation: drawn live
         return {"type": "graphic", "g": v["g"], **({"tag": v["tag"]} if v.get("tag") else {})}
+    if v.get("layers") and not v.get("edit_clip") and all((job / x).is_file() for x in v["layers"]):   # rembg parallax of a generated image
+        return {"type": "layers", "layers": [_link(job / x, pub, "img") for x in v["layers"]], **({"tag": v["tag"]} if v.get("tag") else {})}
     try:
         if v.get("edit_clip") and (job / v["edit_clip"]).exists(): src = job / v["edit_clip"]; kind = "video"
         elif v.get("stock"):
@@ -106,7 +108,7 @@ def _visual_bg(job, pub, v, slot, s, log):
             if _luma_image(src) < 6: log(f"  {v['id']}: image is black -> branded card"); return _card(title or s["vo"][:80])
             bg = {"type": "image", "src": _link(src, pub, "img")}
             if v.get("credit"): bg.update(fit="frame", credit=v.get("short_credit") or "")
-            if v.get("stock_src") == "source" and v.get("tag"): bg["tag"] = v["tag"]
+            if v.get("tag") and (v.get("stock_src") == "source" or str(v["tag"]).startswith("GENERATED · ")): bg["tag"] = v["tag"]
             return bg
         d = media.dur(src) or 0.1
         if _luma_video(src, d / 2) < 6: log(f"  {v['id']}: clip is black -> branded card"); return _card(title or s["vo"][:80])

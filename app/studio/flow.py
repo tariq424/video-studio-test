@@ -1,4 +1,4 @@
-"""Google Flow rung (visual ladder v2, rung 7: the LAST AI video generator, after the free ones in vidgen.py; paid credits).
+"""Google Flow rung (visual ladder v2, rung 5: the last resort for AI video, after the free image generators; paid credits).
 
 Drives Google Flow (labs.google) in a dedicated, signed-in Chrome profile with Playwright: types a visual prompt for the
 beat, waits for the generated clip and downloads it. Any failure (Playwright missing, profile not signed in, the page
