@@ -16,15 +16,14 @@ DEFAULTS = {
     "flow_max_per_video": 4,          # Flow clips per output (credits)
     "flow_headless": False,
     "flow_auto_approve": True,        # click Flow's "Approve" (spend the quoted credits) for each clip; never "Always approve"
-    # free image generators (imagegen.py, rung 3): describe the source screenshot, generate a new image; then rembg parallax (rung 4)
-    # each site needs scripts\imagegen-login.ps1 -Site bing|meta once
+    # image generator (imagegen.py, rung 3): Gemini describes the source screenshot, writes a prompt, generates the image;
+    # then rembg parallax (rung 4). Uses the Google-signed-in Flow profile unless gemini_profile is set.
     "imagegen_on": True,
-    "imagegen_order": ["bing", "meta"],
-    "imagegen_bing_on": True,
-    "imagegen_meta_on": True,
+    "gemini_profile": "",
+    "gemini_url": "https://gemini.google.com/app",
     "imagegen_timeout": 240,
-    "imagegen_max_per_video": 8,      # images per site per output
-    "imagegen_cooldown_hours": 6,     # after a rate-limit / quota message
+    "imagegen_max_per_video": 8,      # Gemini images per output
+    "imagegen_cooldown_hours": 6,     # after a usage-limit message
     "imagegen_headless": False,
     "source_snapshot_max_uses": 2,    # source screenshots taken just for describing (rung-2 clips/screenshots are reused free)
     # WanGP memory policy (wangp.py): never started with the job; launched for a generation, stopped right after

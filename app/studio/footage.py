@@ -558,6 +558,8 @@ def long_broll(job, plan, cfg, log, stop):
         phases = coherence.beat_phases(plan["sections"])
         for s, v in miss:
             if stop(): raise RuntimeError("cancelled")
+            if cfg.get("ladder_v2"):   # v2 has no real-photo rung: the shot goes down the stills ladder (Gemini image -> Flow -> ...)
+                v["type"] = "still"; v["v2"] = "image ladder"; continue
             i = k.get(s["id"], 0); k[s["id"]] = i + 1
             nm = v["subject"]["name"]
             if nm not in pics:

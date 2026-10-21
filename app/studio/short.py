@@ -426,9 +426,9 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         c = chs.get(sec["id"], {})
         return {"bid": sec["id"], "n": int(sec["id"][1:]) + 1, "vo": sec["vo"], "stock_found": c.get("stock_found", len(pick.get(sec["id"], []))),
                 "uses": c.get("uses", []), "failed": c.get("failed", [])}
-    if v2: log("Visual ladder v2 per beat (1 stock -> 2 source clip -> 3 image generators (Bing Image -> Meta AI: describe the source "
-               "screenshot, generate a new image) -> 4 source parallax (rembg + Remotion) -> 5 Google Flow (paid, last) -> real photos -> "
-               "6 WanGP (on demand) -> 7 physics -> 8 Remotion graphics -> illustration -> 9 headline):")
+    if v2: log("Visual ladder v2 per beat (1 stock -> 2 source clip -> 3 image generator (Gemini: describe the source screenshot, "
+               "write a prompt, generate a new image) -> 4 source parallax (rembg + Remotion) -> 5 Google Flow (paid, last) -> "
+               "6 WanGP (on demand) -> 7 physics -> 8 Remotion graphics -> 9 headline card):")
     else: log("Visual ladder per beat (1 stock/photo -> 2 cloud still -> 3 WanGP still -> 4 parallax -> 5 illustration / silhouette -> 6 reconstruction / headline; animate on click):")
     for s in beats:   # beats step 1 covered on its own
         if s["id"] in base_needs: continue
@@ -481,7 +481,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         if s["id"] not in base_needs: why1 = ""   # stock covers this beat; the other treatments are made for the review menu
         act = physics.action(s)[0] if v2 else ""   # v2: a beat describing an action is animated (physics / graphics / illustration), never a still
         if s.get("subject") and act: why1 = f"action beat ({act}): a still photo can't show it"
-        elif s.get("subject") and len(items) < n and not source:   # a beat with its source clip needs no photo search
+        elif s.get("subject") and len(items) < n and not source and not v2:   # (v2 has no real-photo rung) a beat with its source clip needs no photo search
             inside = s["subject"].get("interior") or re.search(r"\b(cockpit|flight deck|pilots?|captain)\b", " ".join(s["queries"]), re.I)
             bp = phases.get(s["id"], ""); pics = []
             if inside: why1 = "inside the aircraft: no real photo of it"
@@ -676,9 +676,9 @@ def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill,
     5. physics = DATA PROVIDER: when the slot describes physical motion it returns a payload (real data, the narration's numbers,
        the script's map coordinates, or a labelled synthetic path), saved to short/physics/<slot>.json
     6. Remotion graphics: draws that payload as a motion-graphics clip; without a payload, a template / Claude composition
-    7. CapCut (hard failures)   8. parallax   9. illustration / silhouette   10. headline card
+    7. CapCut (hard failures)   8. parallax   9. headline card
     Every rung is isolated (_safe): a failure is logged and the next rung runs."""
-    from . import graphics, physics, capcut, illustrate
+    from . import graphics, physics, capcut
     payload = None
     if cfg.get("physics_auto", True) and not vb["p"]:   # 5. physics -> data
         vb["p"] = True
@@ -701,11 +701,6 @@ def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill,
                     "textbg": True, "tag": tag, "rung": "simulation"}
         chain.append("graphics (physics payload, drawn live)")   # pre-render failed: the final render draws the same spec
         return {"type": "graphic", "g": payload["spec"], "tag": tag, "rung": "simulation"}
-    ac = _safe(log, "illustration", lambda: illustrate.aircraft_for(s, pos))
-    if ac and ac["type"] == "fighter" and re.search(illustrate.FIGHTER, physics.slot_text(s.get("vo", ""), pos), re.I):
-        # the slot's narration names fighters ("scrambled F-35s"): the fighter drawing IS the specific picture; a text card isn't
-        ill = _safe(log, "illustration", lambda: illustrate.pick(s, ents, phases.get(s["id"], ""), kill, pos=pos))
-        if ill and ill["g"].get("aircraft") == "fighter": chain.append(f"{ill['rung']} (fighters named)"); return ill
     if not vb["g"]:   # 6. Remotion graphics (template, else Claude-generated)
         vb["g"] = True
         g5 = _safe(log, "graphics", lambda: graphics.make(cfg, sd, s, sl["key"], log)) or {"ok": False, "why": "crashed (see log)", "hard": True, "how": "?"}
@@ -727,9 +722,7 @@ def _v2_rungs(cfg, sd, s, sl, r, ents, phases, bd, vb, chain, why, failed, kill,
         if lay:
             chain.append("parallax")
             return {"type": "layers", "layers": [_rel_sd(p, sd) for p in lay], "tag": "GENERATED · PARALLAX", "rung": "parallax"}
-    ill = _safe(log, "illustration", lambda: illustrate.pick(s, ents, phases.get(s["id"], ""), kill, pos=pos))   # 9. illustration / silhouette
-    if ill: chain.append(ill["rung"]); return ill
-    chain.append("headline")   # 10. headline card
+    chain.append("headline")   # 9. headline card (the illustration rung was removed 2026-10-21)
     return {"type": "graphic", "g": bd if bd.get("kind") == "headline" else {"kind": "headline", "kicker": "", "text": s["vo"][:70], "sub": ""}, "rung": "headline"}
 
 def rotate_still(src, deg, nose, dst):

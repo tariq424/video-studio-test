@@ -19,8 +19,8 @@ def _have_playwright():
         return False
 
 
-class ImagegenAgainstAMockSite(unittest.TestCase):
-    """Runs the real Playwright automation (upload -> describe -> generate -> download) against a local stand-in page."""
+class GeminiAgainstAMockSite(unittest.TestCase):
+    """The real Playwright automation (upload -> describe + prompt -> generate -> download) against a local Gemini stand-in."""
 
     def setUp(self):
         if not _have_playwright():
@@ -28,67 +28,66 @@ class ImagegenAgainstAMockSite(unittest.TestCase):
         imagegen.reset()
         self.root = Path(tempfile.mkdtemp())
         self.sd = self.root / "jobs" / "J" / "short"; self.sd.mkdir(parents=True)
-        for site in ("bing", "meta"):
-            prof = self.root / f"{site}_profile"; prof.mkdir(); (prof / "First Run").write_text("")
-        self.cfg = {"jobs_dir": str(self.root / "jobs"), "imagegen_bing_url": FIXTURE, "imagegen_meta_url": FIXTURE,
-                    "flow_chrome": CHROME, "imagegen_headless": True, "imagegen_timeout": 40}
+        prof = self.root / "flow_profile"; prof.mkdir(); (prof / "First Run").write_text("")
+        self.cfg = {"jobs_dir": str(self.root / "jobs"), "gemini_url": FIXTURE, "flow_chrome": CHROME,
+                    "imagegen_headless": True, "imagegen_timeout": 40}
         from PIL import Image
         self.shot = self.root / "shot.png"; Image.new("RGB", (640, 360), "green").save(self.shot)
 
-    def test_describe_then_generate_then_download(self):
+    def test_screenshot_described_then_generated_then_downloaded(self):
         logs = []
         img, site, prompt = imagegen.generate(self.cfg, self.sd, {"id": "b0", "vo": "x"}, "b0", logs.append, image=self.shot)
-        self.assertEqual(site, "bing")
-        self.assertTrue(prompt.startswith(imagegen.GENERATE + "The image shows a golden retriever"))
-        self.assertLessEqual(len(prompt), imagegen.BING_MAX)
+        self.assertEqual(site, "gemini")
+        self.assertTrue(prompt.startswith("A photorealistic golden retriever"), prompt)
         from PIL import Image
         with Image.open(img) as im:
             self.assertGreaterEqual(min(im.size), 300)
-        self.assertTrue(any("description (" in l for l in logs))
+        self.assertTrue(any("screenshot uploaded" in l for l in logs))
+        self.assertEqual(imagegen.tag(), "GENERATED · GEMINI")
 
-    def test_refused_prompt_falls_to_the_next_site(self):
+    def test_without_a_screenshot_the_narration_is_used(self):
+        img, site, prompt = imagegen.generate(self.cfg, self.sd, {"id": "b1", "vo": "A laptop reads text from images."}, "b1", print)
+        self.assertTrue(prompt.startswith("A wide cinematic shot of a quiet laptop"))
+        self.assertTrue(Path(img).is_file())
+
+    def test_refusal_falls_through_with_evidence(self):
         logs = []
-        with patch.object(imagegen, "GENERATE", "Generate BLOCKME "):
-            img, site, _ = imagegen.generate({**self.cfg, "imagegen_order": ["bing"]}, self.sd, {"id": "b1"}, "b1", logs.append, image=self.shot)
-        self.assertIsNone(img)
-        self.assertTrue(any("refused" in l for l in logs))
-        self.assertTrue((self.sd / "imagegen" / "b1_bing_generate_fail.png").exists())
+        with patch.object(imagegen, "GENERATE", "Generate an image: REFUSE "):
+            res = imagegen.generate(self.cfg, self.sd, {"id": "b2", "vo": "x"}, "b2", logs.append, image=self.shot)
+        self.assertEqual(res, (None, None, None))
+        self.assertTrue(any("declined" in l for l in logs))
+        self.assertTrue((self.sd / "imagegen" / "b2_gemini_generate_fail.png").exists())
 
 
-class ImagegenLadder(unittest.TestCase):
+class GeminiLadder(unittest.TestCase):
     def setUp(self):
         imagegen.reset()
         self.root = Path(tempfile.mkdtemp())
         self.sd = self.root / "jobs" / "J" / "short"; self.sd.mkdir(parents=True)
         self.cfg = {"jobs_dir": str(self.root / "jobs")}
 
-    def test_no_profile_skips_both_sites_for_the_job(self):
+    def test_no_profile_skips_for_the_job(self):
         logs = []
-        with patch("app.studio.flow.visual_prompt", return_value="a calm lake at dawn"):
-            res = imagegen.generate(self.cfg, self.sd, {"id": "b0"}, "b0", logs.append)
-        self.assertEqual(res, (None, None, None))
-        self.assertTrue(any("bing skipped: no signed-in BING profile" in l for l in logs))
-        self.assertTrue(any("meta skipped: no signed-in META AI profile" in l for l in logs))
+        self.assertEqual(imagegen.generate(self.cfg, self.sd, {"id": "b0"}, "b0", logs.append), (None, None, None))
+        self.assertTrue(any("no signed-in Google profile" in l for l in logs))
         logs.clear()
-        imagegen.generate(self.cfg, self.sd, {"id": "b1"}, "b1", logs.append)   # same job: not opened again
-        self.assertTrue(any("none available" in l for l in logs))
+        imagegen.generate(self.cfg, self.sd, {"id": "b1"}, "b1", logs.append)
+        self.assertTrue(any("gemini skipped (" in l for l in logs))
 
-    def test_rate_limit_is_saved_across_jobs(self):
-        calls = []
-        def run(cfg, sd, site, step, key, log, fn):
-            calls.append((site, step))
-            if site == "bing":
-                imagegen._job_skip["bing"] = "quota"; imagegen._cool(cfg, sd, "bing", 3600, "quota")
-                return None
-            return None
-        with patch.object(imagegen, "_run", side_effect=run), patch("app.studio.flow.visual_prompt", return_value="p"):
+    def test_usage_limit_is_saved_across_jobs(self):
+        with patch.object(imagegen, "_session", side_effect=imagegen.Skip("Gemini usage limit", -1)):
             imagegen.generate(self.cfg, self.sd, {"id": "b0"}, "b0", print)
-            imagegen.reset()
-            calls.clear()
+        imagegen.reset()
+        with patch.object(imagegen, "_session") as sess:
             imagegen.generate(self.cfg, self.sd, {"id": "b1"}, "b1", print)
-        self.assertNotIn(("bing", "generate"), calls)   # still cooling down in the next job
-        st = json.loads((self.root / "imagegen_state.json").read_text())
-        self.assertIn("bing", st)
+        sess.assert_not_called()
+        self.assertIn("gemini", json.loads((self.root / "imagegen_state.json").read_text()))
+
+    def test_prompt_extraction(self):
+        self.assertEqual(imagegen.extract_prompt("Desc...\n\n**PROMPT:** A red kite over green hills at dusk, wide shot, soft light, photorealistic."),
+                         "A red kite over green hills at dusk, wide shot, soft light, photorealistic.")
+        self.assertTrue(imagegen.extract_prompt("Here you go:\n```\nA misty pine forest at sunrise with light rays through tall trees\n```").startswith("A misty pine"))
+        self.assertEqual(imagegen.extract_prompt("Sorry."), "")
 
 
 class CutoutLayers(unittest.TestCase):

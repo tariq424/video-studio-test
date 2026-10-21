@@ -219,7 +219,7 @@ def vo_slice(plan, s, v, pad=6):
 def v2_after_wangp(cfg, job, v, vo, log):
     """Visual ladder v2 for an explainer visual that the cloud and WanGP didn't cover (WanGP draws atmospheric beats only):
     5 Remotion graphics (motion/<id>.mp4, GRAPHICS burned in) -> 6 physics module (drawn live by the explainer, SIMULATION) ->
-    9 illustration / silhouette -> 10 headline card. CapCut (7) is Shorts-only for now; parallax (8) has no explainer form.
+    headline card (the illustration rung was removed 2026-10-21). CapCut is Shorts-only for now.
     -> rung name (always succeeds: the headline card is the floor)."""
     from . import graphics, physics
     sec = {"id": v["id"], "vo": vo, "still_prompt": v.get("prompt", ""), "visuals": [x for x in [v.get("chart") and {"chart": v["chart"]}] if x]}
@@ -237,11 +237,6 @@ def v2_after_wangp(cfg, job, v, vo, log):
         v["type"] = "motion"; v["g"] = motion; v["tag"] = "SYNTHETIC"
         log(f"  {v['id']}: synthetic motion ({motion['module']})")
         return "simulation"
-    from . import illustrate
-    ac = illustrate.aircraft_for(sec)
-    if ac and ac["type"] == "fighter" and re.search(illustrate.FIGHTER, vo, re.I):   # fighters named: draw them, not a text card
-        rung = illustration_still(cfg, job, v, vo, log)
-        if rung: return rung
     try: g5 = graphics.make(cfg, _ws(job), sec, v["id"], log, tag="GRAPHICS")
     except Exception as e: g5 = {"ok": False, "why": f"crash ({str(e)[:100]})"}
     if g5.get("ok"):
@@ -253,8 +248,6 @@ def v2_after_wangp(cfg, job, v, vo, log):
         g6 = None
         if g6:
             v["type"] = "motion"; v["g"] = g6; v["tag"] = "SIMULATION"; log(f"  {v['id']}: simulation ({mod})"); return "simulation"
-    rung = illustration_still(cfg, job, v, vo, log)
-    if rung: return rung
     v["type"] = "motion"; v["g"] = {"kind": "headline", "kicker": "", "text": " ".join(vo.split()[:12]), "sub": ""}
     log(f"  {v['id']}: headline card"); return "headline"
 
