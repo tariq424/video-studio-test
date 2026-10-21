@@ -196,7 +196,7 @@ def _render_gen(cfg, sd, code, secs, out, log, tag=None):
     rdir = short._ensure_remotion(log); gdir = Path(rdir) / "src" / "gen"; gdir.mkdir(parents=True, exist_ok=True)
     sp = _ws_space(sd); w, h = sp["w"], sp["h"]
     name = "G" + hashlib.sha1((code + str(time.time())).encode()).hexdigest()[:10]
-    lab = ("" if not tag else
+    lab = ("" if True else   # rung labels are never burned in (2026-10-21); tag stays in the logs
            f'<div style={{{{position:"absolute",top:{250 if h > w else 40},left:{40 if h > w else 48},fontFamily:"Inter, sans-serif",fontWeight:800,'
            f'fontSize:{28 if h > w else 24},letterSpacing:3,color:"#111",background:"rgba(255,200,61,0.95)",borderRadius:8,padding:"8px 16px"}}}}>{tag}</div>')
     (gdir / f"{name}.tsx").write_text(code, encoding="utf-8")

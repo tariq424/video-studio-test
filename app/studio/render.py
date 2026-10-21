@@ -139,7 +139,11 @@ def _ents(job):
     except Exception: return []
 
 def badge(src, dst, text="GENERATED · CLOUD"):
-    """Burn the honesty label into a long-video still (Shorts get it from Remotion), inside the Ken Burns safe area."""
+    """Was: burn the label into the still. Rung labels are no longer drawn on the video (2026-10-21): a plain copy."""
+    import shutil as _sh
+    if str(src) != str(dst): _sh.copy(src, dst)
+    return
+    """(old body kept below for reference)"""
     from PIL import Image, ImageDraw, ImageFont
     im = Image.open(src).convert("RGB"); W, H = im.size; fs = max(14, int(W * 0.018))
     font = None

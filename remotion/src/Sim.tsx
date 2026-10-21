@@ -65,7 +65,6 @@ export const SimBackdrop: React.FC<{ g: Sim; dur: number }> = ({ g, dur }) => {
   return (
     <AbsoluteFill style={{ background: "linear-gradient(170deg, #0d1626 0%, #070a12 70%)" }}>
       <div style={{ position: "absolute", top: tall ? 330 : 50, left: 0, right: 0, textAlign: "center", fontFamily: HEAD, fontWeight: 900, fontSize: tall ? 56 : 46, color: C.text }}>{g.title}</div>
-      {g.label ? <div style={{ position: "absolute", top: tall ? 410 : 112, left: 0, right: 0, textAlign: "center", fontFamily: BODY, fontWeight: 600, fontSize: tall ? 30 : 26, color: C.mut }}>{g.label}</div> : null}
       <svg width={W} height={H} style={{ position: "absolute", inset: 0 }}>
         {ticks.map((v, i) => <g key={i}><line x1={box.x} x2={box.x + box.w} y1={Y(v)} y2={Y(v)} stroke="rgba(255,255,255,0.1)" />
           <text x={box.x - 12} y={Y(v) + 8} fill="rgba(255,255,255,0.55)" fontSize={tall ? 24 : 20} textAnchor="end" fontFamily="Inter">{Math.round(v).toLocaleString("en-US")}</text></g>)}
@@ -154,7 +153,6 @@ export const SimMapBackdrop: React.FC<{ g: SimMap; dur: number }> = ({ g, dur })
       <div style={{ position: "absolute", top: tall ? 320 : 24, left: 0, right: 0, textAlign: "center" }}>
         <div style={{ display: "inline-block", background: "rgba(7,10,18,0.82)", borderRadius: 18, padding: tall ? "14px 34px" : "10px 28px" }}>
           <div style={{ fontFamily: HEAD, fontWeight: 900, fontSize: tall ? 54 : 44, color: C.text }}>{g.title}</div>
-          {g.label ? <div style={{ fontFamily: BODY, fontWeight: 600, fontSize: tall ? 30 : 26, color: C.mut, marginTop: 4 }}>{g.label}</div> : null}
         </div>
       </div>
       {track[Math.min(Math.round(k), track.length - 1)]?.v ? <div style={{ position: "absolute", right: tall ? 80 : 120, top: tall ? 1330 : H - 110, fontFamily: HEAD, fontWeight: 900,

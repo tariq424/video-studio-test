@@ -453,11 +453,6 @@ export const ReconBackdrop: React.FC<{ g: Recon; dur: number }> = ({ g, dur }) =
       <ThreeCanvas width={width} height={height} gl={{ antialias: true, preserveDrawingBuffer: true }} linear={false}>
         <SceneGraph r={g} t={t} p={p} tall={tall} />
       </ThreeCanvas>
-      {/* honest labelling: this is an illustration, not footage */}
-      <div style={{ position: "absolute", top: tall ? 250 : 40, right: tall ? 40 : 48, fontFamily: BODY, fontWeight: 800, fontSize: tall ? 28 : 24, letterSpacing: 3,
-        color: "rgba(255,255,255,0.92)", background: "rgba(10,12,18,0.55)", border: "1.5px solid rgba(255,255,255,0.35)", borderRadius: 8, padding: "8px 16px" }}>
-        RECONSTRUCTION
-      </div>
       {g.altitude || g.squawk?.length ? (() => {
         // cockpit-style readouts: altitude counting down, transponder codes in turn
         const alt = g.altitude ? Math.round(interpolate(p, [0.05, 0.9], g.altitude, { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) / 100) * 100 : null;

@@ -27,6 +27,5 @@ export const MotionBackdrop: React.FC<{g: any; dur: number}> = ({g, dur}) => {
         <g transform={`translate(${x},${y})`}><path d='M30,0 L-20,-15 L-12,0 L-20,15 Z' fill='#ffda65'/></g>
       </g>}
     </svg>
-    <div style={{position:'absolute',bottom:H*0.15,width:'100%',textAlign:'center',fontSize:26,color:'#ffda65'}}>{g.label}</div>
   </AbsoluteFill>;
 };

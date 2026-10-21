@@ -11,16 +11,12 @@ import { TemplateBackdrop } from "./Templates";
 
 // Stills are wide (16:9) in a tall frame, so we SCROLL across them to reveal the whole scene.
 // Videos play slightly slowed so a 5 s clip fills ~6 s.
-// News-style honesty label on real-but-not-of-the-event visuals: "FILE" (a real photo of the subject taken another time),
-// "ILLUSTRATIVE" (generic stock footage). Same place and style as the RECONSTRUCTION tag, on the left.
 export const Shot: React.FC<{ bg: Bg; dur: number; seed: number }> = (props) => {
-  const { height, width } = useVideoConfig(); const tall = height > width;
-  const tag = (props.bg as any).tag as string | undefined;
+  // Rung labels (GENERATED · GEMINI, GENERATED · FLOW, SOURCE · ..., ILLUSTRATIVE, SYNTHETIC...) stay in the timeline data and the job
+  // log for debugging; they are never drawn on the video (owner's decision 2026-10-21; YouTube's altered-content flag discloses AI use).
   return (
     <AbsoluteFill>
       <ShotInner {...props} />
-      {tag ? <div style={{ position: "absolute", top: tall ? 250 : 40, left: tall ? 40 : 48, fontFamily: "Inter, sans-serif", fontWeight: 800,
-        fontSize: tall ? 28 : 24, letterSpacing: 3, color: "#111", background: "rgba(255,200,61,0.95)", borderRadius: 8, padding: "8px 16px" }}>{tag}</div> : null}
     </AbsoluteFill>
   );
 };
@@ -74,12 +70,6 @@ const ShotInner: React.FC<{ bg: Bg; dur: number; seed: number }> = ({ bg, dur, s
         <div style={{ position: "absolute", left: "3%", top: "30%", width: "44%", height: "35%", background: "black", border: "3px solid #ffc83d" }}>
           {g.media === "clip" ? <Html5Video src={asset(g.src)} muted style={{ width: "100%", height: "100%", objectFit: "contain" }} onError={mediaError(g.src) as any} />
             : <Img src={asset(g.src)} style={{ width: "100%", height: "100%", objectFit: "contain" }} />}
-        </div>
-        <div style={{ position: "absolute", left: "4%", top: "20%", right: "4%", color: "#ffc83d", fontFamily: "Inter, sans-serif", fontSize: tall ? 31 : 26 }}>
-          OUR TAKE: {g.purpose}
-        </div>
-        <div style={{ position: "absolute", left: "4%", top: "68%", right: "4%", color: "white", fontFamily: "Inter, sans-serif", fontSize: tall ? 26 : 21 }}>
-          Source: {g.credit} · {g.timestamp.toFixed(1)}s · brief excerpt
         </div>
       </AbsoluteFill>;
     }
