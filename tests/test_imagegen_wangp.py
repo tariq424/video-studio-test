@@ -45,6 +45,14 @@ class GeminiAgainstAMockSite(unittest.TestCase):
         self.assertTrue(any("screenshot uploaded" in l for l in logs))
         self.assertEqual(imagegen.tag(), "GENERATED · GEMINI")
 
+    def test_a_beat_needing_two_visuals_gets_a_second_angle_not_flow(self):
+        logs = []
+        res = imagegen.generate_many(self.cfg, self.sd, {"id": "b3", "vo": "x"}, "b3", logs.append, image=self.shot, count=3)
+        self.assertEqual(len(res), 2)   # capped by imagegen_per_beat (2)
+        self.assertTrue(all(Path(p).is_file() for p, _ in res))
+        self.assertTrue(any("image 2: generate a second image" in l for l in logs))
+        self.assertTrue(any("2 image(s) ready" in l for l in logs))
+
     def test_without_a_screenshot_the_narration_is_used(self):
         img, site, prompt = imagegen.generate(self.cfg, self.sd, {"id": "b1", "vo": "A laptop reads text from images."}, "b1", print)
         self.assertTrue(prompt.startswith("A wide cinematic shot of a quiet laptop"))

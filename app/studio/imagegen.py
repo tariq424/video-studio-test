@@ -28,6 +28,8 @@ DESCRIBE = "Describe this image in detail, then write a prompt to recreate it wi
 FORMAT = "Put the final prompt on its own line, starting with PROMPT:"
 NARRATION = "Write a prompt for a photorealistic image that illustrates this narration, without brands or text: "
 GENERATE = "Generate an image: "
+VARIANTS = ["Generate a second image of the same scene from a different camera angle, same style and lighting.",
+            "Generate another image of the same scene as a close-up of the main subject, same style and lighting."]
 
 RATE = re.compile(r"(reached your (daily )?limit|usage limit|limit for (today|now)|try again (later|tomorrow|in \d+)|"
                   r"too many requests|out of (quota|credits))", re.I)
@@ -195,7 +197,7 @@ def extract_prompt(text):
 
 
 # ---------------------------------------------------------------- the browser session
-def _session(cfg, image, aspect, vo, out, timeout, log, evidence):
+def _session(cfg, image, aspect, vo, out, timeout, log, evidence, extras=()):
     prof = profile_dir(cfg)
     if not prof.exists() or not any(prof.iterdir()):
         raise Skip(f"no signed-in Google profile at {prof}; run scripts\\imagegen-login.ps1 -Site gemini once")
@@ -234,31 +236,48 @@ def _session(cfg, image, aspect, vo, out, timeout, log, evidence):
             # 4: generate the image from that prompt, in the same chat
             step = "generate"
             shape = "Tall vertical 9:16 portrait image." if aspect == "9:16" else "Wide horizontal 16:9 landscape image."
-            before = set(_big_images(page)); n1 = len(_responses(page))
             box = _box(page)
-            _send(page, box, f"{GENERATE}{prompt} {shape} No text, letters, logos or brand names.")
-            t0 = time.time(); src = None
-            while time.time() - t0 < timeout:
-                page.wait_for_timeout(4000)
-                _check(page, step)
-                res = _responses(page)
-                if len(res) > n1 and REFUSED.search(res[-1]) and not _busy(page):
-                    raise RuntimeError("Gemini declined to generate the image: " + res[-1].strip()[:160])
-                fresh = [s for s in _big_images(page) if s not in before]
-                if fresh and not _busy(page):
-                    page.wait_for_timeout(3000)
-                    fresh = [s for s in _big_images(page) if s not in before] or fresh
-                    src = fresh[-1]; break
-            if not src: raise RuntimeError(f"no generated image after {timeout}s")
+            src = _ask_image(page, box, f"{GENERATE}{prompt} {shape} No text, letters, logos or brand names.", timeout, step)
             # 5: download (Gemini's full-size download button first, else the image source)
             step = "download"
             _download(context, page, src, out)
+            # extra images for a beat that needs more than one visual: same scene, another angle / a close-up (saves Flow credits)
+            for k, extra in enumerate(extras):
+                try:
+                    log(f"  gemini: image {k + 2}: {VARIANTS[k % len(VARIANTS)].split(',')[0].lower()}")
+                    src = _ask_image(page, _box(page), f"{VARIANTS[k % len(VARIANTS)]} {shape} No text, letters, logos or brand names.",
+                                     timeout, "generate")
+                    _download(context, page, src, extra)
+                except Exception as e:   # the first image is already saved: keep it, report the extra one (a limit hit here is
+                                         # seen again, and cooled down, on the next beat)
+                    log(f"  gemini: image {k + 2} failed ({str(e).splitlines()[0][:150]})"); Path(extra).unlink(missing_ok=True)
+                    evidence(page, f"extra{k + 2}")
+                    break
             return prompt
         except Exception:
             evidence(page, step)
             raise
         finally:
             context.close()
+
+
+def _ask_image(page, box, text, timeout, step):
+    """Send a generate request in the chat and wait for the new image. -> its src."""
+    before = set(_big_images(page)); n1 = len(_responses(page))
+    _send(page, box, text)
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        page.wait_for_timeout(4000)
+        _check(page, step)
+        res = _responses(page)
+        if len(res) > n1 and REFUSED.search(res[-1]) and not _busy(page):
+            raise RuntimeError("Gemini declined to generate the image: " + res[-1].strip()[:160])
+        fresh = [s for s in _big_images(page) if s not in before]
+        if fresh and not _busy(page):
+            page.wait_for_timeout(3000)
+            fresh = [s for s in _big_images(page) if s not in before] or fresh
+            return fresh[-1]
+    raise RuntimeError(f"no generated image after {timeout}s")
 
 
 def _download(context, page, src, out):
@@ -292,26 +311,35 @@ def _download(context, page, src, out):
 
 
 # ---------------------------------------------------------------- ladder entry
-def generate(cfg, sd, sec, key, log, aspect="9:16", image=None):
-    """Rung 3. -> (image_path, "gemini", prompt) or (None, None, None). Never raises (cancel aside)."""
+def generate(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
+    """Rung 3. -> (image_path, "gemini", prompt) or (None, None, None). Never raises (cancel aside).
+    count > 1: the same chat also makes count-1 more images of the scene (another angle, a close-up); see generate_many."""
+    res = generate_many(cfg, sd, sec, key, log, aspect, image, count)
+    return (res[0][0], "gemini", res[0][1]) if res else (None, None, None)
+
+
+def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
+    """-> [(image_path, prompt), ...] (first = the recreated scene, then the variants), or []. Never raises (cancel aside)."""
+    count = max(1, min(int(count), 1 + len(VARIANTS), int(cfg.get("imagegen_per_beat", 2))))
     if not cfg.get("imagegen_on", True):
-        return None, None, None
+        return []
     if _job_skip["why"]:
-        log(f"  gemini skipped ({_job_skip['why'][:140]})"); return None, None, None
+        log(f"  gemini skipped ({_job_skip['why'][:140]})"); return []
     cool = _cooling(cfg, sd)
     if cool:
         _job_skip["why"] = f"cooling down until {time.strftime('%H:%M', time.localtime(cool['until']))}: {cool['why'][:100]}"
-        log(f"  gemini skipped ({_job_skip['why']})"); return None, None, None
+        log(f"  gemini skipped ({_job_skip['why']})"); return []
     d = Path(sd) / "imagegen"; d.mkdir(parents=True, exist_ok=True)
     led = d / "gemini_usage.json"
     try: used = json.loads(led.read_text(encoding="utf-8")) if led.exists() else {}
     except (OSError, ValueError): used = {}
     cap = int(cfg.get("imagegen_max_per_video", 8))
     if len(used) >= cap and key not in used:
-        log(f"  gemini: {cap} images already made for this video; next rung"); return None, None, None
+        log(f"  gemini: {cap} images already made for this video; next rung"); return []
     out = d / f"{key}_gemini.jpg"
+    extras = [d / f"{key}_gemini_{k + 2}.jpg" for k in range(count - 1)]
     if out.is_file() and key in used:
-        return out, "gemini", used[key].get("prompt", "")
+        return [(x, used[key].get("prompt", "")) for x in [out] + extras if x.is_file()]
     image = str(image) if image and Path(image).is_file() else None
     timeout = int(cfg.get("imagegen_timeout", 240))
     def evidence(page, step):
@@ -322,24 +350,25 @@ def generate(cfg, sd, sec, key, log, aspect="9:16", image=None):
             pass
     t0 = time.time()
     try:
-        prompt = _session(cfg, image, aspect, str(sec.get("vo") or sec.get("still_prompt") or ""), out, timeout, log, evidence)
+        prompt = _session(cfg, image, aspect, str(sec.get("vo") or sec.get("still_prompt") or ""), out, timeout, log, evidence, extras)
     except Skip as s:
         cool = int(float(cfg.get("imagegen_cooldown_hours", 6)) * 3600) if s.cool == -1 else s.cool
         _job_skip["why"] = s.why
         if cool: _cool(cfg, sd, cool, s.why)
         log(f"  gemini skipped: {s.why}" + (f" (saved: retried after {cool // 3600} h)" if cool else " (rest of this job)") + "; next rung")
-        return None, None, None
+        return []
     except Exception as e:
         if str(e) == "cancelled": raise
         out.unlink(missing_ok=True)
         fails = sorted(d.glob(f"{key}_gemini_*_fail.png"))
         log(f"  gemini failed ({str(e).splitlines()[0][:200]})" + (f"; screenshot {fails[-1]}" if fails else "") + "; next rung")
-        return None, None, None
+        return []
     used[key] = {"prompt": prompt, "from_screenshot": bool(image), "made": time.strftime("%Y-%m-%d %H:%M")}
     led.write_text(json.dumps(used, indent=1), encoding="utf-8")
     out.with_suffix(".prompt.txt").write_text(prompt, encoding="utf-8")
-    log(f"  gemini: image ready ({time.time() - t0:.0f}s)")
-    return out, "gemini", prompt
+    got = [out] + [x for x in extras if x.is_file()]
+    log(f"  gemini: {len(got)} image(s) ready ({time.time() - t0:.0f}s)")
+    return [(x, prompt) for x in got]
 
 
 def tag(site="gemini"):

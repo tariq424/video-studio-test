@@ -458,16 +458,16 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         if v2 and len(items) < n and cfg.get("imagegen_on", True):   # rung 3: free image generators (describe the source screenshot -> new image)
             from . import imagegen
             snap = _safe(log, f"{s['id']} source screenshot", lambda: source_visuals.snapshot(cfg, job, sd, s, log, source_item=raw_source))
-            res = _safe(log, "image generators", lambda: imagegen.generate(cfg, sd, s, s["id"], log, aspect="9:16",
-                                                                              image=(snap or {}).get("path")), (None, None, None))
-            img, site, _p = res or (None, None, None)
-            if img:   # rung 4: source parallax (rembg cut-out + Remotion 2.5D)
-                lay = _safe(log, f"{s['id']} parallax", lambda: depth.cutout_layers(img, sd / "imagegen" / f"{s['id']}_px", log))
+            want = n - len(items)   # a beat that needs several visuals gets a second Gemini image (another angle / close-up), not Flow
+            imgs = _safe(log, "image generators", lambda: imagegen.generate_many(cfg, sd, s, s["id"], log, aspect="9:16",
+                                                                                image=(snap or {}).get("path"), count=want), []) or []
+            for k, (img, _p) in enumerate(imgs):   # rung 4: source parallax (rembg cut-out + Remotion 2.5D)
+                lay = _safe(log, f"{s['id']} parallax", lambda: depth.cutout_layers(img, sd / "imagegen" / f"{s['id']}_px{k or ''}", log))
                 if lay:
-                    items.append({"type": "layers", "layers": [_rel_sd(p_, sd) for p_ in lay], "tag": imagegen.tag(site),
-                                  "rung": "imagegen", "site": site, "described": bool(snap)})
+                    items.append({"type": "layers", "layers": [_rel_sd(p_, sd) for p_ in lay], "tag": imagegen.tag(),
+                                  "rung": "imagegen", "site": "gemini", "described": bool(snap), "variant": k})
                 else:
-                    items.append({"type": "image", "src": _rel_sd(img, sd), "tag": imagegen.tag(site), "rung": "imagegen", "site": site})
+                    items.append({"type": "image", "src": _rel_sd(img, sd), "tag": imagegen.tag(), "rung": "imagegen", "site": "gemini", "variant": k})
         if v2 and cfg.get("flow_on", True) and len(items) < n:   # rung 5: Google Flow (paid credits): the last resort for AI video
             from . import flow
             clip = _safe(log, "flow", lambda: flow.generate(cfg, sd, s, f"{s['id']}_flow", log, aspect="9:16"))
@@ -525,7 +525,8 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
             if item.get("rung") == "source":
                 lines.append(f"source clip, full frame ({item['type']} at {float(item.get('timestamp') or 0):.2f}s of the source, {item.get('tag', '')})")
             elif item.get("rung") == "imagegen":
-                lines.append(f"new image from {item.get('site')}" + (" (described from the source screenshot)" if item.get("described") else "")
+                lines.append(f"new image from {item.get('site')}" + (f" (variant {item['variant'] + 1})" if item.get("variant") else "")
+                             + (" (described from the source screenshot)" if item.get("described") else "")
                              + (", rembg parallax" if item["type"] == "layers" else ""))
             elif item.get("rung") == "flow":
                 lines.append("Google Flow clip")

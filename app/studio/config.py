@@ -22,7 +22,8 @@ DEFAULTS = {
     "gemini_profile": "",
     "gemini_url": "https://gemini.google.com/app",
     "imagegen_timeout": 240,
-    "imagegen_max_per_video": 8,      # Gemini images per output
+    "imagegen_max_per_video": 8,      # beats per output that get Gemini images
+    "imagegen_per_beat": 2,           # a beat that needs several visuals: the scene + another angle / close-up (before Flow)
     "imagegen_cooldown_hours": 6,     # after a usage-limit message
     "imagegen_headless": False,
     "source_snapshot_max_uses": 2,    # source screenshots taken just for describing (rung-2 clips/screenshots are reused free)

@@ -6,7 +6,7 @@
 <rich-textarea><div class="ql-editor" contenteditable="true"></div></rich-textarea>
 <button aria-label="Send message" id="send">Send</button>
 <script>
-let uploaded = false;
+let uploaded = false; let made = 0;
 document.getElementById('menu').onclick = () => { document.getElementById('menuitems').style.display = 'block'; };
 document.getElementById('upfiles').onclick = () => {
   const f = document.createElement('input'); f.type = 'file'; f.onchange = () => { uploaded = true; }; f.click();
@@ -20,7 +20,7 @@ function respond(text, img) {
     if (i >= words.length) {
       clearInterval(iv);
       if (img) { const c = document.createElement('canvas'); c.width = 768; c.height = 1024; const g = c.getContext('2d');
-        g.fillStyle = '#2a5'; g.fillRect(0, 0, 768, 1024); g.fillStyle = '#fd3'; g.beginPath(); g.arc(384, 560, 220, 0, 7); g.fill();
+        g.fillStyle = ['#2a5', '#25a', '#a52'][made++ % 3]; g.fillRect(0, 0, 768, 1024); g.fillStyle = '#fd3'; g.beginPath(); g.arc(384, 560, 220, 0, 7); g.fill();
         const im = new Image(); im.style.width = '320px'; im.src = c.toDataURL('image/png'); r.appendChild(im); }
       stop.remove();
     }
@@ -33,7 +33,7 @@ document.getElementById('send').onclick = () => {
     if (!uploaded) { respond('Please upload an image first.'); return; }
     respond('The image shows a golden retriever sitting on a sunny lawn in a park, trees behind it, soft warm light. PROMPT: A photorealistic golden retriever sitting upright on a sunlit park lawn, trees softly blurred behind, warm afternoon light, eye-level shot, shallow depth of field');
   } else if (/^Generate an image: .*REFUSE/.test(t)) { respond("I can't create images like that one. Try something else.");
-  } else if (/^Generate an image:/.test(t)) { respond('Here is your image', true);
+  } else if (/^Generate (an image:|a second image|another image)/.test(t)) { respond('Here is your image', true);
   } else if (/^Write a prompt/.test(t)) { respond('PROMPT: A wide cinematic shot of a quiet laptop on a wooden desk at dawn, soft window light, shallow depth of field, photorealistic'); }
 };
 </script></body></html>
