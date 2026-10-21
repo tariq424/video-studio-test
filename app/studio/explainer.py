@@ -141,8 +141,13 @@ def build(job, plan, cfg, log, stop=lambda: False):
             if v.get("stock_src") != "source" or len(vis) < 2 or not (job / v.get("stock", "")).is_file(): continue
             d = (media.dur(job / v["stock"]) or 2.5) + 0.4
             if bnd[vi + 1] - bnd[vi] <= d + 0.5: continue
-            if vi + 1 < len(vis): bnd[vi + 1] = bnd[vi] + d   # the next visual starts right after the clip
-            else: bnd[vi] = bnd[vi + 1] - d                  # last slot: the previous visual runs longer
+            if vi + 1 < len(vis):   # the later visuals share the freed time evenly, starting right after the clip
+                a, rest = bnd[vi] + d, len(vis) - vi - 1
+                for k in range(1, rest + 1): bnd[vi + k] = a + (D - a) * (k - 1) / rest
+            else:                   # last slot: the earlier visuals share the freed time
+                b = bnd[vi + 1] - d
+                for k in range(1, vi): bnd[k] = b * k / vi
+                bnd[vi] = b
         bgs = []
         for vi, v in enumerate(vis):
             slot = bnd[vi + 1] - bnd[vi]
