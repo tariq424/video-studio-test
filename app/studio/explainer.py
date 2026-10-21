@@ -135,6 +135,14 @@ def build(job, plan, cfg, log, stop=lambda: False):
         vis = list(s["visuals"])
         if si == 0: vis = [{"id": "_title", "type": "chart"}] + vis
         bnd = _bounds(wt, len(vis), D)
+        # a source clip is ~2.5 s: it gets only its own length (plus 0.4 s), the neighbouring visual takes the rest of the
+        # slot. Stretched over a whole slot it played slowed, then froze for up to 15 s and looked like a still.
+        for vi, v in enumerate(vis):
+            if v.get("stock_src") != "source" or len(vis) < 2 or not (job / v.get("stock", "")).is_file(): continue
+            d = (media.dur(job / v["stock"]) or 2.5) + 0.4
+            if bnd[vi + 1] - bnd[vi] <= d + 0.5: continue
+            if vi + 1 < len(vis): bnd[vi + 1] = bnd[vi] + d   # the next visual starts right after the clip
+            else: bnd[vi] = bnd[vi + 1] - d                  # last slot: the previous visual runs longer
         bgs = []
         for vi, v in enumerate(vis):
             slot = bnd[vi + 1] - bnd[vi]

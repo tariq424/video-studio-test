@@ -283,6 +283,12 @@ def apply_long(job, plan, cfg, log):
                 used.add(visual.get("stock")); break
             if visual.get("stock_src") == "yours" or visual.get("edit_bgs") or visual.get("edit_clip"):
                 continue
+            ledger = job / "build" / "source_excerpts" / "usage.json"
+            try: full = len(json.loads(ledger.read_text(encoding="utf-8"))) >= max(0, min(2, int(cfg.get("source_visual_max_uses", 2))))
+            except (OSError, ValueError): full = False
+            if full:
+                log("  source clips: budget of 2 per video reached; the other sections use the rest of the ladder")
+                return
             try:
                 item = make(cfg, job, job / "build", {**sec, "id": visual["id"], "source_visual": visual.get("source_visual")}, log)
             except Exception as error:   # never stops the job
