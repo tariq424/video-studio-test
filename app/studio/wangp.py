@@ -129,6 +129,8 @@ def release(log=print, why="generation finished"):
 def find_url(cfg, fresh=False):
     """Return a WanGP MCP URL that answers, or the best guess if none does."""
     if not fresh and _found["url"] and time.time() - _found["t"] < 30: return _found["url"]
+    if not fresh and not _found["url"] and time.time() - _found.get("miss_t", 0) < 30 and _found.get("miss"):
+        return _found["miss"]   # nothing answered a moment ago: don't probe every port again (status polls every few seconds)
     cands = [cfg["wangp_mcp"]] if cfg.get("wangp_mcp") else []
     cands += _from_pinokio_log(cfg) + ["http://127.0.0.1:8000/mcp", "http://127.0.0.1:42004/mcp/"]
     seen = []
@@ -136,7 +138,7 @@ def find_url(cfg, fresh=False):
         if u in seen: continue
         seen.append(u)
         if _probe(u): _found.update(url=u, t=time.time()); return u
-    _found.update(url=None, t=0.0)
+    _found.update(url=None, t=0.0, miss=seen[0], miss_t=time.time())
     return seen[0]
 
 class WanGP:
@@ -164,9 +166,10 @@ class WanGP:
         self._post({"jsonrpc": "2.0", "method": "notifications/initialized"})
 
     def running(self):
-        """Probe only: is a WanGP MCP server answering right now?"""
+        """Is a WanGP MCP server answering right now? (probe results are cached for 30 s)"""
         if not self.cfg: return _probe(self.url)
-        return _probe(find_url(self.cfg))
+        u = find_url(self.cfg)
+        return bool(_found["url"]) and u == _found["url"]
 
     def alive(self):
         """Can a generation use WanGP? True when one is running OR it can be started on demand. Never starts it."""

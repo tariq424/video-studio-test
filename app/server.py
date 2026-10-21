@@ -56,7 +56,8 @@ def test_key():
 @app.get("/api/status")
 def status():
     cfg = config.load()
-    return jsonify(wangp=WanGP(cfg).running(), wangp_on_demand=WanGP(cfg).alive(), api_key=bool(cfg.get("anthropic_api_key")), zai_key=bool(cfg.get("zai_api_key")), deepseek_key=bool(cfg.get("deepseek_api_key")), provider=cfg.get("script_provider"), current=studio.current, stages=STAGES)
+    _wg = WanGP(cfg); _run = _wg.running()
+    return jsonify(wangp=_run, wangp_on_demand=_run or _wg.alive(), api_key=bool(cfg.get("anthropic_api_key")), zai_key=bool(cfg.get("zai_api_key")), deepseek_key=bool(cfg.get("deepseek_api_key")), provider=cfg.get("script_provider"), current=studio.current, stages=STAGES)
 
 @app.get("/api/jobs")
 def jobs(): return jsonify(studio.list())
