@@ -33,6 +33,12 @@ def do_charts(job, plan, cfg, log):
     log(f"Charts: {n} rendered")
 
 def do_voice(job, plan, cfg, wg, log, stop):
+    """WanGP (when needed at all) is started on demand and stopped as soon as this batch is done (wangp.py)."""
+    with wg.hold():
+        return _do_voice_inner(job, plan, cfg, wg, log, stop)
+
+
+def _do_voice_inner(job, plan, cfg, wg, log, stop):
     d = job / "voice"; d.mkdir(exist_ok=True)
     gap = d / "_gap.wav"; media.ff("-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", 0.25, gap)
     seed = 9000
@@ -84,6 +90,12 @@ def presenter_segments(job, plan):
     return segs
 
 def do_presenter(job, plan, cfg, wg, log, stop):
+    """WanGP (when needed at all) is started on demand and stopped as soon as this batch is done (wangp.py)."""
+    with wg.hold():
+        return _do_presenter_inner(job, plan, cfg, wg, log, stop)
+
+
+def _do_presenter_inner(job, plan, cfg, wg, log, stop):
     d = job / "presenter"; d.mkdir(exist_ok=True)
     segs = presenter_segments(job, plan); (d / "segments.json").write_text(json.dumps(segs, indent=1))
     seed = 7000
@@ -267,6 +279,12 @@ def refresh_fallbacks(job, plan, cfg, log, stop=lambda: False):
     return out
 
 def do_motion(job, plan, cfg, wg, log, stop):
+    """WanGP (when needed at all) is started on demand and stopped as soon as this batch is done (wangp.py)."""
+    with wg.hold():
+        return _do_motion_inner(job, plan, cfg, wg, log, stop)
+
+
+def _do_motion_inner(job, plan, cfg, wg, log, stop):
     d = job / "motion"; d.mkdir(exist_ok=True); seed = 3000
     for s in plan["sections"]:
         for v in s["visuals"]:
@@ -301,21 +319,41 @@ def do_motion(job, plan, cfg, wg, log, stop):
 def do_stills(job, plan, cfg, wg, log, stop):
     d = job / "stills"; d.mkdir(exist_ok=True); seed = 1000; n = 0
     todo = [(v, vo_slice(plan, s, v) if cfg.get("ladder_v2") else s.get("vo", "")) for s in plan["sections"] for v in s["visuals"] if v["type"] == "still" and not v.get("stock")]
+    sec_of = {v["id"]: s for s in plan["sections"] for v in s["visuals"]}
+    ocr_cache = {}
+    def section_ocr(sec):
+        """The prompt text read (OCR) from a frame of this section's source clip, with that frame as the anchor image."""
+        if sec["id"] in ocr_cache: return ocr_cache[sec["id"]]
+        res = None
+        sv = next((x for x in sec["visuals"] if x.get("stock_src") == "source" and x.get("stock")), None)
+        if sv and cfg.get("source_parallax", True):
+            from . import source_visuals
+            clip = job / sv["stock"]
+            item = {"type": "video" if clip.suffix == ".mp4" else "image", "path": str(clip), "secs": media.dur(clip) if clip.suffix == ".mp4" else 0}
+            try: res = source_visuals.snapshot(cfg, job, _ws(job), {"id": sec["id"]}, log, source_item=item)
+            except Exception as e: log(f"  {sec['id']}: source snapshot failed ({str(e)[:100]})")
+        ocr_cache[sec["id"]] = res
+        return res
     from .pipeline import progress
     for i, (v, vo) in enumerate(todo):
         progress(job, i + 1, len(todo))
         seed += 1; out = d / f"{v['id']}.jpg"
         if out.exists(): continue
         if stop(): raise RuntimeError("cancelled")
-        if cfg.get("ladder_v2") and cfg.get("flow_on", True):   # Google Flow first (the ladder's rung 3); falls through on any failure
-            from . import flow
-            try: clip = flow.generate(cfg, _ws(job), {"id": v["id"], "vo": vo, "still_prompt": v.get("prompt", ""), "queries": v.get("queries") or []},
-                                      "L_" + v["id"], log, aspect="16:9")
-            except Exception as e: log(f"  {v['id']}: flow failed ({str(e)[:100]}); next rung"); clip = None
+        if cfg.get("ladder_v2"):   # AI video: free generators first (Bing, Meta AI, Sora), Google Flow (paid) last; any failure falls through
+            from . import vidgen
+            snap = section_ocr(sec_of[v["id"]]) if v["id"] in sec_of else None
+            ocr_prompt = (snap or {}).get("prompt") or None
+            if ocr_prompt: log(f"  {v['id']}: AI video prompt = the text read from the source ({len(ocr_prompt.split())} words)")
+            try: clip, site = vidgen.generate(cfg, _ws(job), {"id": v["id"], "vo": vo, "still_prompt": v.get("prompt", ""), "queries": v.get("queries") or []},
+                                              "L_" + v["id"], log, aspect="16:9", prompt=ocr_prompt, image=(snap or {}).get("path") if ocr_prompt else None)
+            except Exception as e:
+                if str(e) == "cancelled": raise
+                log(f"  {v['id']}: AI video failed ({str(e)[:100]}); next rung"); clip, site = None, None
             if clip:
                 md = job / "motion"; md.mkdir(exist_ok=True)
-                shutil.copy(clip, md / f"{v['id']}.mp4"); v["type"] = "motion"; v["tag"] = "GENERATED · FLOW"; v.pop("g", None)
-                log(f"  {v['id']}: Google Flow clip"); n += 1; continue
+                shutil.copy(clip, md / f"{v['id']}.mp4"); v["type"] = "motion"; v["tag"] = vidgen.tag(site); v.pop("g", None)
+                log(f"  {v['id']}: AI video clip from {site}"); n += 1; continue
         if cloud_still(cfg, job, v, vo, log): continue   # cloud first
         if cfg.get("ladder_v2"):   # v2: WanGP still for atmospheric beats, then graphics -> physics -> illustration -> headline
             from . import illustrate

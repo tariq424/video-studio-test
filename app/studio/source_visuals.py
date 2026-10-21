@@ -306,3 +306,61 @@ def apply_long(job, plan, cfg, log):
             visual.update(type="motion" if item["type"] == "video" else "still", stock=rel, stock_src="source", no_stock=True,
                           tag=item["tag"], credit=item.get("credit", ""), short_credit=item.get("short_credit", ""))
             break   # one per section
+
+
+def snapshot(cfg, job, workspace, sec, log, source_item=None):
+    """Source Parallax rung (v2 rung 3) input: one still of the source at the beat's matched moment, plus any prompt text
+    baked into it (OCR). -> {"path", "ocr", "prompt", "engine", "from"} or None.
+    The still is the rung-2 screenshot, else a frame of the rung-2 clip, else a fresh screenshot at the matched caption cue
+    (its own budget: source_snapshot_max_uses, default 2 per output). Never guesses a timestamp."""
+    if not cfg.get("source_visuals", True) or not cfg.get("source_parallax", True):
+        return None
+    job, workspace = Path(job), Path(workspace)
+    directory = workspace / "source_excerpts"
+    directory.mkdir(parents=True, exist_ok=True)
+    bid = str(sec.get("id") or "beat")
+    still, origin = None, ""
+    try:
+        if source_item and source_item.get("type") == "image" and source_item.get("path"):
+            still, origin = Path(source_item["path"]), "source screenshot"
+        elif source_item and source_item.get("type") == "video" and source_item.get("path"):
+            still = directory / f"{bid}_snap.png"
+            clip = Path(source_item["path"])
+            mid = max(0.1, float(source_item.get("secs") or 2.5) / 2)
+            media.ff("-ss", mid, "-i", clip, "-frames:v", 1, still, timeout=60)
+            origin = "frame of the source clip"
+        else:
+            req = _request(sec) or (auto_request(job, sec) if cfg.get("source_clips_auto", True) else None)
+            if not req:
+                return None
+            ledger_path = directory / "snap_usage.json"
+            ledger = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.exists() else {}
+            limit = max(0, min(2, int(cfg.get("source_snapshot_max_uses", 2))))
+            if bid not in ledger and len(ledger) >= limit:
+                log(f"  {bid}: source snapshot budget reached; continuing visual ladder")
+                return None
+            req = {**req, "kind": "screenshot"}
+            meta_path = job / "src" / "meta.json"
+            meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+            key = hashlib.sha256(json.dumps([req["start"], meta.get("webpage_url")], sort_keys=True).encode()).hexdigest()[:16]
+            still = directory / f"{key}_snap.png"
+            if not still.exists():
+                _extract(job, req, still, meta, log)
+            ledger[bid] = {"start": req["start"], "asset": still.name}
+            ledger_path.write_text(json.dumps(ledger, indent=2), encoding="utf-8")
+            origin = f"screenshot at {req['start']:.1f}s"
+        if not still or not still.is_file():
+            return None
+    except Exception as error:
+        log(f"  {bid}: source snapshot unavailable ({' '.join(str(error).split())[:300]}); continuing visual ladder")
+        return None
+    from . import ocr
+    text, engine = ocr.read(still, cfg, log)
+    prompt_text = ocr.prompt_from(text)
+    if prompt_text:
+        log(f"  {bid}: OCR ({engine}) found a prompt in the {origin}: \"{prompt_text[:120]}...\" ({len(prompt_text.split())} words)")
+    elif text.strip():
+        log(f"  {bid}: OCR ({engine}) read {len(text.split())} words in the {origin}, no prompt paragraph")
+    else:
+        log(f"  {bid}: OCR ({engine}): no text in the {origin}")
+    return {"path": str(still), "ocr": text, "prompt": prompt_text, "engine": engine, "from": origin}

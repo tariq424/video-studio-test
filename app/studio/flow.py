@@ -1,4 +1,4 @@
-"""Google Flow rung (visual ladder v2, rung 6: after the AI stills, before physics / Remotion graphics).
+"""Google Flow rung (visual ladder v2, rung 7: the LAST AI video generator, after the free ones in vidgen.py; paid credits).
 
 Drives Google Flow (labs.google) in a dedicated, signed-in Chrome profile with Playwright: types a visual prompt for the
 beat, waits for the generated clip and downloads it. Any failure (Playwright missing, profile not signed in, the page
@@ -108,8 +108,9 @@ def _save(context, page, src, out):
         out.write_bytes(r.body())
 
 
-def generate(cfg, sd, sec, key, log, aspect="9:16"):
-    """-> path of the downloaded clip, or None (logged) so the ladder falls through."""
+def generate(cfg, sd, sec, key, log, aspect="9:16", prompt=None):
+    """-> path of the downloaded clip, or None (logged) so the ladder falls through. prompt: use this text (e.g. the OCR'd
+    prompt from a source snapshot) instead of the beat's own visual prompt."""
     if not cfg.get("flow_on", True):
         return None
     if _down["why"]:
@@ -135,7 +136,7 @@ def generate(cfg, sd, sec, key, log, aspect="9:16"):
         _down["why"] = "Playwright is not installed in this environment"
         log(f"  flow: {_down['why']}; next rung")
         return None
-    prompt = visual_prompt(cfg, sec, log)
+    prompt = prompt or visual_prompt(cfg, sec, log)
     timeout = int(cfg.get("flow_timeout", 360))
     t0 = time.time()
     log(f"  flow: generating ({prompt[:90]}...)")

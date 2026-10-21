@@ -15,7 +15,8 @@ from . import media
 FPS = 30
 RUNG = {"source": "Source evidence + commentary", "own": "Your footage", "stock": "Stock footage", "photo": "Real photo", "cloud": "Cloud still", "illustration": "Illustration", "silhouette": "Silhouette", "simulation": "Simulation", "still": "AI still", "animate": "AI animation", "parallax": "Parallax",
         "reconstruction": "3D reconstruction", "headline": "Headline card", "map": "Map", "supplied": "Your file", "parallax (fill)": "Parallax",
-        "graphics": "Remotion graphics", "capcut": "CapCut"}
+        "graphics": "Remotion graphics", "capcut": "CapCut",
+        "source_parallax": "Source parallax", "bing": "Bing Video", "meta": "Meta AI video", "sora": "Sora", "flow": "Google Flow"}
 STATIC = {"still", "headline", "photo"}          # click enlarges instead of playing
 _locks, _gpu = {}, threading.Lock()
 

@@ -1,8 +1,15 @@
-"""Minimal client for WanGP's local MCP server (streamable HTTP).
+"""Minimal client for WanGP's local MCP server (streamable HTTP), started ON DEMAND.
+
+Memory policy (WanGP holds many GB of VRAM): nothing starts WanGP when a job starts. The first real generation request
+(a presenter clip, an atmospheric still, the TTS fallback) launches WanGP's MCP server from its Pinokio install
+(wangp_dir, default C:/pinokio/api/wan.git); as soon as that generation (or a held batch, e.g. all presenter clips) is
+done, the process is stopped, which unloads every model and frees the VRAM. A WanGP that was already running (started in
+Pinokio by you) is used but never stopped by the pipeline. Settings: wangp_on_demand (true), wangp_start_timeout (300 s).
+
 The MCP port is picked by Pinokio at start-up and can change, so the URL is found automatically:
 1) the "WanGP MCP URL" setting, if filled in; 2) the address WanGP's Pinokio launcher last printed
 ("Uvicorn running on ..."); 3) the usual ports 8000 and 42004."""
-import json, re, time, requests
+import json, os, re, socket, subprocess, sys, threading, time, requests
 from pathlib import Path
 
 _found = {"url": None, "t": 0.0}
@@ -37,6 +44,88 @@ def _probe(url):
         return r.status_code < 400 and bool(r.headers.get("mcp-session-id") or "jsonrpc" in r.text)
     except Exception: return False
 
+# ---- on-demand process (only the one this pipeline started; never a WanGP you started in Pinokio)
+_proc = {"p": None, "url": None, "lock": threading.Lock()}
+
+
+def wangp_dir(cfg):
+    return Path(cfg.get("wangp_dir") or "C:/pinokio/api/wan.git")
+
+
+def _python(cfg):
+    env = wangp_dir(cfg) / "app" / "env"
+    for c in (env / "Scripts" / "python.exe", env / "bin" / "python"):
+        if c.is_file(): return c
+    return None
+
+
+def installed(cfg):
+    return bool(cfg.get("wangp_on_demand", True)) and (wangp_dir(cfg) / "app" / "wgp.py").is_file() and _python(cfg) is not None
+
+
+def owned():
+    p = _proc["p"]
+    return p is not None and p.poll() is None
+
+
+def start(cfg, log=print):
+    """Launch WanGP's MCP server and wait until it answers. -> MCP URL. Raises RuntimeError."""
+    with _proc["lock"]:
+        if owned() and _probe(_proc["url"]): return _proc["url"]
+        py = _python(cfg)
+        if not installed(cfg): raise RuntimeError(f"WanGP is not running and no on-demand install was found at {wangp_dir(cfg)}")
+        with socket.socket() as so:
+            so.bind(("127.0.0.1", 0)); port = so.getsockname()[1]
+        app = wangp_dir(cfg) / "app"; env = dict(os.environ)
+        venv = app / "env"
+        env["PATH"] = os.pathsep.join(str(x) for x in (venv / "Scripts", venv / "Library" / "bin", venv / "bin")) + os.pathsep + env.get("PATH", "")
+        env["VIRTUAL_ENV"] = str(venv); env.pop("PYTHONHOME", None); env["PYTHONUNBUFFERED"] = "1"
+        logf = Path(cfg.get("jobs_dir") or ".").parent / "wangp_on_demand.log"
+        try: out = open(logf, "a", encoding="utf-8", errors="replace")
+        except OSError: out = subprocess.DEVNULL
+        log(f"  WanGP: starting on demand (MCP on port {port}; output in {logf})")
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        p = subprocess.Popen([str(py), "wgp.py", "--mcp", "--mcp-transport", "streamable-http", "--mcp-host", "127.0.0.1",
+                              "--mcp-port", str(port)], cwd=str(app), env=env, stdout=out, stderr=subprocess.STDOUT,
+                             creationflags=flags if os.name == "nt" else 0)
+        url = f"http://127.0.0.1:{port}/mcp"
+        _proc.update(p=p, url=url)
+        t0, limit = time.time(), float(cfg.get("wangp_start_timeout", 300))
+        while time.time() - t0 < limit:
+            if p.poll() is not None:
+                _proc.update(p=None, url=None)
+                raise RuntimeError(f"WanGP exited while starting (code {p.returncode}); see {logf}")
+            if _probe(url):
+                log(f"  WanGP: ready after {time.time() - t0:.0f}s")
+                _found.update(url=url, t=time.time()); _down.update(until=0.0, why="")
+                return url
+            time.sleep(3)
+        _kill(p); _proc.update(p=None, url=None)
+        raise RuntimeError(f"WanGP did not answer within {limit:.0f}s of starting; see {logf}")
+
+
+def _kill(p):
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(p.pid), "/T", "/F"], capture_output=True, timeout=30)
+        else:
+            p.kill()
+        p.wait(timeout=30)
+    except Exception:
+        pass
+
+
+def release(log=print, why="generation finished"):
+    """Stop the WanGP process this pipeline started: unloads every model and frees the VRAM. A WanGP you started yourself
+    is left alone."""
+    with _proc["lock"]:
+        p = _proc["p"]
+        if p is None: return False
+        _kill(p); _proc.update(p=None, url=None); _found.update(url=None, t=0.0)
+    log(f"  WanGP: stopped ({why}); models unloaded, VRAM freed")
+    return True
+
+
 def find_url(cfg, fresh=False):
     """Return a WanGP MCP URL that answers, or the best guess if none does."""
     if not fresh and _found["url"] and time.time() - _found["t"] < 30: return _found["url"]
@@ -65,23 +154,49 @@ class WanGP:
 
     def init(self):
         self.sid = None
-        if self.cfg: self.url = find_url(self.cfg, fresh=self.url is not None)
+        if self.cfg:
+            self.url = find_url(self.cfg, fresh=self.url is not None)
+            if not _probe(self.url) and installed(self.cfg):   # nothing running: start it now, for this generation
+                self.url = start(self.cfg, getattr(self, "log", print))
         r = self._post({"jsonrpc": "2.0", "id": 1, "method": "initialize",
                         "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "explainer-studio", "version": "1"}}})
         r.raise_for_status()
         self._post({"jsonrpc": "2.0", "method": "notifications/initialized"})
 
+    def running(self):
+        """Probe only: is a WanGP MCP server answering right now?"""
+        if not self.cfg: return _probe(self.url)
+        return _probe(find_url(self.cfg))
+
     def alive(self):
+        """Can a generation use WanGP? True when one is running OR it can be started on demand. Never starts it."""
         if is_down(): return False
-        try: self.init(); return True
-        except Exception: mark_down(); return False
+        try:
+            if self.running(): return True
+        except Exception: pass
+        if self.cfg and installed(self.cfg): return True
+        mark_down(); return False
+
+    def hold(self):
+        """with wg.hold(): ... keeps an on-demand WanGP loaded across several generations (all presenter clips, all
+        narration chunks), then stops it."""
+        wg = self
+        class _Hold:
+            def __enter__(self_): wg._held = getattr(wg, "_held", 0) + 1; return wg
+            def __exit__(self_, *a):
+                wg._held -= 1
+                if not wg._held: release(getattr(wg, "log", print), "batch finished")
+        return _Hold()
 
     def call(self, name, args):
         if is_down(): return {"error": f"{UNREACHABLE} (skipped: it failed less than {DOWN_SECS // 60} min ago)"}
         conn_fail = 0
         for _ in range(5):
             try:
-                if not self.sid: self.init()
+                if not self.sid:
+                    try: self.init()
+                    except RuntimeError as e:   # on-demand start failed: don't try again for DOWN_SECS
+                        mark_down(str(e)); return {"error": f"{UNREACHABLE}: {str(e)[:200]}"}
                 r = self._post({"jsonrpc": "2.0", "id": int(time.time() * 1000), "method": "tools/call",
                                 "params": {"name": name, "arguments": args}})
                 if r.status_code >= 400:
@@ -134,6 +249,13 @@ class WanGP:
                 self.call("wangp_cancel_job", {"job_id": jid}); return {"ok": False, "err": "stalled"}
 
     def gen(self, src, log, tag, tries=3, stop=lambda: False):
+        self.log = log
+        try:
+            return self._gen(src, log, tag, tries, stop)
+        finally:   # memory policy: unload right after the generation unless a batch holds WanGP
+            if not getattr(self, "_held", 0): release(log, f"{tag} done")
+
+    def _gen(self, src, log, tag, tries=3, stop=lambda: False):
         seed = int(src.get("seed", 1))
         for t in range(tries):
             s = dict(src); s["seed"] = seed + t * 1000

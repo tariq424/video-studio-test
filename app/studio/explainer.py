@@ -113,7 +113,7 @@ def _visual_bg(job, pub, v, slot, s, log):
         rate = max(0.6, min(1.0, d / max(slot, 0.1)))
         bg = {"type": "video", "src": _link(src, pub, "vid"), "rate": round(rate, 3)}
         if d / rate < slot - 0.1: bg["freezeAt"] = round(max(0.1, d / rate - 0.12), 2)   # shorter even slowed: hold its last frame
-        if v.get("tag") and (v.get("stock_src") == "source" or v.get("tag") == "GENERATED · FLOW"): bg["tag"] = v["tag"]
+        if v.get("tag") and (v.get("stock_src") == "source" or str(v.get("tag")).startswith("GENERATED · ")): bg["tag"] = v["tag"]
         log(f"  {v['id']}: video {src.name} ({d:.1f}s{', ' + v['tag'] if bg.get('tag') else ''}) in a {slot:.1f}s slot")
         return bg
     except Exception as e:

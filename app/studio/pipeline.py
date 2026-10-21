@@ -220,7 +220,11 @@ class Studio:
                     threading.Timer(60, lambda jid=jid: self.q.put(jid)).start()
                 else:
                     j.save(status="error", error=str(e)[:500])
-            finally: self.current = None
+            finally:
+                self.current = None
+                try:   # a job never leaves an on-demand WanGP holding VRAM (error, cancel or success)
+                    from . import wangp as _wangp; _wangp.release(print, "job ended")
+                except Exception: pass
 
     # ---- YouTube transcripts without hammering YouTube: reuse what we have, respect a cooldown after a block
     YT_COOLDOWN = 30 * 60
@@ -491,4 +495,5 @@ def _want_wangp(wg, cfg, log):
     raise RuntimeError("WanGP is not running. Start Wan2GP in Pinokio, then press Resume.")
 
 def _need_wangp(wg):
-    if not wg.alive(): raise RuntimeError("WanGP is not running. Start Wan2GP in Pinokio, then press Resume.")
+    """True when WanGP is running or can be started on demand (it is NOT started here: the first generation starts it)."""
+    if not wg.alive(): raise RuntimeError("WanGP is not running and can't be started on demand (wangp_dir). Start Wan2GP in Pinokio, then press Resume.")

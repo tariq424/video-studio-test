@@ -16,6 +16,23 @@ DEFAULTS = {
     "flow_max_per_video": 4,          # Flow clips per output (credits)
     "flow_headless": False,
     "flow_auto_approve": True,        # click Flow's "Approve" (spend the quoted credits) for each clip; never "Always approve"
+    # free AI video generators before Flow (vidgen.py); each needs scripts\vidgen-login.ps1 -Site <site> once
+    "vidgen_order": ["bing", "meta", "sora", "flow"],
+    "vidgen_bing_on": True,           # probed; Microsoft announced Bing Video Creator ends 2026-07-31 (a dead page is remembered 7 days)
+    "vidgen_meta_on": True,
+    "vidgen_sora_on": False,          # OpenAI discontinued the Sora app/web on 2026-04-26
+    "vidgen_max_per_video": 6,        # clips per free site per output
+    "vidgen_cooldown_hours": 6,       # after a rate-limit / quota message
+    "vidgen_headless": False,
+    "meta_timeout": 300, "bing_timeout": 300, "sora_timeout": 300,
+    # Source Parallax rung: snapshot of the source at the matched cue -> OCR (prompt text) -> 2.5D parallax
+    "source_parallax": True,
+    "source_snapshot_max_uses": 2,
+    "ocr_on": True,
+    "tesseract_cmd": "",              # path to tesseract.exe; else PATH / C:\Program Files\Tesseract-OCR; else RapidOCR
+    # WanGP memory policy (wangp.py): never started with the job; launched for a generation, stopped right after
+    "wangp_on_demand": True,
+    "wangp_start_timeout": 300,
     "script_provider": "deepseek",
     "qa_provider": "off",
     "anthropic_api_key": "",
