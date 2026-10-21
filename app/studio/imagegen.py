@@ -26,6 +26,10 @@ URL = "https://gemini.google.com/app"
 LABEL = "GEMINI"
 DESCRIBE = "Describe this image in detail, then write a prompt to recreate it without brands or text."
 FORMAT = "Put the final prompt on its own line, starting with PROMPT:"
+# Never a real person's likeness (a "US president at a podium" came back looking like a former president, in a story
+# about another one): people only as anonymous figures.
+NO_PEOPLE = ("The prompt must not show any real or recognizable person, politician or celebrity: show people only as "
+             "anonymous figures seen from behind, in silhouette, as hands, or out of focus.")
 NARRATION = "Write a prompt for a photorealistic image that illustrates this narration, without brands or text: "
 GENERATE = "Generate an image: "
 VARIANTS = ["Generate a second image of the same scene from a different camera angle, same style and lighting.",
@@ -225,10 +229,10 @@ def _session(cfg, image, aspect, vo, out, timeout, log, evidence, extras=()):
                 if not _upload(page, image): raise RuntimeError("Gemini's upload control was not found")
                 page.wait_for_timeout(4000)
                 log(f"  gemini: screenshot uploaded ({Path(image).name}); asking for a description and a prompt")
-                _send(page, box, DESCRIBE + " " + FORMAT)
+                _send(page, box, DESCRIBE + " " + NO_PEOPLE + " " + FORMAT)
             else:
                 log("  gemini: no source screenshot; asking for a prompt from the narration")
-                _send(page, box, NARRATION + vo[:1200] + " " + FORMAT)
+                _send(page, box, NARRATION + vo[:1200] + " " + NO_PEOPLE + " " + FORMAT)
             answer = _wait_answer(page, n0, timeout, step)
             prompt = extract_prompt(answer)
             if not prompt: raise RuntimeError("no prompt found in Gemini's answer")
@@ -237,7 +241,7 @@ def _session(cfg, image, aspect, vo, out, timeout, log, evidence, extras=()):
             step = "generate"
             shape = "Tall vertical 9:16 portrait image." if aspect == "9:16" else "Wide horizontal 16:9 landscape image."
             box = _box(page)
-            src = _ask_image(page, box, f"{GENERATE}{prompt} {shape} No text, letters, logos or brand names.", timeout, step)
+            src = _ask_image(page, box, f"{GENERATE}{prompt} {shape} No text, letters, logos or brand names. No real or recognizable people.", timeout, step)
             # 5: download (Gemini's full-size download button first, else the image source)
             step = "download"
             _download(context, page, src, out)
@@ -245,7 +249,7 @@ def _session(cfg, image, aspect, vo, out, timeout, log, evidence, extras=()):
             for k, extra in enumerate(extras):
                 try:
                     log(f"  gemini: image {k + 2}: {VARIANTS[k % len(VARIANTS)].split(',')[0].lower()}")
-                    src = _ask_image(page, _box(page), f"{VARIANTS[k % len(VARIANTS)]} {shape} No text, letters, logos or brand names.",
+                    src = _ask_image(page, _box(page), f"{VARIANTS[k % len(VARIANTS)]} {shape} No text, letters, logos or brand names. No real or recognizable people.",
                                      timeout, "generate")
                     _download(context, page, src, extra)
                 except Exception as e:   # the first image is already saved: keep it, report the extra one (a limit hit here is
