@@ -37,6 +37,11 @@ On the explainer, shots locked to a named subject now go down the image ladder i
 - Cloud stills: no provider is configured.
 - CapCut: off.
 
+**No on-screen labels (2026-10-21):** rung tags (`GENERATED · GEMINI`, `GENERATED · FLOW`, `SOURCE · ...`, `ILLUSTRATIVE`,
+`SYNTHETIC`, `GRAPHICS`, `RECONSTRUCTION`) are kept in the timeline JSON and the job log but never drawn on the video. AI use
+is disclosed through YouTube's "Altered content" answer instead (the Publisher sets Yes when a timeline has a
+`GENERATED · GEMINI / FLOW / WanGP` tag, or the Newsroom's `ai_content.json` says so).
+
 Every rung is isolated (`short._safe`). A failure is logged with its reason and the next rung runs. Pause and cancel
 still propagate. The job log prints the ladder line, then one decision line per slot, e.g.
 `b1#2: new image from gemini (described from the source screenshot), rembg parallax`.
@@ -104,7 +109,12 @@ that illustrates this narration..."). No other model is involved: no DeepSeek, B
 | Gemini declines / no image within `imagegen_timeout` (240 s) | That beat falls to Flow. |
 | Any failure | Saves `short/imagegen/<beat>_gemini_<step>_fail.png` + `.html` (steps: open, describe, generate, download, extraN) for selector fixes when Gemini's page changes. |
 
-**Settings:** `imagegen_on`, `gemini_profile`, `gemini_url`, `imagegen_timeout`, `imagegen_per_beat` (2),
+**No real people:** the describe / narration prompt requires anonymous figures (from behind, silhouettes, hands, out of
+focus) and every generate request adds "No real or recognizable people" (added 2026-10-21 after an image resembled a real
+former president). Flow prompts carry the same rule.
+
+**Settings:** `imagegen_on`, `gemini_profile`, `gemini_url`, `imagegen_timeout`, `imagegen_per_beat` (3: scene, another
+angle, close-up; raised from 2 on 2026-10-21 because 165 s Shorts used Flow for every beat's third visual),
 `imagegen_max_per_video` (8 beats), `imagegen_cooldown_hours`, `imagegen_headless` (false).
 
 **Account note:** Gemini and Flow automate the same Google account. On 2026-10-10 the project removed Gemini browser
