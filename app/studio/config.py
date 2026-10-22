@@ -13,7 +13,7 @@ DEFAULTS = {
     "flow_profile": "",               # Chrome profile for Flow ("" = <jobs_dir parent>\flow_profile)
     "flow_url": "https://labs.google/fx/tools/flow",
     "flow_timeout": 480,              # seconds to wait for one generated clip (Flow queues at busy times)
-    "flow_max_per_video": 4,          # Flow clips per output (credits)
+    "flow_max_per_video": 1,          # Flow clips per output: Google account + credits, only when everything else failed
     "flow_headless": False,
     "flow_auto_approve": True,        # click Flow's "Approve" (spend the quoted credits) for each clip; never "Always approve"
     # image generator (imagegen.py, rung 3): Gemini describes the source screenshot, writes a prompt, generates the image;
