@@ -642,9 +642,12 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
     cap = int(cfg.get("imagegen_max_per_video", 8))
     if len(used) >= cap:
         log(f"  image generators: {cap} images already made for this video; next rung"); return []
-    pref = cfg.get("imagegen_first") if cfg.get("imagegen_first") in order else None   # tried first for every video (hf: free)
-    first = _job_provider(cfg, sd, [x for x in order if x != pref] or order)   # the rest take turns as the fallback
-    tries = ([pref] if pref else []) + [first] + [x for x in order if x not in (first, pref)]
+    if not cfg.get("imagegen_rotate", False):   # fixed priority (default): the list order, every beat
+        pref, first, tries = None, order[0], list(order)
+    else:   # rotation: one service per video, taking turns (imagegen_first tried before it)
+        pref = cfg.get("imagegen_first") if cfg.get("imagegen_first") in order else None
+        first = _job_provider(cfg, sd, [x for x in order if x != pref] or order)
+        tries = ([pref] if pref else []) + [first] + [x for x in order if x not in (first, pref)]
     image = str(image) if image and Path(image).is_file() else None
     timeout = int(cfg.get("imagegen_timeout", 240))
     vo = str(sec.get("vo") or sec.get("still_prompt") or "")
@@ -686,7 +689,7 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
             log(f"  {site} failed ({str(e).splitlines()[0][:200]})" + (f"; screenshot {fails[-1]}" if fails else "") + "; next service")
             continue
         got = [out] + [x for x in extras if x.is_file()]
-        if site not in (first, pref):   # the video's service is out: the rest of this video uses the one that worked (one look per video)
+        if cfg.get("imagegen_rotate", False) and site not in (first, pref):   # the video's service is out: the rest of this video uses the one that worked (one look per video)
             try: (d / "provider.txt").write_text(site, encoding="utf-8")
             except OSError: pass
         used[key] = {"prompt": prompt, "site": site, "files": [x.name for x in got], "from_screenshot": bool(image),

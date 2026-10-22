@@ -74,7 +74,8 @@ class ServiceRotation(unittest.TestCase):
     def setUp(self):
         imagegen.reset()
         self.root = Path(tempfile.mkdtemp())
-        self.cfg = {"jobs_dir": str(self.root / "jobs"), "imagegen_delay_secs": [0, 0], "imagegen_providers": ["gemini", "chatgpt", "bing"]}
+        self.cfg = {"jobs_dir": str(self.root / "jobs"), "imagegen_delay_secs": [0, 0], "imagegen_providers": ["gemini", "chatgpt", "bing"],
+                    "imagegen_rotate": True}
 
     def fake(self, site, calls, fail=None):
         def run(cfg, *a, **k):
@@ -118,10 +119,24 @@ class ServiceRotation(unittest.TestCase):
         with patch.object(imagegen, "_session_hf", self.fake("hf", calls, imagegen.Skip("Hugging Face quota", -1))), \
                 patch.object(imagegen, "_session", self.fake("gemini", calls)), \
                 patch.object(imagegen, "_session_chatgpt", self.fake("chatgpt", calls)):
-            cfg = dict(self.cfg, imagegen_providers=["gemini", "chatgpt", "bing", "hf"], imagegen_first="hf")
+            cfg = dict(self.cfg, imagegen_providers=["gemini", "chatgpt", "bing", "hf"], imagegen_first="hf", imagegen_rotate=True)
             imagegen.generate(cfg, self.sd("A"), {"id": "b0", "vo": "x"}, "b0", print)   # hf out of quota -> the video's rotation service
             imagegen.generate(cfg, self.sd("B"), {"id": "b0", "vo": "x"}, "b0", print)   # hf cooling down: straight to the next in turn
         self.assertEqual(calls, ["hf", "gemini", "chatgpt"])
+
+    def test_fixed_priority_gemini_last(self):
+        calls = []
+        cfg = {"jobs_dir": str(self.root / "jobs"), "imagegen_delay_secs": [0, 0]}   # the defaults: hf -> chatgpt -> bing -> gemini
+        from app.studio import config
+        cfg = dict(config.DEFAULTS, **cfg)
+        with patch.object(imagegen, "_session_hf", self.fake("hf", calls, RuntimeError("vision check: plane with four wings"))), \
+                patch.object(imagegen, "_session_chatgpt", self.fake("chatgpt", calls, imagegen.Skip("ChatGPT limit", -1))), \
+                patch.object(imagegen, "_session_bing", self.fake("bing", calls)), \
+                patch.object(imagegen, "_session", self.fake("gemini", calls)):
+            img, site, _ = imagegen.generate(cfg, self.sd("A"), {"id": "b0", "vo": "x"}, "b0", print)
+            imagegen.generate(cfg, self.sd("B"), {"id": "b0", "vo": "x"}, "b0", print)   # next video: hf again, chatgpt cooling
+        self.assertEqual(site, "bing")
+        self.assertEqual(calls, ["hf", "chatgpt", "bing", "hf", "bing"])   # Gemini never touched while another works
 
     def test_one_image_per_beat_by_default(self):
         calls = []
