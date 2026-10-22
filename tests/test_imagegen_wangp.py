@@ -113,6 +113,16 @@ class ServiceRotation(unittest.TestCase):
         self.assertEqual((sd / "imagegen" / "provider.txt").read_text(), "chatgpt")
         self.assertIn("gemini", json.loads((self.root / "imagegen_state.json").read_text()))
 
+    def test_hugging_face_first_then_the_rotation(self):
+        calls = []
+        with patch.object(imagegen, "_session_hf", self.fake("hf", calls, imagegen.Skip("Hugging Face quota", -1))), \
+                patch.object(imagegen, "_session", self.fake("gemini", calls)), \
+                patch.object(imagegen, "_session_chatgpt", self.fake("chatgpt", calls)):
+            cfg = dict(self.cfg, imagegen_providers=["gemini", "chatgpt", "bing", "hf"], imagegen_first="hf")
+            imagegen.generate(cfg, self.sd("A"), {"id": "b0", "vo": "x"}, "b0", print)   # hf out of quota -> the video's rotation service
+            imagegen.generate(cfg, self.sd("B"), {"id": "b0", "vo": "x"}, "b0", print)   # hf cooling down: straight to the next in turn
+        self.assertEqual(calls, ["hf", "gemini", "chatgpt"])
+
     def test_one_image_per_beat_by_default(self):
         calls = []
         with patch.object(imagegen, "_session", self.fake("gemini", calls)):
