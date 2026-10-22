@@ -29,3 +29,4 @@ app/kenv/
 
 # ladder v2: Claude-written Remotion components (temporary, deleted after each render)
 remotion/src/gen/
+models/
