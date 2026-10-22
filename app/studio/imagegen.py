@@ -573,10 +573,42 @@ def _session_hf(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
         raise RuntimeError(f"Hugging Face: {msg[:200]}")
     _answered("hf")
     from PIL import Image
-    for f, dest in zip(files, [out] + list(extras)):
+    for k, (f, dest) in enumerate(zip(files, [out] + list(extras))):
         src = f.get("path") if isinstance(f, dict) else f
         with Image.open(src) as im: im.convert("RGB").save(dest, "JPEG", quality=93)
+        why = _has_text(cfg, dest, log)
+        if why and k == 0:   # one more try with a new seed, then the next service
+            log(f"  hf: image has text ({why}); one more try")
+            try:
+                _pause(cfg, log, "a text-free retry", "hf")
+                res = client.predict(prompt, 0, True, w, h, 4, api_name="/infer"); _answered("hf")
+                f2 = res[0] if isinstance(res, (list, tuple)) else res
+                with Image.open(f2.get("path") if isinstance(f2, dict) else f2) as im: im.convert("RGB").save(dest, "JPEG", quality=93)
+                why = _has_text(cfg, dest, log)
+            except Exception as e:
+                why = why or str(e)[:80]
+            if why:
+                Path(dest).unlink(missing_ok=True)
+                raise RuntimeError(f"Hugging Face images kept showing text ({why})")
+        elif why:
+            log(f"  hf: image {k + 1} has text ({why}); dropped"); Path(dest).unlink(missing_ok=True)
     return prompt
+
+
+TEXT_CHECK = ('Look closely at this image. Does it contain any readable or pseudo letters, words, numbers, signs, logos or '
+              'license plates (even small or garbled ones)? Reply with JSON only: {"text": "yes" or "no", "what": "<where, a few words>"}')
+
+
+def _has_text(cfg, image, log):
+    """Local vision check (Ollama on this PC, no account usage): -> short reason if the image shows text, else ""."""
+    if cfg.get("vet_provider", "local") != "local" or not cfg.get("imagegen_text_check", True): return ""
+    try:
+        from .footage import _vision
+        from .llm import parse_json
+        j = parse_json(_vision(cfg, image, TEXT_CHECK))
+        return str(j.get("what") or "text")[:60] if str(j.get("text", "no")).strip().lower() in ("yes", "true", "1") else ""
+    except Exception as e:
+        log(f"  text check unavailable ({str(e)[:80]}); keeping the image"); return ""
 
 
 # ---------------------------------------------------------------- ladder entry

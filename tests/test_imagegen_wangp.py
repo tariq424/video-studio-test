@@ -242,3 +242,26 @@ def test_gemini_defaults_headless_and_paced():
     from app.studio import config
     assert config.DEFAULTS["imagegen_headless"] is True
     assert config.DEFAULTS["imagegen_delay_secs"] == [15, 30]
+
+
+def test_hf_images_with_text_are_retried_then_handed_on(tmp_path, monkeypatch):
+    import sys, types
+    from PIL import Image
+    src = tmp_path / "gen.png"; Image.new("RGB", (64, 64), "red").save(src)
+    calls = []
+    class FakeClient:
+        def __init__(self, *a, **k): pass
+        def predict(self, *a, **k): calls.append(1); return (str(src), 1)
+    monkeypatch.setitem(sys.modules, "gradio_client", types.SimpleNamespace(Client=FakeClient))
+    from app.studio import flow
+    monkeypatch.setattr(flow, "visual_prompt", lambda cfg, sec, log: "a quiet street at dusk")
+    cfg = {"imagegen_delay_secs": [0, 0]}
+    answers = iter(["license plate", ""])
+    monkeypatch.setattr(imagegen, "_has_text", lambda cfg, img, log: next(answers))
+    out = tmp_path / "o.jpg"
+    imagegen._session_hf(cfg, {"vo": "x"}, "16:9", out, 30, print, None)
+    assert out.is_file() and len(calls) == 2   # retried once, the second image is clean
+    monkeypatch.setattr(imagegen, "_has_text", lambda cfg, img, log: "sign")
+    import pytest
+    with pytest.raises(RuntimeError): imagegen._session_hf(cfg, {"vo": "x"}, "16:9", tmp_path / "p.jpg", 30, print, None)
+    assert not (tmp_path / "p.jpg").exists()
