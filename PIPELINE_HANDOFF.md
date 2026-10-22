@@ -123,6 +123,28 @@ again.
 
 ---
 
+## 2b. Three image services, rotating (2026-10-21)
+
+Rung 3 is no longer Gemini only. `imagegen.generate_many` picks **one service per video**, rotating between videos
+(`imagegen_providers`, default Gemini -> ChatGPT -> Bing; the counter is `rotation` in `imagegen_state.json`, the video's
+choice is `<sd>/imagegen/provider.txt`). If that service fails, the beat tries the next; a usage limit or human check cools
+the service down (per service, `imagegen_cooldown_hours`) and the rest of the video stays on the service that worked.
+
+| Service | Browser / profile | How |
+|---|---|---|
+| Gemini | Chrome, `F:\videos_test\flow_profile` | describe screenshot -> PROMPT: -> generate, one chat per beat |
+| ChatGPT | Chrome, `F:\videos_test\chatgpt_profile` (tarrigg@gmail.com, Plus) | screenshot attached (else narration) -> "create an image" |
+| Bing Image Creator | Edge, `F:\videos_test\bing_profile` (tarrigg@outlook.com) | text prompt from `flow.visual_prompt` (DeepSeek); 4 versions per request |
+
+All headless with a normal browser user agent, 15-30 s random pause between requests to the same service, no real people.
+**1 AI image per beat** (`imagegen_per_beat` 1; was 3). Sign in: `scripts\imagegen-login.ps1 -Site gemini|chatgpt|bing`
+(or `login-<site>` in `F:\code\.restart-only`). `scripts/imagegen_poc.py` is the one-image smoke test per service.
+Tags: `GENERATED · GEMINI|CHATGPT|BING` (the Publisher's altered-content check matches GENERATED).
+
+Stock: candidates DeepSeek ranked by meaning skip the literal word gate (`footage.on_subject`) and go straight to the
+local vision check (Qwen2.5-VL via Ollama); the word gate still guards the unranked fallback candidates and subject-locked
+slots. Before this, the gate threw out ranked clips like "server racks" for an AI-compute beat, which sent ~3 of 4 beats to Gemini.
+
 ## 3. Remotion parallax workflow (rung 4)
 
 `depth.cutout_layers(image, prefix, log, size)`:

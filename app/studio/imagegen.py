@@ -1,4 +1,13 @@
-"""Image generator rung (visual ladder v2, rung 3): Google Gemini in the signed-in Chrome profile, via Playwright.
+"""Image generator rung (visual ladder v2, rung 3): Gemini, ChatGPT and Bing Image Creator in signed-in browser
+profiles, via Playwright, with no visible window. ONE service per video, rotating between videos (Gemini -> ChatGPT ->
+Bing -> ...), so each account carries a third of the load and a video keeps one look. If a service fails or hits a limit,
+the beat moves to the next service (a limit or a human check cools that service down / skips it for the job).
+  gemini : Chrome, the Flow profile (F:\\videos_test\\flow_profile); the describe -> prompt -> generate chat below
+  chatgpt: Chrome, F:\\videos_test\\chatgpt_profile; screenshot (or narration) -> "create an image" in one chat
+  bing   : Edge,   F:\\videos_test\\bing_profile; a text prompt (DeepSeek writes it from the beat); 4 images per request
+Sign in once with scripts\\imagegen-login.ps1 -Site gemini|chatgpt|bing.
+
+Gemini's workflow:
 
 Workflow, all in one Gemini chat:
   1. Open Gemini (https://gemini.google.com/app) in the Google-signed-in profile (default: the Flow profile, same account).
@@ -15,7 +24,8 @@ Failures are logged and the ladder moves on (Flow is next). Not signed in or a C
 Gemini for the job (never automated); a usage-limit message cools it down for imagegen_cooldown_hours (default 6, saved
 across jobs). Each failure saves <key>_gemini_<step>_fail.png/.html for selector fixes.
 Settings: imagegen_on, gemini_profile ("" = the Flow profile), gemini_url, imagegen_timeout (240), imagegen_max_per_video (8),
-imagegen_cooldown_hours, imagegen_headless (true), imagegen_delay_secs ([15, 30]: human pacing between requests).
+imagegen_cooldown_hours, imagegen_headless (true), imagegen_delay_secs ([15, 30]: human pacing between requests, per
+service), imagegen_providers (["gemini", "chatgpt", "bing"]: the rotation), chatgpt_profile, bing_profile.
 """
 import json
 import re
@@ -36,32 +46,41 @@ VARIANTS = ["Generate a second image of the same scene from a different camera a
             "Generate another image of the same scene as a close-up of the main subject, same style and lighting."]
 
 RATE = re.compile(r"(reached your (daily )?limit|usage limit|limit for (today|now)|try again (later|tomorrow|in \d+)|"
-                  r"too many requests|out of (quota|credits))", re.I)
+                  r"too many requests|out of (quota|credits)|(hit|reached) (the|your) [a-z ]{0,30}limit|limit resets)", re.I)
 CAPTCHA = re.compile(r"(captcha|unusual traffic|verify (that )?you('| a)re (a )?human|are you a robot|not a robot)", re.I)
 REFUSED = re.compile(r"(can.t (create|generate|make) (images|that|this)|couldn.t (create|generate)|i can.t help with (that|this)|"
                      r"against (my|our) (policies|guidelines)|unable to (create|generate))", re.I)
 
-_job_skip = {"why": ""}
-_last = {"t": 0.0}   # when Gemini last answered (any beat): requests are paced like a person, not a script
+PROVIDERS = ("gemini", "chatgpt", "bing")
+_job_skip = {}       # site -> why it's skipped for the rest of this job
+_last = {}           # site -> when it last answered: each service is paced like a person, not a script
+_site = {"cur": "gemini"}   # the service that made the images generate_many returned last (for tag())
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+UA_EDGE = UA + " Edg/141.0.0.0"
+CHATGPT_URL = "https://chatgpt.com/"
+BING_URL = "https://www.bing.com/images/create"
 
 
-def _pause(cfg, log, why):
-    """Wait a human-looking 15-30 s (imagegen_delay_secs) since Gemini's last answer before the next request."""
+def _pause(cfg, log, why, site="gemini"):
+    """Wait a human-looking 15-30 s (imagegen_delay_secs) since this service's last answer before the next request."""
     import random
     lo, hi = (cfg.get("imagegen_delay_secs") or [15, 30])[:2]
-    wait = random.uniform(float(lo), float(hi)) - (time.time() - _last["t"])
+    wait = random.uniform(float(lo), float(hi)) - (time.time() - _last.get(site, 0.0))
     if wait > 0:
-        log(f"  gemini: pausing {wait:.0f}s before {why} (human pacing)")
+        log(f"  {site}: pausing {wait:.0f}s before {why} (human pacing)")
         time.sleep(wait)
 
 
-def _answered():
-    _last["t"] = time.time()
+def _answered(site="gemini"):
+    _last[site] = time.time()
 
 
 def reset():
-    _job_skip["why"] = ""
+    _job_skip.clear()
+
+
+def last_site():
+    return _site["cur"]
 
 
 class Skip(Exception):
@@ -76,25 +95,49 @@ def _state_path(cfg, sd):
     return Path(cfg.get("jobs_dir") or Path(sd).parent.parent).parent / "imagegen_state.json"
 
 
-def _cooling(cfg, sd):
-    try: e = (json.loads(_state_path(cfg, sd).read_text(encoding="utf-8")) or {}).get("gemini") or {}
+def _cooling(cfg, sd, site="gemini"):
+    try: e = (json.loads(_state_path(cfg, sd).read_text(encoding="utf-8")) or {}).get(site) or {}
     except (OSError, ValueError): return None
     return e if float(e.get("until") or 0) > time.time() else None
 
 
-def _cool(cfg, sd, secs, why):
+def _cool(cfg, sd, secs, why, site="gemini"):
     p = _state_path(cfg, sd)
     try: st = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError): st = {}
-    st["gemini"] = {"until": time.time() + secs, "why": why, "set": time.strftime("%Y-%m-%d %H:%M")}
+    st[site] = {"until": time.time() + secs, "why": why, "set": time.strftime("%Y-%m-%d %H:%M")}
     try: p.parent.mkdir(parents=True, exist_ok=True); p.write_text(json.dumps(st, indent=1), encoding="utf-8")
     except OSError: pass
 
 
-def profile_dir(cfg):
+def profile_dir(cfg, site="gemini"):
+    if site != "gemini":
+        if cfg.get(f"{site}_profile"): return Path(cfg[f"{site}_profile"])
+        return Path(cfg.get("jobs_dir") or ".").parent / f"{site}_profile"
     if cfg.get("gemini_profile"): return Path(cfg["gemini_profile"])
     from .flow import profile_dir as flow_profile
     return flow_profile(cfg)
+
+
+def _job_provider(cfg, sd, order):
+    """One service per video, rotating between videos. Remembered in <sd>/imagegen/provider.txt."""
+    f = Path(sd) / "imagegen" / "provider.txt"
+    try:
+        cur = f.read_text(encoding="utf-8").strip()
+        if cur in order: return cur
+    except OSError:
+        pass
+    p = _state_path(cfg, sd)
+    try: st = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError): st = {}
+    n = int(st.get("rotation", 0) or 0)
+    cur = order[n % len(order)]
+    st["rotation"] = n + 1
+    try: p.parent.mkdir(parents=True, exist_ok=True); p.write_text(json.dumps(st, indent=1), encoding="utf-8")
+    except OSError: pass
+    try: f.parent.mkdir(parents=True, exist_ok=True); f.write_text(cur, encoding="utf-8")
+    except OSError: pass
+    return cur
 
 
 # ---------------------------------------------------------------- page helpers
@@ -337,66 +380,251 @@ def _download(context, page, src, out):
     tmp.unlink(missing_ok=True)
 
 
+# ---------------------------------------------------------------- ChatGPT and Bing
+def _launch(pw, cfg, site):
+    prof = profile_dir(cfg, site)
+    if not prof.exists() or not any(prof.iterdir()):
+        raise Skip(f"no signed-in {site} profile at {prof}; run scripts\\imagegen-login.ps1 -Site {site} once")
+    headless = bool(cfg.get("imagegen_headless", True))
+    kw = dict(user_data_dir=str(prof), headless=headless, accept_downloads=True, channel="msedge" if site == "bing" else "chrome",
+              viewport={"width": 1440, "height": 900}, args=["--disable-blink-features=AutomationControlled"])
+    if headless: kw["user_agent"] = UA_EDGE if site == "bing" else UA
+    context = pw.chromium.launch_persistent_context(**kw)
+    return context, (context.pages[0] if context.pages else context.new_page())
+
+
+def _check_site(page, site, step):
+    body = _body(page)
+    if CAPTCHA.search(body):
+        raise Skip(f"{site} shows a human check; not automated: open the profile with scripts\\imagegen-login.ps1 -Site {site} and complete it")
+    m = RATE.search(body)
+    if m: raise Skip(f"{site} usage limit (\"{m.group(0)}\")", -1)
+    return body
+
+
+def _new_images(page, before, pattern=None, min_side=400):
+    js = """([before, pat, minSide]) => Array.from(document.images).filter(i => i.complete && Math.min(i.naturalWidth, i.naturalHeight) >= minSide
+        && !before.includes(i.currentSrc || i.src) && (!pat || new RegExp(pat).test(i.currentSrc || i.src)))
+        .map(i => i.currentSrc || i.src)"""
+    try: return page.evaluate(js, [list(before), pattern, min_side])
+    except Exception: return []
+
+
+def _session_chatgpt(cfg, image, aspect, vo, out, timeout, log, evidence, extras=()):
+    from playwright.sync_api import sync_playwright
+    from .flow import _first
+    shape = "Tall vertical 9:16 portrait image." if aspect == "9:16" else "Wide horizontal 16:9 landscape image."
+    rules = "Photorealistic. No text, letters, logos or brand names. " + NO_PEOPLE.replace("The prompt must", "It must")
+    with sync_playwright() as pw:
+        context, page = _launch(pw, cfg, "chatgpt")
+        step = "open"
+        try:
+            page.goto(CHATGPT_URL, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(5000)
+            _check_site(page, "chatgpt", step)
+            box = _first(page, ["#prompt-textarea", "div.ProseMirror[contenteditable=true]", "div[contenteditable=true][role=textbox]",
+                                "textarea[placeholder*='Ask' i]"], 20000)
+            if not box:
+                if re.search(r"\b(log in|sign up)\b", _body(page), re.I):
+                    raise Skip("the ChatGPT profile is not signed in; run scripts\\imagegen-login.ps1 -Site chatgpt")
+                raise RuntimeError("ChatGPT's prompt box was not found (the page may have changed)")
+            step = "generate"
+            _pause(cfg, log, "this beat's image", "chatgpt")
+            used = False
+            if image:
+                try:
+                    inp = page.locator("input[type=file]")
+                    if inp.count():
+                        inp.first.set_input_files(str(image)); page.wait_for_timeout(5000); used = True
+                except Exception:
+                    used = False
+            if used:
+                prompt = ("Create a new, original image inspired by the scene in this screenshot: keep its subject and mood, "
+                          f"use a fresh composition. {shape} {rules}")
+                log(f"  chatgpt: screenshot attached ({Path(image).name}); asking for an image of that scene")
+            else:
+                prompt = f"Create an image that illustrates this narration: {vo[:900]} {shape} {rules}"
+                log("  chatgpt: asking for an image from the narration")
+            before = set(_big_images(page))
+            box.click(); page.keyboard.insert_text(prompt); page.wait_for_timeout(600); page.keyboard.press("Enter")
+            src = _wait_chatgpt(page, before, timeout, step)
+            step = "download"
+            _download(context, page, src, out)
+            for k, extra in enumerate(extras):
+                try:
+                    _pause(cfg, log, f"image {k + 2}", "chatgpt")
+                    log(f"  chatgpt: image {k + 2}: {VARIANTS[k % len(VARIANTS)].split(',')[0].lower()}")
+                    before = set(_big_images(page))
+                    box = _first(page, ["#prompt-textarea", "div.ProseMirror[contenteditable=true]", "div[contenteditable=true][role=textbox]"], 10000)
+                    box.click(); page.keyboard.insert_text(f"{VARIANTS[k % len(VARIANTS)]} {shape} {rules}"); page.keyboard.press("Enter")
+                    _download(context, page, _wait_chatgpt(page, before, timeout, "generate"), extra)
+                except Exception as e:
+                    log(f"  chatgpt: image {k + 2} failed ({str(e).splitlines()[0][:150]})"); Path(extra).unlink(missing_ok=True)
+                    evidence(page, f"extra{k + 2}"); break
+            return prompt
+        except Exception:
+            evidence(page, step); raise
+        finally:
+            context.close()
+
+
+def _wait_chatgpt(page, before, timeout, step):
+    t0, last, stable = time.time(), None, 0
+    while time.time() - t0 < timeout:
+        page.wait_for_timeout(3000)
+        body = _check_site(page, "chatgpt", step)
+        busy = page.locator("[data-testid='stop-button']").count() or re.search(r"Creating image|Generating image", body)
+        fresh = [x for x in _big_images(page) if x not in before]
+        if fresh and not busy:
+            stable = stable + 1 if fresh[-1] == last else 0
+            last = fresh[-1]
+            if stable >= 2:   # the same final image three checks in a row (not the blurred preview)
+                _answered("chatgpt"); return last
+        elif not busy and REFUSED.search(body[-1500:]) and time.time() - t0 > 20:
+            raise RuntimeError("ChatGPT declined to generate the image")
+    raise RuntimeError(f"no image from ChatGPT after {timeout}s")
+
+
+def _session_bing(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
+    from playwright.sync_api import sync_playwright
+    from .flow import visual_prompt
+    prompt = re.sub(r"(?i)slow (cinematic )?camera move[^.]*\.?", "", visual_prompt(cfg, sec, log))
+    prompt = re.sub(r"\s+", " ", prompt).strip()[:420] + " No text, no logos. No real or recognizable people."
+    with sync_playwright() as pw:
+        context, page = _launch(pw, cfg, "bing")
+        step = "open"
+        try:
+            page.goto(BING_URL, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(5000)
+            _check_site(page, "bing", step)
+            box = page.get_by_placeholder("Describe the image", exact=False).first
+            try: box.wait_for(state="visible", timeout=20000)
+            except Exception: raise RuntimeError("Bing's prompt box was not found (the page may have changed)")
+            if page.locator("a#id_l, a:has-text('Sign in'), button:has-text('Join & Create')").count() and \
+                    not page.locator("#id_n, [aria-label*='Account' i], #id_p").count():
+                log("  bing: the page shows a Sign in link (it often does even when signed in); trying anyway")
+            # the aspect ratio control (9:16 for Shorts); best effort
+            try:
+                want = "9:16" if aspect == "9:16" else "16:9"
+                page.get_by_text("Aspect Ratio", exact=False).first.click(timeout=3000); page.wait_for_timeout(600)
+                page.get_by_text(want, exact=True).first.click(timeout=3000)
+            except Exception:
+                pass
+            step = "generate"
+            _pause(cfg, log, "this beat's image", "bing")
+            box.click(); page.keyboard.insert_text(prompt); page.wait_for_timeout(500)
+            log(f"  bing: prompt ({len(prompt.split())} words): \"{prompt[:140]}...\"")
+            page.get_by_role("button", name="Generate").first.click()
+            t0, got = time.time(), []
+            while time.time() - t0 < timeout:
+                page.wait_for_timeout(3000)
+                body = _check_site(page, "bing", step)
+                got = _new_images(page, [], r"/th/id/OIG|OIG\d", 200)
+                if got:
+                    page.wait_for_timeout(4000)
+                    got = _new_images(page, [], r"/th/id/OIG|OIG\d", 200); break
+                if re.search(r"content warning|unsafe image|can.t create|blocked", body, re.I):
+                    raise RuntimeError("Bing declined the prompt")
+            if not got: raise RuntimeError(f"no image from Bing after {timeout}s")
+            _answered("bing")
+            step = "download"
+            seen = []
+            for u in got:
+                full = u.split("?")[0]
+                if full not in seen: seen.append(full)
+            _download(context, page, seen[0], out)
+            for k, extra in enumerate(extras):   # Bing returns several versions per request: the extras cost no extra request
+                if k + 1 < len(seen):
+                    try: _download(context, page, seen[k + 1], extra)
+                    except Exception as e: log(f"  bing: image {k + 2} failed ({str(e)[:120]})"); Path(extra).unlink(missing_ok=True)
+            return prompt
+        except Exception:
+            evidence(page, step); raise
+        finally:
+            context.close()
+
+
 # ---------------------------------------------------------------- ladder entry
 def generate(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
-    """Rung 3. -> (image_path, "gemini", prompt) or (None, None, None). Never raises (cancel aside).
-    count > 1: the same chat also makes count-1 more images of the scene (another angle, a close-up); see generate_many."""
+    """Rung 3. -> (image_path, site, prompt) or (None, None, None). Never raises (cancel aside)."""
     res = generate_many(cfg, sd, sec, key, log, aspect, image, count)
-    return (res[0][0], "gemini", res[0][1]) if res else (None, None, None)
+    return (res[0][0], _site["cur"], res[0][1]) if res else (None, None, None)
 
 
 def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
-    """-> [(image_path, prompt), ...] (first = the recreated scene, then the variants), or []. Never raises (cancel aside)."""
-    count = max(1, min(int(count), 1 + len(VARIANTS), int(cfg.get("imagegen_per_beat", 2))))
+    """-> [(image_path, prompt), ...] (first = the scene, then variants), or []. Never raises (cancel aside).
+    The video's service first (rotation), then the others if it fails; last_site() says which one made them."""
+    count = max(1, min(int(count), 1 + len(VARIANTS), int(cfg.get("imagegen_per_beat", 1))))
     if not cfg.get("imagegen_on", True):
         return []
-    if _job_skip["why"]:
-        log(f"  gemini skipped ({_job_skip['why'][:140]})"); return []
-    cool = _cooling(cfg, sd)
-    if cool:
-        _job_skip["why"] = f"cooling down until {time.strftime('%H:%M', time.localtime(cool['until']))}: {cool['why'][:100]}"
-        log(f"  gemini skipped ({_job_skip['why']})"); return []
+    order = [x for x in (cfg.get("imagegen_providers") or PROVIDERS) if x in PROVIDERS] or ["gemini"]
     d = Path(sd) / "imagegen"; d.mkdir(parents=True, exist_ok=True)
-    led = d / "gemini_usage.json"
+    led = d / "gemini_usage.json"   # (name kept from when Gemini was the only service: one ledger per video)
     try: used = json.loads(led.read_text(encoding="utf-8")) if led.exists() else {}
     except (OSError, ValueError): used = {}
+    if key in used:   # already made (a resumed job)
+        site = used[key].get("site", "gemini")
+        files = [d / f for f in used[key].get("files", [])] or [d / f"{key}_gemini.jpg"] + [d / f"{key}_gemini_{k + 2}.jpg" for k in range(count - 1)]
+        files = [x for x in files if x.is_file()]
+        if files:
+            _site["cur"] = site
+            return [(x, used[key].get("prompt", "")) for x in files]
     cap = int(cfg.get("imagegen_max_per_video", 8))
-    if len(used) >= cap and key not in used:
-        log(f"  gemini: {cap} images already made for this video; next rung"); return []
-    out = d / f"{key}_gemini.jpg"
-    extras = [d / f"{key}_gemini_{k + 2}.jpg" for k in range(count - 1)]
-    if out.is_file() and key in used:
-        return [(x, used[key].get("prompt", "")) for x in [out] + extras if x.is_file()]
+    if len(used) >= cap:
+        log(f"  image generators: {cap} images already made for this video; next rung"); return []
+    first = _job_provider(cfg, sd, order)
+    tries = [first] + [x for x in order if x != first]
     image = str(image) if image and Path(image).is_file() else None
     timeout = int(cfg.get("imagegen_timeout", 240))
-    def evidence(page, step):
+    vo = str(sec.get("vo") or sec.get("still_prompt") or "")
+    for site in tries:
+        if _job_skip.get(site):
+            log(f"  {site} skipped ({_job_skip[site][:140]})"); continue
+        cool = _cooling(cfg, sd, site)
+        if cool:
+            _job_skip[site] = f"cooling down until {time.strftime('%H:%M', time.localtime(cool['until']))}: {cool['why'][:100]}"
+            log(f"  {site} skipped ({_job_skip[site]})"); continue
+        out = d / f"{key}_{site}.jpg"
+        extras = [d / f"{key}_{site}_{k + 2}.jpg" for k in range(count - 1)]
+        def evidence(page, step, site=site):
+            try:
+                (d / f"{key}_{site}_{step}_fail.png").write_bytes(page.screenshot(full_page=False))
+                (d / f"{key}_{site}_{step}_fail.html").write_text(page.content(), encoding="utf-8")
+            except Exception:
+                pass
+        t0 = time.time()
         try:
-            (d / f"{key}_gemini_{step}_fail.png").write_bytes(page.screenshot(full_page=False))
-            (d / f"{key}_gemini_{step}_fail.html").write_text(page.content(), encoding="utf-8")
-        except Exception:
-            pass
-    t0 = time.time()
-    try:
-        prompt = _session(cfg, image, aspect, str(sec.get("vo") or sec.get("still_prompt") or ""), out, timeout, log, evidence, extras)
-    except Skip as s:
-        cool = int(float(cfg.get("imagegen_cooldown_hours", 6)) * 3600) if s.cool == -1 else s.cool
-        _job_skip["why"] = s.why
-        if cool: _cool(cfg, sd, cool, s.why)
-        log(f"  gemini skipped: {s.why}" + (f" (saved: retried after {cool // 3600} h)" if cool else " (rest of this job)") + "; next rung")
-        return []
-    except Exception as e:
-        if str(e) == "cancelled": raise
-        out.unlink(missing_ok=True)
-        fails = sorted(d.glob(f"{key}_gemini_*_fail.png"))
-        log(f"  gemini failed ({str(e).splitlines()[0][:200]})" + (f"; screenshot {fails[-1]}" if fails else "") + "; next rung")
-        return []
-    used[key] = {"prompt": prompt, "from_screenshot": bool(image), "made": time.strftime("%Y-%m-%d %H:%M")}
-    led.write_text(json.dumps(used, indent=1), encoding="utf-8")
-    out.with_suffix(".prompt.txt").write_text(prompt, encoding="utf-8")
-    got = [out] + [x for x in extras if x.is_file()]
-    log(f"  gemini: {len(got)} image(s) ready ({time.time() - t0:.0f}s)")
-    return [(x, prompt) for x in got]
+            if site == "gemini":
+                prompt = _session(cfg, image, aspect, vo, out, timeout, log, evidence, extras)
+            elif site == "chatgpt":
+                prompt = _session_chatgpt(cfg, image, aspect, vo, out, timeout, log, evidence, extras)
+            else:
+                prompt = _session_bing(cfg, sec, aspect, out, timeout, log, evidence, extras)
+        except Skip as s_:
+            cool = int(float(cfg.get("imagegen_cooldown_hours", 6)) * 3600) if s_.cool == -1 else s_.cool
+            _job_skip[site] = s_.why
+            if cool: _cool(cfg, sd, cool, s_.why, site)
+            log(f"  {site} skipped: {s_.why}" + (f" (retried after {cool // 3600} h)" if cool else " (rest of this job)") + "; next service")
+            continue
+        except Exception as e:
+            if str(e) == "cancelled": raise
+            out.unlink(missing_ok=True)
+            fails = sorted(d.glob(f"{key}_{site}_*_fail.png"))
+            log(f"  {site} failed ({str(e).splitlines()[0][:200]})" + (f"; screenshot {fails[-1]}" if fails else "") + "; next service")
+            continue
+        got = [out] + [x for x in extras if x.is_file()]
+        if site != first:   # the video's service is out: the rest of this video uses the one that worked (one look per video)
+            try: (d / "provider.txt").write_text(site, encoding="utf-8")
+            except OSError: pass
+        used[key] = {"prompt": prompt, "site": site, "files": [x.name for x in got], "from_screenshot": bool(image),
+                     "made": time.strftime("%Y-%m-%d %H:%M")}
+        led.write_text(json.dumps(used, indent=1), encoding="utf-8")
+        out.with_suffix(".prompt.txt").write_text(prompt, encoding="utf-8")
+        _site["cur"] = site
+        log(f"  {site}: {len(got)} image(s) ready ({time.time() - t0:.0f}s)")
+        return [(x, prompt) for x in got]
+    return []
 
 
-def tag(site="gemini"):
-    return f"GENERATED · {LABEL}"
+def tag(site=None):
+    return f"GENERATED · {(site or _site['cur']).upper()}"

@@ -459,7 +459,9 @@ def fill(cfg, slots, orient, need, out_dir, log, stop, want_long_side, max_secs,
                 if len(got) >= need[s["id"]]: break
                 c = byid.get(cid)
                 if not c or cid in used: continue
-                if cfg.get("stock_subject_gate", True) and not s.get("cta") and not on_subject(c, s["queries"], sj, narration=s.get("narration") or s.get("text") or ""):
+                ranked = cid in (st["ranked"].get(s["id"]) or [])   # DeepSeek already judged it by meaning: the vision check decides
+                if cfg.get("stock_subject_gate", True) and not s.get("cta") and not (ranked and not sj) and \
+                        not on_subject(c, s["queries"], sj, narration=s.get("narration") or s.get("text") or ""):
                     log(f"  {s['id']}: skipped {c['src']} clip {cid} (its description names neither the shot's subject nor anything the narration says: {c.get('desc', '')[:50]})")
                     st.setdefault("rejected", {}).setdefault(s["id"], []).append({"id": cid, "src": c["src"], "why": "off-subject description", "desc": c.get("desc", "")[:80]})
                     continue

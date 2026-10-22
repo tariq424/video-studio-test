@@ -23,10 +23,11 @@ DEFAULTS = {
     "gemini_url": "https://gemini.google.com/app",
     "imagegen_timeout": 240,
     "imagegen_max_per_video": 8,      # beats per output that get Gemini images
-    "imagegen_per_beat": 3,           # a beat that needs several visuals: the scene + another angle + a close-up (before Flow)
+    "imagegen_per_beat": 1,           # 1 AI image per beat (2026-10-21: protect the accounts); parallax/zoom add the variety
     "imagegen_cooldown_hours": 6,     # after a usage-limit message
     "imagegen_headless": True,        # no visible Chrome window for Gemini (2026-10-21)
-    "imagegen_delay_secs": [15, 30],  # human pacing: a random 15-30 s between Gemini requests (one chat per beat)
+    "imagegen_delay_secs": [15, 30],  # human pacing: a random 15-30 s between requests to the same service
+    "imagegen_providers": ["gemini", "chatgpt", "bing"],   # one service per video, rotating; the others are the fallback
     "source_snapshot_max_uses": 2,    # source screenshots taken just for describing (rung-2 clips/screenshots are reused free)
     # WanGP memory policy (wangp.py): never started with the job; launched for a generation, stopped right after
     "wangp_on_demand": True,

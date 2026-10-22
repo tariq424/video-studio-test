@@ -30,7 +30,8 @@ class GeminiAgainstAMockSite(unittest.TestCase):
         self.sd = self.root / "jobs" / "J" / "short"; self.sd.mkdir(parents=True)
         prof = self.root / "flow_profile"; prof.mkdir(); (prof / "First Run").write_text("")
         self.cfg = {"jobs_dir": str(self.root / "jobs"), "gemini_url": FIXTURE, "flow_chrome": CHROME,
-                    "imagegen_headless": True, "imagegen_timeout": 40, "imagegen_delay_secs": [0, 0]}
+                    "imagegen_headless": True, "imagegen_timeout": 40, "imagegen_delay_secs": [0, 0],
+                    "imagegen_providers": ["gemini"], "imagegen_per_beat": 2}
         from PIL import Image
         self.shot = self.root / "shot.png"; Image.new("RGB", (640, 360), "green").save(self.shot)
 
@@ -67,12 +68,64 @@ class GeminiAgainstAMockSite(unittest.TestCase):
         self.assertTrue((self.sd / "imagegen" / "b2_gemini_generate_fail.png").exists())
 
 
+class ServiceRotation(unittest.TestCase):
+    """One service per video, rotating; a failing service hands the beat (and the rest of the video) to the next."""
+
+    def setUp(self):
+        imagegen.reset()
+        self.root = Path(tempfile.mkdtemp())
+        self.cfg = {"jobs_dir": str(self.root / "jobs"), "imagegen_delay_secs": [0, 0]}
+
+    def fake(self, site, calls, fail=None):
+        def run(cfg, *a, **k):
+            calls.append(site)
+            if fail: raise fail
+            out = next(x for x in a if isinstance(x, Path) and x.suffix == ".jpg")
+            from PIL import Image
+            Image.new("RGB", (640, 360), "blue").save(out); return f"{site} prompt"
+        return run
+
+    def sd(self, name):
+        d = self.root / "jobs" / name / "short"; d.mkdir(parents=True); return d
+
+    def test_videos_rotate_between_services(self):
+        calls = []
+        with patch.object(imagegen, "_session", self.fake("gemini", calls)), \
+                patch.object(imagegen, "_session_chatgpt", self.fake("chatgpt", calls)), \
+                patch.object(imagegen, "_session_bing", self.fake("bing", calls)):
+            for job in ("A", "B", "C", "D"):
+                sd = self.sd(job)
+                imagegen.generate(self.cfg, sd, {"id": "b0", "vo": "x"}, "b0", print)
+                imagegen.generate(self.cfg, sd, {"id": "b1", "vo": "x"}, "b1", print)   # same video: same service
+        self.assertEqual(calls, ["gemini", "gemini", "chatgpt", "chatgpt", "bing", "bing", "gemini", "gemini"])
+        self.assertEqual(imagegen.tag(), "GENERATED · GEMINI")
+
+    def test_a_limit_moves_the_video_to_the_next_service(self):
+        calls = []
+        with patch.object(imagegen, "_session", self.fake("gemini", calls, imagegen.Skip("Gemini usage limit", -1))), \
+                patch.object(imagegen, "_session_chatgpt", self.fake("chatgpt", calls)), \
+                patch.object(imagegen, "_session_bing", self.fake("bing", calls)):
+            sd = self.sd("A")
+            img, site, _ = imagegen.generate(self.cfg, sd, {"id": "b0", "vo": "x"}, "b0", print)
+            self.assertEqual((site, Path(img).name), ("chatgpt", "b0_chatgpt.jpg"))
+            imagegen.generate(self.cfg, sd, {"id": "b1", "vo": "x"}, "b1", print)
+        self.assertEqual(calls, ["gemini", "chatgpt", "chatgpt"])   # Gemini cooled down: not asked again
+        self.assertEqual((sd / "imagegen" / "provider.txt").read_text(), "chatgpt")
+        self.assertIn("gemini", json.loads((self.root / "imagegen_state.json").read_text()))
+
+    def test_one_image_per_beat_by_default(self):
+        calls = []
+        with patch.object(imagegen, "_session", self.fake("gemini", calls)):
+            res = imagegen.generate_many(dict(self.cfg, imagegen_providers=["gemini"]), self.sd("A"), {"id": "b0", "vo": "x"}, "b0", print, count=3)
+        self.assertEqual(len(res), 1)
+
+
 class GeminiLadder(unittest.TestCase):
     def setUp(self):
         imagegen.reset()
         self.root = Path(tempfile.mkdtemp())
         self.sd = self.root / "jobs" / "J" / "short"; self.sd.mkdir(parents=True)
-        self.cfg = {"jobs_dir": str(self.root / "jobs")}
+        self.cfg = {"jobs_dir": str(self.root / "jobs"), "imagegen_providers": ["gemini"]}
 
     def test_no_profile_skips_for_the_job(self):
         logs = []
@@ -170,7 +223,7 @@ def test_pacing_waits_between_gemini_requests(monkeypatch):
     imagegen._pause({"imagegen_delay_secs": [15, 30]}, lambda m: None, "next")
     assert slept and 14 <= slept[0] <= 30
     slept.clear()
-    imagegen._last["t"] = 0
+    imagegen._last["gemini"] = 0
     imagegen._pause({"imagegen_delay_secs": [15, 30]}, lambda m: None, "next")
     assert not slept   # long idle already counts as the pause
 

@@ -465,9 +465,9 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                 lay = _safe(log, f"{s['id']} parallax", lambda: depth.cutout_layers(img, sd / "imagegen" / f"{s['id']}_px{k or ''}", log))
                 if lay:
                     items.append({"type": "layers", "layers": [_rel_sd(p_, sd) for p_ in lay], "tag": imagegen.tag(),
-                                  "rung": "imagegen", "site": "gemini", "described": bool(snap), "variant": k})
+                                  "rung": "imagegen", "site": imagegen.last_site(), "described": bool(snap), "variant": k})
                 else:
-                    items.append({"type": "image", "src": _rel_sd(img, sd), "tag": imagegen.tag(), "rung": "imagegen", "site": "gemini", "variant": k})
+                    items.append({"type": "image", "src": _rel_sd(img, sd), "tag": imagegen.tag(), "rung": "imagegen", "site": imagegen.last_site(), "variant": k})
         if v2 and cfg.get("flow_on", True) and len(items) < n:   # rung 5: Google Flow (paid credits): the last resort for AI video
             from . import flow
             clip = _safe(log, "flow", lambda: flow.generate(cfg, sd, s, f"{s['id']}_flow", log, aspect="9:16"))
