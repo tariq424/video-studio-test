@@ -132,14 +132,22 @@ def hf():
     t0 = time.time()
     try:
         from gradio_client import Client
-        c = Client("black-forest-labs/FLUX.1-schnell", verbose=False)
+        tok = json.loads(Path(r"F:\code\video-studio-test\settings.json").read_text(encoding="utf-8-sig")).get("hf_token") or None
+        if tok:
+            from huggingface_hub import whoami
+            log(f"  hf: token works for account '{whoami(token=tok).get('name')}'")
+        else:
+            log("  hf: no hf_token in settings.json (anonymous quota)")
+        c = Client("black-forest-labs/FLUX.1-schnell", token=tok, verbose=False)
         api = c.view_api(return_format="dict", print_info=False)
         log(f"  hf: endpoints {list(api.get('named_endpoints', {}).keys())}")
-        res = c.predict(PROMPT, 0, True, 1344, 768, 4, api_name="/infer")
+        prompt = ("A red vintage pickup truck parked beside a New Hampshire covered bridge in autumn, golden leaves, "
+                  "late afternoon light, photorealistic, wide 16:9. No text, no logos, no people.")
+        res = c.predict(prompt, 0, True, 1344, 768, 4, api_name="/infer")
         src = res[0] if isinstance(res, (list, tuple)) else res
         src = src.get("path") if isinstance(src, dict) else src
         from PIL import Image
-        dest = OUT / "hf.png"
+        dest = OUT / "hf_token_test.png"
         with Image.open(src) as im: im.save(dest); w, h = im.size
         log(f"  hf: OK in {round(time.time() - t0)}s -> {dest} ({w}x{h})")
         return {"site": "hf", "ok": True, "secs": round(time.time() - t0), "file": str(dest)}

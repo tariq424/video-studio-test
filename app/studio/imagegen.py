@@ -561,7 +561,7 @@ def _session_hf(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
     _pause(cfg, log, "this beat's image", "hf")
     log(f"  hf: prompt ({len(prompt.split())} words): \"{prompt[:140]}...\"")
     try:
-        client = Client(cfg.get("hf_space") or HF_SPACE, hf_token=cfg.get("hf_token") or None, verbose=False)
+        client = Client(cfg.get("hf_space") or HF_SPACE, token=cfg.get("hf_token") or None, verbose=False)
         files = []
         for k in range(1 + len(extras)):
             if k: _pause(cfg, log, f"image {k + 1}", "hf")
