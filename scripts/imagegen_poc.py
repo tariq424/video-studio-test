@@ -127,10 +127,33 @@ def run(site, headless):
             ctx.close()
 
 
+def hf():
+    """Hugging Face FLUX.1-schnell Space through gradio_client (no browser)."""
+    t0 = time.time()
+    try:
+        from gradio_client import Client
+        c = Client("black-forest-labs/FLUX.1-schnell", verbose=False)
+        api = c.view_api(return_format="dict", print_info=False)
+        log(f"  hf: endpoints {list(api.get('named_endpoints', {}).keys())}")
+        res = c.predict(PROMPT, 0, True, 1344, 768, 4, api_name="/infer")
+        src = res[0] if isinstance(res, (list, tuple)) else res
+        src = src.get("path") if isinstance(src, dict) else src
+        from PIL import Image
+        dest = OUT / "hf.png"
+        with Image.open(src) as im: im.save(dest); w, h = im.size
+        log(f"  hf: OK in {round(time.time() - t0)}s -> {dest} ({w}x{h})")
+        return {"site": "hf", "ok": True, "secs": round(time.time() - t0), "file": str(dest)}
+    except Exception as e:
+        log(f"  hf: FAILED after {round(time.time() - t0)}s: {str(e)[:400]}")
+        return {"site": "hf", "ok": False, "error": str(e)[:400]}
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     which = sys.argv[1] if len(sys.argv) > 1 else "both"
     results = []
+    if which == "hf":
+        results.append(hf()); (OUT / "results.json").write_text(json.dumps(results, indent=1), encoding="utf-8"); log("done"); return
     for site in (["chatgpt", "bing"] if which == "both" else [which]):
         log(f"{site}: headless try")
         r = run(site, True); results.append(r)

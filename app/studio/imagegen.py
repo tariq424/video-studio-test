@@ -5,6 +5,7 @@ the beat moves to the next service (a limit or a human check cools that service 
   gemini : Chrome, the Flow profile (F:\\videos_test\\flow_profile); the describe -> prompt -> generate chat below
   chatgpt: Chrome, F:\\videos_test\\chatgpt_profile; screenshot (or narration) -> "create an image" in one chat
   bing   : Edge,   F:\\videos_test\\bing_profile; a text prompt (DeepSeek writes it from the beat); 4 images per request
+  hf     : Hugging Face's free FLUX.1-schnell Space via gradio_client (no browser, no account; hf_token raises the quota)
 Sign in once with scripts\\imagegen-login.ps1 -Site gemini|chatgpt|bing.
 
 Gemini's workflow:
@@ -51,7 +52,8 @@ CAPTCHA = re.compile(r"(captcha|unusual traffic|verify (that )?you('| a)re (a )?
 REFUSED = re.compile(r"(can.t (create|generate|make) (images|that|this)|couldn.t (create|generate)|i can.t help with (that|this)|"
                      r"against (my|our) (policies|guidelines)|unable to (create|generate))", re.I)
 
-PROVIDERS = ("gemini", "chatgpt", "bing")
+PROVIDERS = ("gemini", "chatgpt", "bing", "hf")
+HF_SPACE = "black-forest-labs/FLUX.1-schnell"   # Hugging Face's free hosted FLUX (ZeroGPU): runs on their GPUs, not this PC
 _job_skip = {}       # site -> why it's skipped for the rest of this job
 _last = {}           # site -> when it last answered: each service is paced like a person, not a script
 _site = {"cur": "gemini"}   # the service that made the images generate_many returned last (for tag())
@@ -544,6 +546,39 @@ def _session_bing(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
             context.close()
 
 
+def _session_hf(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
+    """Hugging Face Space (FLUX.1-schnell) through the official gradio client: no browser, no Google/OpenAI/Microsoft
+    account. Free quota per day (more with a free HF token: settings hf_token)."""
+    try:
+        from gradio_client import Client
+    except ImportError:
+        raise Skip("gradio_client is not installed (pip install gradio_client)")
+    from .flow import visual_prompt
+    import shutil
+    prompt = re.sub(r"(?i)slow (cinematic )?camera move[^.]*\.?", "", visual_prompt(cfg, sec, log))
+    prompt = re.sub(r"\s+", " ", prompt).strip()[:700] + " Photorealistic. No text, no logos. No real or recognizable people."
+    w, h = (768, 1344) if aspect == "9:16" else (1344, 768)
+    _pause(cfg, log, "this beat's image", "hf")
+    log(f"  hf: prompt ({len(prompt.split())} words): \"{prompt[:140]}...\"")
+    try:
+        client = Client(cfg.get("hf_space") or HF_SPACE, hf_token=cfg.get("hf_token") or None, verbose=False)
+        files = []
+        for k in range(1 + len(extras)):
+            if k: _pause(cfg, log, f"image {k + 1}", "hf")
+            res = client.predict(prompt, 0, True, w, h, 4, api_name="/infer")
+            files.append(res[0] if isinstance(res, (list, tuple)) else res)
+    except Exception as e:
+        msg = str(e)
+        if re.search(r"quota|rate limit|too many|exceeded", msg, re.I): raise Skip(f"Hugging Face quota ({msg[:120]})", -1)
+        raise RuntimeError(f"Hugging Face: {msg[:200]}")
+    _answered("hf")
+    from PIL import Image
+    for f, dest in zip(files, [out] + list(extras)):
+        src = f.get("path") if isinstance(f, dict) else f
+        with Image.open(src) as im: im.convert("RGB").save(dest, "JPEG", quality=93)
+    return prompt
+
+
 # ---------------------------------------------------------------- ladder entry
 def generate(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
     """Rung 3. -> (image_path, site, prompt) or (None, None, None). Never raises (cancel aside)."""
@@ -598,6 +633,8 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
                 prompt = _session(cfg, image, aspect, vo, out, timeout, log, evidence, extras)
             elif site == "chatgpt":
                 prompt = _session_chatgpt(cfg, image, aspect, vo, out, timeout, log, evidence, extras)
+            elif site == "hf":
+                prompt = _session_hf(cfg, sec, aspect, out, timeout, log, evidence, extras)
             else:
                 prompt = _session_bing(cfg, sec, aspect, out, timeout, log, evidence, extras)
         except Skip as s_:

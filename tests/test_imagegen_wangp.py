@@ -74,7 +74,7 @@ class ServiceRotation(unittest.TestCase):
     def setUp(self):
         imagegen.reset()
         self.root = Path(tempfile.mkdtemp())
-        self.cfg = {"jobs_dir": str(self.root / "jobs"), "imagegen_delay_secs": [0, 0]}
+        self.cfg = {"jobs_dir": str(self.root / "jobs"), "imagegen_delay_secs": [0, 0], "imagegen_providers": ["gemini", "chatgpt", "bing"]}
 
     def fake(self, site, calls, fail=None):
         def run(cfg, *a, **k):
