@@ -256,7 +256,7 @@ def test_hf_images_with_text_are_retried_then_handed_on(tmp_path, monkeypatch):
     from app.studio import flow
     monkeypatch.setattr(flow, "visual_prompt", lambda cfg, sec, log: "a quiet street at dusk")
     cfg = {"imagegen_delay_secs": [0, 0]}
-    answers = iter(["license plate", ""])
+    answers = iter(["plane with four wings", ""])
     monkeypatch.setattr(imagegen, "_has_text", lambda cfg, img, log: next(answers))
     out = tmp_path / "o.jpg"
     imagegen._session_hf(cfg, {"vo": "x"}, "16:9", out, 30, print, None)

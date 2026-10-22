@@ -577,10 +577,10 @@ def _session_hf(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
         src = f.get("path") if isinstance(f, dict) else f
         with Image.open(src) as im: im.convert("RGB").save(dest, "JPEG", quality=93)
         why = _has_text(cfg, dest, log)
-        if why and k == 0:   # one more try with a new seed, then the next service
-            log(f"  hf: image has text ({why}); one more try")
+        if why and k == 0:   # an obvious physical mistake: one more try with a new seed, then the next service
+            log(f"  hf: image looks wrong ({why}); one more try")
             try:
-                _pause(cfg, log, "a text-free retry", "hf")
+                _pause(cfg, log, "a retry", "hf")
                 res = client.predict(prompt, 0, True, w, h, 4, api_name="/infer"); _answered("hf")
                 f2 = res[0] if isinstance(res, (list, tuple)) else res
                 with Image.open(f2.get("path") if isinstance(f2, dict) else f2) as im: im.convert("RGB").save(dest, "JPEG", quality=93)
@@ -589,24 +589,27 @@ def _session_hf(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
                 why = why or str(e)[:80]
             if why:
                 Path(dest).unlink(missing_ok=True)
-                raise RuntimeError(f"Hugging Face images kept showing text ({why})")
+                raise RuntimeError(f"Hugging Face images kept coming out wrong ({why})")
         elif why:
-            log(f"  hf: image {k + 1} has text ({why}); dropped"); Path(dest).unlink(missing_ok=True)
+            log(f"  hf: image {k + 1} looks wrong ({why}); dropped"); Path(dest).unlink(missing_ok=True)
     return prompt
 
 
-TEXT_CHECK = ('Look closely at this image. Does it contain any readable or pseudo letters, words, numbers, signs, logos or '
-              'license plates (even small or garbled ones)? Reply with JSON only: {"text": "yes" or "no", "what": "<where, a few words>"}')
+TEXT_CHECK = ('Check this AI-generated image for obvious physical mistakes only: an object with the wrong number of parts (a plane '
+              'with extra wings or engines, a car with extra wheels, a bike with three pedals), malformed hands or limbs, or impossible, '
+              'melted or fused structures. Ignore any text, lettering, signs or license plates. Reply with JSON only: '
+              '{"broken": "yes" or "no", "what": "<the mistake, a few words>"}')
 
 
 def _has_text(cfg, image, log):
-    """Local vision check (Ollama on this PC, no account usage): -> short reason if the image shows text, else ""."""
+    """Local vision check (Ollama on this PC, no account usage): -> short reason if the image has an obvious physical mistake
+    (a four-winged plane, extra wheels, mangled hands), else "". Text and fake plates are fine."""
     if cfg.get("vet_provider", "local") != "local" or not cfg.get("imagegen_text_check", True): return ""
     try:
         from .footage import _vision
         from .llm import parse_json
         j = parse_json(_vision(cfg, image, TEXT_CHECK))
-        return str(j.get("what") or "text")[:60] if str(j.get("text", "no")).strip().lower() in ("yes", "true", "1") else ""
+        return str(j.get("what") or "a physical mistake")[:60] if str(j.get("broken", "no")).strip().lower() in ("yes", "true", "1") else ""
     except Exception as e:
         log(f"  text check unavailable ({str(e)[:80]}); keeping the image"); return ""
 
