@@ -403,6 +403,9 @@ class Studio:
                 else:
                     meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
                     out = short.do_render(j.dir, sp, cfg, meta, log, stop); j.save(short_output=str(out))
+                    from . import talkinghead
+                    if s.get("presenter") and talkinghead.enabled(cfg):   # Hugging Face talking head over the hook (optional; never fails the job)
+                        out = talkinghead.overlay_short(j.dir, sp, cfg, out, log)
                     from . import capcut
                     if capcut.enabled(cfg) and capcut.pending(j.dir):   # ladder v2 rung 7: one CapCut session per video (off by default)
                         out = capcut.run(cfg, j.dir, out, sp, log)

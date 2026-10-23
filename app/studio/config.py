@@ -63,6 +63,9 @@ DEFAULTS = {
     "long_broll": True,               # long videos: use real stock footage first, AI stills/motion only where nothing fits
     "voice_ref_wav": str(ROOT / "assets" / "voice_ref_baritone.wav"),
     "voice_ref_text": "Every few months, someone announces that artificial intelligence is about to change everything. Some say it will end work as we know it. Others say it is mostly hype. Stanford economist Chad Jones has spent years building models to answer a simpler question.",
+    "talking_head": "hf",             # Shorts with "presenter" on: a Hugging Face lip-synced presenter over the hook beat ("off" = none)
+    "talking_head_spaces": [],        # Spaces to try in order ([] = talkinghead.SPACES); scripts/talking_head_probe.py finds working ones
+    "talking_head_max_secs": 10,
     "presenter_image": str(ROOT / "assets" / "presenter.jpg"),
     "presenter_prompt": "A documentary TV presenter in his mid 40s is talking to the camera, speaking clearly and animatedly, his mouth opening and closing with every word, lips and teeth visible as he talks, natural head nods and eyebrow movement, modern studio, static camera",
     "wpm": 155,
