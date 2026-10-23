@@ -21,7 +21,11 @@ asks() { local v; read -r -s -p "$1" v </dev/tty; echo >/dev/tty; printf '%s' "$
 case "$PC" in @@*) PC=$(ask "PC address and port (e.g. 192.168.40.150:42040): ");; esac
 case "$PIN" in @@*|"") PIN=$(asks "Newsroom phone passcode: ");; esac
 T0=$(date +%s)
+FROM=${1:-1}   # resume: "bash setup.sh 7" skips the finished steps 1, 2, 5, 6 (code, keys and services always run)
+want() { [ "$FROM" -le "$1" ]; }
+sudo -v </dev/tty
 
+if want 1; then
 say "1/10 system packages (sudo password once)"
 sudo -v </dev/tty
 sudo apt-get update -qq || true
@@ -36,7 +40,9 @@ if [ -n "$MISSING" ] && ! sudo apt-get install -y -qq $MISSING >/dev/null 2>&1; 
   [ -z "$FAILED" ] || echo "   could not install:$FAILED (continuing; the steps that need them will say so)"
 fi
 echo "   node $(node -v 2>/dev/null || echo missing), npm $(npm -v 2>/dev/null || echo missing), ffmpeg $(command -v ffmpeg >/dev/null && echo ok || echo missing)"
+else say "1/10 skipped (resuming from step $FROM)"; fi
 
+if want 2; then
 say "2/10 browsers for the image sites (Google Chrome for ChatGPT, Microsoft Edge for Bing)"
 if ! command -v google-chrome >/dev/null; then
   wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
@@ -46,6 +52,7 @@ if ! command -v microsoft-edge >/dev/null; then
   wget -q -O /tmp/edge.deb "https://go.microsoft.com/fwlink?linkid=2149051&brand=M102"
   sudo apt-get install -y -qq /tmp/edge.deb >/dev/null || echo "   (Edge did not install; Bing stays off on the laptop)"; rm -f /tmp/edge.deb
 fi
+else say "2/10 skipped (resuming from step $FROM)"; fi
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo /nonexistent)"
 if [ -d "$HERE/repo/.git" ]; then   # run from the tarball: the code comes with it, no GitHub sign-in needed
@@ -60,22 +67,33 @@ else
 fi
 say "4/10 code: $(git -C "$DIR" log --oneline -1)"
 
+if want 5; then
 say "5/10 Python environment (app/env) and packages"
 [ -x "$DIR/app/env/bin/python" ] || python3 -m venv "$DIR/app/env"
 "$DIR/app/env/bin/pip" install -q --upgrade pip
 "$DIR/app/env/bin/pip" install -q -r "$DIR/app/requirements.txt" playwright gradio_client huggingface_hub rembg onnxruntime soundfile
 "$DIR/app/env/bin/python" -m playwright install chromium >/dev/null
+else say "5/10 skipped (resuming from step $FROM)"; fi
 
+if want 6; then
 say "6/10 Kokoro voice (its own env, app/kenv, CPU torch)"
 [ -x "$DIR/app/kenv/bin/python" ] || python3 -m venv "$DIR/app/kenv"
 "$DIR/app/kenv/bin/pip" install -q --upgrade pip
 "$DIR/app/kenv/bin/pip" install -q torch --index-url https://download.pytorch.org/whl/cpu
 "$DIR/app/kenv/bin/pip" install -q kokoro soundfile numpy
+else say "6/10 skipped (resuming from step $FROM)"; fi
 
 say "7/10 Remotion (the video renderer) and Ollama (local vision check, CPU)"
 (cd "$DIR/remotion" && npm ci --silent --no-audit --no-fund && npx --yes remotion browser ensure >/dev/null 2>&1 || true)
 command -v ollama >/dev/null || curl -fsSL https://ollama.com/install.sh | sh
-ollama pull qwen2.5vl:7b   # ~6 GB, once
+# ~6 GB, once. Detached (nohup) so a dropped SSH session or closed terminal cannot kill it; a re-run resumes it.
+if ollama list 2>/dev/null | grep -q "qwen2.5vl:7b"; then echo "   vision model already downloaded"
+else
+  nohup ollama pull qwen2.5vl:7b > "$HOME/ollama-pull.log" 2>&1 &
+  PULL=$!; echo "   downloading the vision model in the background (log: ~/ollama-pull.log)"
+  while kill -0 "$PULL" 2>/dev/null; do printf "\r   %s   " "$(tr '\r' '\n' < "$HOME/ollama-pull.log" | grep -o '[0-9]*%.*' | tail -1 | cut -c1-60)"; sleep 10; done; echo
+  ollama list 2>/dev/null | grep -q "qwen2.5vl:7b" || echo "   (the vision model did not finish; run this script again later: it resumes)"
+fi
 
 say "8/10 keys (from the PC, home network only) and settings (kept in $CONF, never in git)"
 mkdir -p "$CONF" "$HOME/videos/jobs"; chmod 700 "$CONF"
