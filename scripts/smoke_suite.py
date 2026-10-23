@@ -25,13 +25,24 @@ BASE = Path(r"F:\videos_test\smoke") if WIN else Path.home() / "videos" / "smoke
 HOLD = Path(r"F:\videos\newsroom\hold")
 IMG = Path(r"F:\videos_test\poc\hf_token_test.png") if WIN else Path.home() / "videos" / "poc" / "hf_token_test.png"
 TEXT = ("The Old Man of the Mountain was a granite rock face on Cannon Mountain in Franconia Notch, New Hampshire. Seen from the "
-        "north it looked like the profile of an old man. It appeared on the state quarter in 2000 and on road signs across the state. "
-        "Workers had used cables and epoxy since the 1920s to hold the ledges together, but on May 3, 2003 the formation collapsed. "
-        "Today a memorial at Profile Lake uses steel 'profilers' that line up with the mountain to show visitors where the face used to be.")
-CLIP_TEXT = ("New Hampshire has more than 50 historic covered bridges, most of them built in the 1800s. The roof kept snow and rain off "
-             "the wooden deck and trusses, so a covered bridge could last 80 years instead of 20. In autumn, when the maples turn red and "
-             "gold, visitors drive the back roads around Conway, Bath and Cornish to see them. The Cornish-Windsor bridge over the "
-             "Connecticut River is the longest wooden covered bridge in the United States that still carries cars.")
+        "north, five separate ledges of rock lined up to form the profile of an old man's face, about forty feet tall from chin to forehead. "
+        "Surveyors first wrote about it in 1805, and by the late 1800s it had become the most famous landmark in the state. It later "
+        "appeared on the New Hampshire state quarter in 2000, on highway route signs, and on the state's license plates. Freezing and thawing "
+        "water slowly widened the cracks behind the ledges, so starting in the 1920s workers climbed up every summer to hold the stones "
+        "together with steel cables, turnbuckles and waterproof epoxy. A caretaker family looked after it for decades. Even so, on the night of "
+        "May 3, 2003 the formation collapsed, and in the morning the face was simply gone. People left flowers at the base. Today a "
+        "memorial at Profile Lake uses tall steel 'profilers': visitors stand in a marked spot, look along the steel rods toward the cliff, "
+        "and the shapes line up with the mountain to show exactly where the old face used to be.")
+CLIP_TEXT = ("New Hampshire has more than fifty historic covered bridges, and most of them were built in the 1800s by local carpenters "
+             "using timber cut nearby. The roof and walls were not decoration: they kept snow, rain and sun off the wooden deck and the big "
+             "trusses that carry the load, so a covered bridge could last eighty years or more instead of about twenty for an open one. "
+             "Farmers liked them because horses were calmer crossing a river when they could not see the water below. Many bridges were "
+             "nearly lost to floods, fires and trucks too heavy for them, and towns have spent years restoring them with new beams and "
+             "steel supports hidden inside. In autumn, when the maples turn red and gold, visitors drive the back roads around Conway, Bath "
+             "and Cornish to photograph them, and some still carry cars every day. The Cornish-Windsor bridge over the Connecticut River, "
+             "which links New Hampshire and Vermont, is the longest wooden covered bridge in the United States that still carries traffic, "
+             "at about 450 feet. Bath has one of the oldest, and its red paint and stone piers make it one of the most photographed.")
+for t in (TEXT, CLIP_TEXT): assert len(t.split()) >= 160, len(t.split())
 
 
 class Suite:
