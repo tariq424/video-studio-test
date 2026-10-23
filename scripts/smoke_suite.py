@@ -66,7 +66,7 @@ class Suite:
         raise RuntimeError(f"Video Studio still busy after {max_min} min; suite not started")
 
     def release(self):
-        if self.held and HOLD.exists() and HOLD.read_text(encoding="utf-8").strip() == "smoke suite":
+        if self.local and WIN and HOLD.exists() and HOLD.read_text(encoding="utf-8").strip() == "smoke suite":
             HOLD.unlink(); self.log("Newsroom hold released")
 
     # ---- inputs
