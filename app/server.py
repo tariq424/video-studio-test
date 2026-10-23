@@ -110,6 +110,40 @@ def create():
     except ValueError as e: return jsonify(error=str(e)[:300]), 400
     return jsonify(id=jid)
 
+# ---- house style learned from feedback (studio/style.py)
+@app.get("/api/style")
+def style_list():
+    from studio import style
+    return jsonify(rules=style.load(config.load()))
+
+@app.post("/api/style")
+def style_add():
+    from studio import style
+    b = request.get_json(silent=True) or {}
+    try: return jsonify(rule=style.add(config.load(), b.get("rule", ""), b.get("area", "general")))
+    except ValueError as e: return jsonify(error=str(e)), 400
+
+@app.post("/api/style/learn")
+def style_learn():
+    from studio import style
+    b = request.get_json(silent=True) or {}
+    msgs = []
+    try: r = style.learn(config.load(), b.get("note", ""), b.get("context", ""), b.get("job", ""), msgs.append)
+    except ValueError as e: return jsonify(error=str(e)), 400
+    except Exception as e: return jsonify(error="the script AI could not turn that into rules: " + " ".join(str(e).split())[:200]), 502
+    return jsonify(**r)
+
+@app.post("/api/style/import")
+def style_import():
+    from studio import style
+    style.replace_all(config.load(), (request.get_json(silent=True) or {}).get("rules") or [])
+    return jsonify(ok=True)
+
+@app.delete("/api/style/<rid>")
+def style_remove(rid):
+    from studio import style
+    return jsonify(ok=style.remove(config.load(), rid))
+
 @app.post("/api/smoke")
 def smoke():
     """Deprecated (the old fixed one-beat job is gone). Use POST /api/jobs with mode=smoke: the one smoke path."""

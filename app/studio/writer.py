@@ -172,7 +172,8 @@ def audience_key(cfg):
 
 def audience_line(cfg):
     """The prompt line for this job's audience (cfg["audience"]: the job's choice, else settings.json, else common)."""
-    return AUDIENCE[audience_key(cfg)]
+    from . import style
+    return AUDIENCE[audience_key(cfg)] + style.text(cfg)   # + the house style learned from feedback ('' when none)
 
 def log_audience(cfg, log):
     src = "this job" if cfg.get("_audience_from") == "job" else "settings default"

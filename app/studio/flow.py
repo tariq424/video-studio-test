@@ -47,6 +47,11 @@ documentary look. No text, captions, logos, brand names, real people's names or 
 Max 60 words. Reply with JSON only: {{"prompt": "..."}}"""
 
 
+def _style(cfg):
+    from . import style
+    return style.text(cfg, ("visuals", "general"))
+
+
 def visual_prompt(cfg, sec, log):
     """A Flow prompt for the beat: the script's own still prompt / motion when present, else one short model call."""
     base = str(sec.get("still_prompt") or "").strip()
@@ -59,7 +64,7 @@ def visual_prompt(cfg, sec, log):
         from .llm import LLM
         with LLM(dict(cfg), log, lambda: False) as llm:
             j = llm.chat_json("You write prompts for AI video generators. Reply with JSON only.",
-                              PROMPT.format(vo=str(sec.get("vo", ""))[:600].replace('"', "'"), hint=hint), max_tokens=300,
+                              PROMPT.format(vo=str(sec.get("vo", ""))[:600].replace('"', "'"), hint=hint) + _style(cfg), max_tokens=300,
                               check=lambda j: None if len(str(j.get("prompt") or "").split()) >= 8 else (_ for _ in ()).throw(ValueError("prompt too short")))
         return str(j["prompt"]).strip()[:600]
     except Exception as e:
