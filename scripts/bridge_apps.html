@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bridge - Google Apps</title>
+<style>
+  :root { --bg:#ffffff; --card:#eff2f7; --ink:#20242c; --line:#dde2ea; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14161b; --card:#1d2129; --ink:#e7eaf0; --line:#2c323d; } }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.4 "Segoe UI", system-ui, sans-serif; }
+  main { max-width:760px; margin:28px auto; padding:0 16px; }
+  .card { background:var(--card); border-radius:22px; padding:20px 26px 26px; }
+  h1 { font-size:22px; font-weight:600; margin:0 0 16px; padding-bottom:12px; border-bottom:1px solid var(--line); }
+  .grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:18px 10px; }
+  a { display:flex; flex-direction:column; align-items:center; gap:8px; padding:8px 4px; border-radius:14px; color:var(--ink); text-decoration:none; }
+  a:hover, a:focus-visible { background:rgba(127,127,127,.12); outline:none; }
+  .t { width:58px; height:58px; border-radius:15px; display:grid; place-items:center; color:#fff; font-weight:700; font-size:26px; }
+  .b { background:#4285f4; } .g { background:#34a853; } .r { background:#ea4335; } .y { background:#fbbc04; } .p { background:#8e24aa; } .c { background:#00979d; } .k { background:#3c4043; }
+</style>
+</head>
+<body>
+<main><div class="card">
+  <h1>Google Apps (bridge profile)</h1>
+  <div class="grid" id="apps"></div>
+</div></main>
+<script>
+// id: used by "bridge.py goto <id>"; keep in step with APPS in bridge.py
+const APPS = [
+  ["notebooklm", "NotebookLM", "https://notebooklm.google.com/", "k"],
+  ["photos", "Photos", "https://photos.google.com/", "y"],
+  ["drive", "Drive", "https://drive.google.com/", "g"],
+  ["gemini", "Gemini", "https://gemini.google.com/app", "p"],
+  ["youtube", "YouTube", "https://www.youtube.com/", "r"],
+  ["studio", "YT Studio", "https://studio.youtube.com/", "r"],
+  ["gmail", "Gmail", "https://mail.google.com/", "r"],
+  ["docs", "Docs", "https://docs.google.com/document/", "b"],
+  ["sheets", "Sheets", "https://docs.google.com/spreadsheets/", "g"],
+  ["calendar", "Calendar", "https://calendar.google.com/", "b"],
+  ["keep", "Keep", "https://keep.google.com/", "y"],
+  ["account", "Account", "https://myaccount.google.com/", "b"],
+  ["search", "Search", "https://www.google.com/", "b"],
+  ["maps", "Maps", "https://maps.google.com/", "g"],
+  ["news", "News", "https://news.google.com/", "r"],
+  ["translate", "Translate", "https://translate.google.com/", "b"],
+  ["earth", "Earth", "https://earth.google.com/web/", "c"],
+  ["flow", "Flow", "https://labs.google/fx/tools/flow", "k"],
+];
+const g = document.getElementById("apps");
+for (const [id, name, url, col] of APPS) {
+  const a = document.createElement("a"); a.href = url; a.id = "app-" + id;
+  a.innerHTML = `<span class="t ${col}">${name[0]}</span>${name}`;
+  g.appendChild(a);
+}
+</script>
+</body>
+</html>
