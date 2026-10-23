@@ -326,6 +326,7 @@ def make_check(cfg, c, sheet_path, guard, narration, log):
     for im in ims: pair.paste(im, (x, 0)); x += im.width + 12
     pp = sheet_path.with_name(f"{c['id']}_pair.jpg"); pair.save(pp, "JPEG", quality=90)
     side = drive_side(narration) or guard.get("side", "")
+    if cfg.get("vet_provider", "local") in ("off", "", None): cfg = dict(cfg, vet_provider="local")   # the guard always looks (local model)
     for kind, brands in (guard.get("kinds") or {"vehicle": []}).items():
         what, who = KIND_WORDS[kind]
         try: j = parse_json(_vision(cfg, pp, MAKE.format(what=what, who=who)))
