@@ -89,7 +89,7 @@ command -v ollama >/dev/null || curl -fsSL https://ollama.com/install.sh | sh
 # ~6 GB, once. Detached (nohup) so a dropped SSH session or closed terminal cannot kill it; a re-run resumes it.
 if ollama list 2>/dev/null | grep -q "qwen2.5vl:7b"; then echo "   vision model already downloaded"
 else
-  nohup ollama pull qwen2.5vl:7b > "$HOME/ollama-pull.log" 2>&1 &
+  nohup bash -c 'for i in 1 2 3 4 5 6 7 8; do ollama pull qwen2.5vl:7b && exit 0; echo "retry $i in 30 s (network/DNS hiccup)"; sleep 30; done; exit 1' > "$HOME/ollama-pull.log" 2>&1 &   # resumes where it stopped
   PULL=$!; echo "   downloading the vision model in the background (log: ~/ollama-pull.log)"
   while kill -0 "$PULL" 2>/dev/null; do printf "\r   %s   " "$(tr '\r' '\n' < "$HOME/ollama-pull.log" | grep -o '[0-9]*%.*' | tail -1 | cut -c1-60)"; sleep 10; done; echo
   ollama list 2>/dev/null | grep -q "qwen2.5vl:7b" || echo "   (the vision model did not finish; run this script again later: it resumes)"
