@@ -278,12 +278,14 @@ Add "forbidden" to the JSON."""
 # A story about Tesla must not show a Honda steering wheel, a BMW, a Kia or a classic Triumph: every clip in which a vehicle /
 # aircraft / product is a main subject must be that story's make, recognised from a closer look at two full frames. Unknown
 # makes are dropped too (a stock clip is never shoehorned in). Interiors must drive on the side the story's country does.
-MAKE = """Look closely at this image: two frames from one video clip.
-1. "object": is {what} a main subject of the frames (not just tiny in the far background)? true or false.
-2. "make": the {who} of that main subject, recognised from a badge, logo, livery or unmistakable design (look at the steering-wheel
-   hub, grille, bonnet, boot, wheels, tail fin, screen). "unknown" if you cannot tell for sure. "none" if "object" is false.
-3. "drive_side": if a car interior is shown, is the steering wheel on the "left" or the "right" of the car? "none" otherwise.
-Reply with JSON only: {{"object": false, "make": "none", "drive_side": "none"}}"""
+MAKE = """Look closely at this picture (two frames from one video clip side by side).
+First describe in one sentence what is in it, naming any car, vehicle, aircraft or product you see and any badge or logo on it.
+Then answer:
+- object: is {what} clearly visible as a main subject (not tiny in the far background)? Answer true or false.
+- make: the {who} of it, read from a badge or logo (steering-wheel hub, grille, bonnet, boot, wheels, tail) or recognised from an
+  unmistakable design. Write "unknown" if you cannot tell for sure, "none" if object is false.
+- drive_side: if a car's interior with its steering wheel is shown, is the wheel on the "left" or the "right" side? Otherwise "none".
+Reply with one JSON object with the keys seen, object, make, drive_side, filled in from what you actually see."""
 KIND_WORDS = {"vehicle": ("a car, truck, motorbike or other road vehicle, or a car's interior (steering wheel, dashboard, seats)", "make (brand)"),
               "aircraft": ("an aircraft, or an aircraft's cabin, wing or tail", "airline or maker"),
               "train": ("a train", "operator or maker"), "ship": ("a ship or boat", "operator or maker"),
