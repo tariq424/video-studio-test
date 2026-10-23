@@ -333,8 +333,9 @@ def make_check(cfg, c, sheet_path, guard, narration, log):
         what, who = KIND_WORDS[kind]
         try: j = parse_json(_vision(cfg, pp, MAKE.format(what=what, who=who)))
         except Exception as e: return False, f"make check unavailable ({str(e)[:50]}); not risking a wrong {kind}"
-        if str(j.get("object", "false")).strip().lower() not in ("true", "yes", "1"): continue
+        obj = str(j.get("object", "false")).strip().lower()   # the model answers true/false, or names the object ("car")
         make = str(j.get("make") or "unknown").strip()
+        if obj in ("false", "no", "none", "0", "") and make.lower() in ("none", "", "unknown"): continue
         if brands:
             hit = any(_norm_brand(b) and (_norm_brand(b) in _norm_brand(make) or _norm_brand(make) in _norm_brand(b)) for b in brands) and _norm_brand(make)
             if not hit:

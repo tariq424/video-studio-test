@@ -33,4 +33,5 @@ def test_story_guard_and_make_check(monkeypatch):
     answers.update(make="Tesla", drive_side="right"); ok, why = footage.make_check(cfg, c, sh, g, "x", print); assert not ok and "right-hand" in why
     answers.update(make="Tesla Model 3", drive_side="left"); assert footage.make_check(cfg, c, sh, g, "x", print) == (True, "")
     answers.update(object=False, make="none"); assert footage.make_check(cfg, c, sh, g, "x", print) == (True, "")   # a charger, a city: fine
+    answers.update(object="car", make="BMW", drive_side="none"); ok, why = footage.make_check(cfg, c, sh, g, "x", print); assert not ok and "BMW" in why
     assert footage.make_check({"story_subject_guard": False}, c, sh, g, "x", print) == (True, "")
