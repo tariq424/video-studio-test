@@ -63,6 +63,10 @@ DEFAULTS = {
     "long_broll": True,               # long videos: use real stock footage first, AI stills/motion only where nothing fits
     "voice_ref_wav": str(ROOT / "assets" / "voice_ref_baritone.wav"),
     "voice_ref_text": "Every few months, someone announces that artificial intelligence is about to change everything. Some say it will end work as we know it. Others say it is mostly hype. Stanford economist Chad Jones has spent years building models to answer a simpler question.",
+    "music_on": True,                 # music under Shorts/explainers from your own folder (music_dir\hook, music_dir\bed); none there = none
+    "music_dir": "",                  # "" = <jobs folder parent>\music
+    "music_hook_db": -14, "music_bed_db": -24, "music_long": True,
+    "jokes_per_beat": [0.5, 0.3, 0.2],  # Shorts: chance of 1, 2 or 3 jokes in a beat (picked at random per beat; the 3:00 limit wins)
     "talking_head": "hf",             # Shorts with "presenter" on: a Hugging Face lip-synced presenter over the hook beat ("off" = none)
     "talking_head_spaces": [],        # Spaces to try in order ([] = talkinghead.SPACES); scripts/talking_head_probe.py finds working ones
     "talking_head_max_secs": 10,

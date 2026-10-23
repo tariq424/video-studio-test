@@ -267,7 +267,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             editorial_review(llm, plan, meta, transcript, cfg, log, stop)
             if plan.get("editorial_warnings"):
                 jargon_check(llm, plan, cfg, log, source_notes=notes)   # the review gave up: explanations still go in (protected)
-        punch_up(cfg, plan, log, force=smoke)   # smoke: every beat gets its joke here; otherwise only beats still without one
+        punch_up(cfg, plan, log, force=smoke, budget=None if smoke else wmax)   # smoke: every beat gets its joke here; otherwise only beats still without one
         from . import coherence
         ents = coherence.entities(cfg, Path(srcdir).parent, title, notes, log, stop, llm=llm)
         nl = 0

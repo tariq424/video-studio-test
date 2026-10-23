@@ -720,11 +720,14 @@ def _has_joke(section):
     return bool(j) and len(j.split()) >= 3 and bool(_editorial_span(vo, j))
 
 
-def punch_up(cfg, plan, log, force=False):
+def punch_up(cfg, plan, log, force=False, budget=None):
     """Last voice step: every content beat that still has no joke gets one appended, written by Claude when an Anthropic key is
     set (the API; the Claude chat app can't be called), else by the script provider. Never blocks the job."""
     missing = [s for s in plan["sections"] if not s.get("cta") and (force or not _has_joke(s))]
-    if not missing or not cfg.get("punch_up", True): return plan
+    if not cfg.get("punch_up", True): return plan
+    if not missing:
+        if not plan.get("smoke"): extra_jokes(dict(cfg), plan, log, budget)
+        return plan
     c = dict(cfg)
     if c.get("anthropic_api_key"):
         c["script_provider"] = "claude"
@@ -746,6 +749,49 @@ def punch_up(cfg, plan, log, force=False):
                 log(f"  punch-up {s['id']} ({llm.name}): {joke}")
     except Exception as e:
         log(f"  punch-up skipped ({str(e)[:100]})")
+    if not plan.get("smoke"): extra_jokes(c, plan, log, budget)
+    return plan
+
+
+ASIDE = """Here is one beat of a news video. Write {k} quick funny aside(s) (each max {n} words) that the narrator drops IN THE
+MIDDLE of the beat: dry, snarky, conversational, about a concrete consequence of what is said, never repeating this joke at
+the end of the beat: "{last}". Rules: no new facts, numbers or names; punch at companies, hype or situations, never at victims
+or ordinary people; each must read naturally as its own sentence between two sentences of the beat.
+BEAT: "{vo}"
+Reply with JSON only: {{"asides": ["...", ...]}}"""
+
+
+def extra_jokes(cfg, plan, log, budget=None):
+    """Shorts: some beats get a second or third joke (random per beat, weights cfg jokes_per_beat for 1/2/3), placed
+    inside the beat. Skipped once the script would pass the word budget (the 3:00 limit). Never blocks the job."""
+    import random
+    w = cfg.get("jokes_per_beat") or [1, 0, 0]
+    if len(w) < 3 or sum(w[1:]) <= 0: return plan
+    rng = random.Random(plan.get("title", ""))
+    n = 12
+    try:
+        from .llm import LLM
+        with LLM(cfg, log, lambda: False) as llm:
+            for s in plan["sections"]:
+                if s.get("cta"): continue
+                k = rng.choices([1, 2, 3], weights=w[:3])[0] - 1
+                total = sum(len(x["vo"].split()) for x in plan["sections"])
+                if budget: k = min(k, max(0, int((budget - total) // (n + 2))))
+                if k <= 0: continue
+                def chk(j):
+                    a = [str(x).strip() for x in (j.get("asides") or [])]
+                    if len(a) < k or any(not 3 <= len(x.split()) <= n + 4 for x in a[:k]): raise ValueError(f"give {k} asides of 3-{n} words")
+                j = llm.trace(f"asides {s['id']}").chat_json("You write dry, snarky one-liners. Reply with JSON only.",
+                    ASIDE.format(k=k, n=n, last=(s.get("punchline") or s.get("joke") or "").replace('"', "'"), vo=s["vo"].replace('"', "'")),
+                    max_tokens=400, check=chk)
+                asides = [str(x).strip() for x in j["asides"][:k]]
+                for i, a in enumerate(asides):
+                    if a[-1:] not in ".!?": a += "."
+                    s["vo"] = _insert_after(s["vo"], (i + 1) / (k + 2), a)
+                s["asides"] = asides
+                log(f"  extra joke(s) {s['id']} ({1 + k} in this beat): " + " | ".join(asides))
+    except Exception as e:
+        log(f"  extra jokes skipped ({str(e)[:100]})")
     return plan
 
 

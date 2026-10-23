@@ -403,6 +403,8 @@ class Studio:
                 else:
                     meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
                     out = short.do_render(j.dir, sp, cfg, meta, log, stop); j.save(short_output=str(out))
+                    from . import music
+                    if not s.get("smoke"): music.mix(out, cfg, log, music.hook_secs_short(j.dir), seed=jid)   # hook cue + ducked bed (your tracks)
                     from . import talkinghead
                     if s.get("presenter") and talkinghead.enabled(cfg):   # Hugging Face talking head over the hook (optional; never fails the job)
                         out = talkinghead.overlay_short(j.dir, sp, cfg, out, log)
@@ -470,6 +472,9 @@ class Studio:
                     else:   # one timeline from the narration, rendered like the Short (explainer.py)
                         from . import explainer
                         final = explainer.render(j.dir, plan, cfg, meta, log, stop)
+                    if cfg.get("music_long", True):
+                        from . import music
+                        music.mix(final, cfg, log, float(cfg.get("music_long_hook_secs", 8)), seed=jid)
                     j.save(output=str(final)); _length_check(j, final, (s.get("minutes") or 0) * 60, "Long video", log)
             if stop(): j.save(status="stopped"); log("Stopped"); self.cancel.discard(jid); return
             d = j.state.get("done", []); d.append(st); j.save(done=d)
