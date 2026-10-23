@@ -11,7 +11,7 @@ def ff(*a): subprocess.run(["ffmpeg", "-v", "error", "-y", *map(str, a)], check=
 def test_music_mix_and_no_tracks():
     tmp = Path(tempfile.mkdtemp()); mp4 = tmp / "v.mp4"
     ff("-f", "lavfi", "-i", "color=s=320x568:d=12:r=25", "-f", "lavfi", "-i", "sine=f=400:d=12", "-shortest", "-c:v", "libx264", "-c:a", "aac", mp4)
-    cfg = {"jobs_dir": str(tmp / "jobs")}; logs = []
+    cfg = {"jobs_dir": str(tmp / "jobs"), "music_generate": False}; logs = []
     before = mp4.read_bytes()
     assert not music.mix(mp4, cfg, logs.append) and mp4.read_bytes() == before   # no tracks: unchanged
     (tmp / "music" / "hook").mkdir(parents=True); (tmp / "music" / "bed").mkdir()
@@ -47,3 +47,25 @@ def test_extra_jokes_random_and_budget(monkeypatch):
     plan3 = {"title": "T", "sections": [{"id": "b0", "vo": vo}]}
     writer.extra_jokes({"jokes_per_beat": [1, 0, 0]}, plan3, lambda m: None)   # one joke only: unchanged
     assert plan3["sections"][0]["vo"] == vo
+
+
+def test_library_mood_choice_and_generation_cap(monkeypatch):
+    import random
+    from studio import music_gen
+    tmp = Path(tempfile.mkdtemp()); cfg = {"jobs_dir": str(tmp / "jobs"), "music_generate_per_day": 1}
+    (tmp / "music" / "bed").mkdir(parents=True)
+    ff("-f", "lavfi", "-i", "sine=f=220:d=6", tmp / "music" / "bed" / "mine.mp3")
+    ff("-f", "lavfi", "-i", "sine=f=330:d=6", tmp / "music" / "bed" / "classical_1.mp3")
+    music.add_to_library(cfg, tmp / "music" / "bed" / "classical_1.mp3", "bed", "classical", "string quartet")
+    lib = music.library(cfg)
+    assert {x["file"]: x["mood"] for x in lib} == {"bed/classical_1.mp3": "classical", "bed/mine.mp3": "any"}
+    rng = random.Random(1)
+    assert music.choose(cfg, "bed", "classical", rng, print).name == "classical_1.mp3"   # fits: reused, nothing generated
+    made = []
+    def fake_gen(cfg_, desc, out, log, **kw):
+        music_gen._count(cfg_); made.append(desc); ff("-f", "lavfi", "-i", "sine=f=440:d=6", out); return out
+    monkeypatch.setattr(music_gen, "generate", fake_gen)
+    f = music.choose(cfg, "bed", "cheerful", rng, print)   # nothing cheerful: one new track, added to the library
+    assert made and "cheerful" in f.name and any(x["mood"] == "cheerful" for x in music.library(cfg))
+    g = music.choose(cfg, "bed", "somber", rng, print)    # today's cap (1) reached: an existing track instead
+    assert len(made) == 1 and g.parent.name == "bed" and "somber" not in g.name

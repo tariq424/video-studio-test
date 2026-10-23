@@ -10,6 +10,7 @@ Settings: music_on (true), music_dir, music_hook_db (-14: hook cue level), music
 music_long (true: explainers get it too)."""
 import json
 import random
+import time
 from pathlib import Path
 
 from . import media
@@ -21,19 +22,92 @@ def folder(cfg):
     return Path(cfg.get("music_dir") or (Path(cfg.get("jobs_dir") or ".").parent / "music"))
 
 
-def _pick(cfg, sub, rng):
-    d = folder(cfg) / sub
-    files = sorted(p for p in d.glob("*") if p.suffix.lower() in AUDIO) if d.is_dir() else []
-    return rng.choice(files) if files else None
+MOODS = {   # mood -> how we describe a new track of that mood to Gemini (kind: hook = 15-20 s cue, bed = loopable background)
+    "tense":       ("hook", "a tense cinematic build-up, low pulsing strings and a ticking pulse, 15-20 seconds, ending on a hit"),
+    "dramatic":    ("hook", "a dramatic orchestral opener, big drums and brass swell, 15-20 seconds"),
+    "playful":     ("hook", "a playful, cheeky pizzicato and woodblock sting, bright and quick, 15-20 seconds"),
+    "classical":   ("bed", "light classical chamber music, string quartet and piano, gentle and elegant, steady tempo, loopable"),
+    "light-dance": ("bed", "light, bouncy dance groove, soft four-on-the-floor beat, warm synths, unobtrusive, loopable"),
+    "cheerful":    ("bed", "cheerful, sunny acoustic pop instrumental, ukulele, claps and glockenspiel, loopable"),
+    "calm":        ("bed", "calm lo-fi hip hop instrumental, mellow keys and soft vinyl texture, relaxed, loopable"),
+    "inspiring":   ("bed", "inspiring, hopeful cinematic underscore, piano and soft strings, slowly rising, loopable"),
+    "upbeat":      ("bed", "upbeat modern news-style background, light percussion and plucked synths, energetic but quiet, loopable"),
+    "somber":      ("bed", "somber, reflective ambient underscore, soft piano and pads, slow, loopable"),
+}
+PICK = """Pick background music for this news video. Hook = the opening cue; bed = quiet music under the rest.
+Hook moods: tense, dramatic, playful. Bed moods: classical, light-dance, cheerful, calm, inspiring, upbeat, somber.
+Match the story's tone (a light tech story -> cheerful or light-dance; serious harm or loss -> somber; never cheerful
+music under bad news). VIDEO: {text}
+Reply with JSON only: {{"hook": "...", "bed": "..."}}"""
 
 
-def mix(mp4, cfg, log, hook_secs=6.0, seed=None):
+def library(cfg):
+    """[{file, kind, mood, desc, source}] from library.json, plus any file you dropped in hook/ or bed/ (mood 'any')."""
+    root = folder(cfg); idx = root / "library.json"
+    try: lib = json.loads(idx.read_text(encoding="utf-8"))
+    except (OSError, ValueError): lib = []
+    known = {x["file"] for x in lib}
+    for kind in ("hook", "bed"):
+        d = root / kind
+        for f in (sorted(d.glob("*")) if d.is_dir() else []):
+            rel = f"{kind}/{f.name}"
+            if f.suffix.lower() in AUDIO and rel not in known: lib.append({"file": rel, "kind": kind, "mood": "any", "desc": "", "source": "yours"})
+    return [x for x in lib if (root / x["file"]).exists()]
+
+
+def add_to_library(cfg, f, kind, mood, desc, source="gemini"):
+    root = folder(cfg); idx = root / "library.json"
+    try: lib = json.loads(idx.read_text(encoding="utf-8"))
+    except (OSError, ValueError): lib = []
+    rel = Path(f).resolve().relative_to(root.resolve()).as_posix()
+    lib = [x for x in lib if x["file"] != rel] + [{"file": rel, "kind": kind, "mood": mood, "desc": desc, "source": source, "at": time.time()}]
+    idx.write_text(json.dumps(lib, indent=1), encoding="utf-8")
+
+
+def moods_for(cfg, text, log):
+    """The script AI picks a hook mood and a bed mood for the story (default: tense + calm)."""
+    if not text: return "tense", "calm"
+    try:
+        from .llm import LLM
+        def ok(j):
+            if j.get("hook") not in MOODS or MOODS[j["hook"]][0] != "hook" or j.get("bed") not in MOODS or MOODS[j["bed"]][0] != "bed":
+                raise ValueError("pick one hook mood and one bed mood from the lists")
+        with LLM(dict(cfg), log, lambda: False) as llm:
+            j = llm.chat_json("You pick music moods. Reply with JSON only.", PICK.format(text=text[:1500].replace('"', "'")), max_tokens=100, check=ok)
+        return j["hook"], j["bed"]
+    except Exception as e:
+        log(f"  music: mood pick failed ({str(e)[:80]}); tense + calm"); return "tense", "calm"
+
+
+def choose(cfg, kind, mood, rng, log):
+    """A track of this kind and mood from the library; a new one from Gemini only if none fits and today's cap allows;
+    else any track of this kind (yours included)."""
+    lib = [x for x in library(cfg) if x["kind"] == kind]
+    fit = [x for x in lib if x["mood"] == mood]
+    if fit: return folder(cfg) / rng.choice(fit)["file"]
+    from . import music_gen
+    if music_gen.allowed(cfg):
+        desc = MOODS[mood][1]
+        out = folder(cfg) / kind / f"{mood}_{time.strftime('%Y%m%d_%H%M%S')}.mp3"
+        try:
+            music_gen.generate(cfg, desc, out, log, evidence_dir=folder(cfg))
+            add_to_library(cfg, out, kind, mood, desc); log(f"  music: new {mood} {kind} track added to the library")
+            return out
+        except Exception as e:
+            log(f"  music: couldn't make a new {mood} track ({' '.join(str(e).split())[:150]}); using another from the library")
+    any_ = lib   # nothing fits and no new track: any track of this kind (yours included)
+    return folder(cfg) / rng.choice(any_)["file"] if any_ else None
+
+
+def mix(mp4, cfg, log, hook_secs=6.0, seed=None, text=""):
     """Lay music under the narration of mp4 (in place). -> True if music was added."""
     if not cfg.get("music_on", True): return False
     mp4 = Path(mp4); rng = random.Random(seed)
-    hook, bed = _pick(cfg, "hook", rng), _pick(cfg, "bed", rng)
+    hm, bm = moods_for(cfg, text, log)
+    log(f"  music: moods hook={hm}, bed={bm}")
+    hook, bed = choose(cfg, "hook", hm, rng, log), choose(cfg, "bed", bm, rng, log)
     if not hook and not bed:
-        log(f"  music: no tracks in {folder(cfg)}\\hook or \\bed; no music added"); return False
+        log(f"  music: no tracks in the library ({folder(cfg)}); no music added"); return False
     try:
         total = media.dur(mp4); h = max(0.0, min(float(hook_secs), total)) if hook else 0.0
         hdb, bdb = float(cfg.get("music_hook_db", -14)), float(cfg.get("music_bed_db", -24))
@@ -58,7 +132,8 @@ def mix(mp4, cfg, log, hook_secs=6.0, seed=None):
                  "-movflags", "+faststart", "-t", f"{total:.3f}", tmp)
         if media.dur(tmp) < total - 0.5: raise RuntimeError("the result came out shorter")
         tmp.replace(mp4)
-        (mp4.parent / (mp4.stem + "_music.json")).write_text(json.dumps({"hook": str(hook or ""), "bed": str(bed or ""), "hook_secs": h}, indent=1), encoding="utf-8")
+        (mp4.parent / (mp4.stem + "_music.json")).write_text(json.dumps({"hook": str(hook or ""), "bed": str(bed or ""), "hook_secs": h,
+                                                                         "moods": [hm, bm]}, indent=1), encoding="utf-8")
         log(f"Music added: {'hook ' + hook.name + f' ({h:.1f}s)' if hook else ''}{' + ' if hook and bed else ''}{'bed ' + bed.name if bed else ''}")
         return True
     except Exception as e:
