@@ -14,6 +14,7 @@ Log and screenshots: F:\\videos_test\\smoke\\bridge\\. Owner's rule: Google tool
 the bridge never runs while a pipeline step is using the same profile (it checks the profile lock first)."""
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -122,10 +123,65 @@ def stop():
     log("bridge closed")
 
 
+# ---------------------------------------------------------------- NotebookLM (read and download only; never creates or edits)
+def _page(ctx, url_part, url):
+    for p in ctx.pages:
+        if url_part in p.url: p.bring_to_front(); return p
+    p = ctx.new_page(); p.goto(url, wait_until="domcontentloaded", timeout=60000); return p
+
+
+def dump(page, tag):
+    """Screenshot + the clickable things on the page (for finding the right buttons)."""
+    f = OUT / f"{tag}_{time.strftime('%H%M%S')}"
+    page.screenshot(path=str(f) + ".png")
+    items = page.evaluate("""() => [...document.querySelectorAll('button, a, [role=button], [role=menuitem], [role=tab]')]
+        .filter(e => e.offsetParent !== null).map(e => ((e.getAttribute('aria-label') || '') + ' | ' + (e.innerText || '').trim().replace(/\s+/g, ' ')).slice(0, 120))
+        .filter(t => t.replace(/[ |]/g, '').length)""")
+    Path(str(f) + ".txt").write_text("\n".join(items), encoding="utf-8")
+    log(f"{tag}: {page.title()[:60]} ({page.url[:90]}); {len(items)} clickable items -> {f.name}.txt/.png")
+
+
+def nlm(action, name=""):
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        b, ctx = _connect(pw)
+        page = _page(ctx, "notebooklm.google.com", "https://notebooklm.google.com/")
+        page.wait_for_timeout(4000)
+        if "accounts.google.com" in page.url: raise SystemExit("NotebookLM: not signed in")
+        if action == "list":
+            if "/notebook/" in page.url: page.goto("https://notebooklm.google.com/", wait_until="domcontentloaded"); page.wait_for_timeout(4000)
+            dump(page, "nlm_list")
+        elif action == "open":
+            if "/notebook/" in page.url: page.goto("https://notebooklm.google.com/", wait_until="domcontentloaded"); page.wait_for_timeout(4000)
+            page.get_by_text(name, exact=False).first.click(timeout=15000); page.wait_for_timeout(6000)
+            dump(page, "nlm_open")
+        elif action == "download":   # name = "<notebook title>|audio" or "|video"
+            title, _, kind = name.partition("|"); kind = (kind or "audio").lower()
+            if title and title.lower() not in page.title().lower():
+                if "/notebook/" in page.url: page.goto("https://notebooklm.google.com/", wait_until="domcontentloaded"); page.wait_for_timeout(4000)
+                page.get_by_text(title, exact=False).first.click(timeout=15000); page.wait_for_timeout(6000)
+            dest = Path(r"F:\videos_test\smoke\nlm") if os.name == "nt" else OUT / "nlm"; dest.mkdir(parents=True, exist_ok=True)
+            # the overview's own "more" menu in the Studio panel, then Download
+            word = "Audio Overview" if kind == "audio" else "Video Overview"
+            item = page.locator(f"text=/{word}/i").first
+            item.scroll_into_view_if_needed(timeout=10000)
+            more = item.locator("xpath=ancestor::*[.//button][1]").locator("button[aria-label*='More' i], button[aria-label*='options' i], button:has(mat-icon:text('more_vert'))").first
+            more.click(timeout=10000); page.wait_for_timeout(1200)
+            with page.expect_download(timeout=180000) as dl:
+                page.get_by_role("menuitem", name=re.compile("download", re.I)).first.click(timeout=10000)
+            f = dest / (re.sub(r"[^\w-]+", "_", title or "notebook")[:60] + f"_{kind}_" + time.strftime("%Y%m%d_%H%M%S") + Path(dl.value.suggested_filename).suffix)
+            dl.value.save_as(str(f)); log(f"downloaded {kind} overview -> {f} ({f.stat().st_size // 1024} KB)")
+        b.close()
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "start"
     try:
         if cmd == "goto": goto(sys.argv[2] if len(sys.argv) > 2 else "")
+        elif cmd.startswith("nlm-"): nlm(cmd[4:], " ".join(sys.argv[2:]))
+        elif cmd == "args":   # arguments from a file (spaces and quotes survive): F:\videos_test\smoke\bridge\args.txt
+            a = (OUT / "args.txt").read_text(encoding="utf-8").strip().split(" ", 1); sys.argv = [sys.argv[0]] + a
+            nlm(a[0][4:], a[1] if len(a) > 1 else "") if a[0].startswith("nlm-") else goto(a[1])
         elif cmd in ("start", "tabs", "shot", "stop"): {"start": start, "tabs": tabs, "shot": shot, "stop": stop}[cmd]()
         else: raise SystemExit(f"unknown command {cmd}: start | goto <app> | tabs | shot | stop")
     except SystemExit as e:
