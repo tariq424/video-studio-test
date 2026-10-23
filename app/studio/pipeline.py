@@ -404,7 +404,7 @@ class Studio:
                     meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
                     out = short.do_render(j.dir, sp, cfg, meta, log, stop); j.save(short_output=str(out))
                     from . import music
-                    if not s.get("smoke"): music.mix(out, cfg, log, music.hook_secs_short(j.dir), seed=jid, text=sp.get("title", "") + ": " + " ".join(x["vo"] for x in sp["sections"]))   # hook cue + ducked bed (your tracks)
+                    if not s.get("smoke") or cfg.get("music_in_smoke", False): music.mix(out, cfg, log, music.hook_secs_short(j.dir), seed=jid, text=sp.get("title", "") + ": " + " ".join(x["vo"] for x in sp["sections"]))   # hook cue + ducked bed (your tracks)
                     from . import talkinghead
                     if s.get("presenter") and talkinghead.enabled(cfg):   # Hugging Face talking head over the hook (optional; never fails the job)
                         out = talkinghead.overlay_short(j.dir, sp, cfg, out, log)

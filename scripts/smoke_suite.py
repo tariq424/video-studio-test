@@ -170,10 +170,13 @@ class Suite:
     def main(self):
         only = set(self.a.only.split(","))
         self.log(f"Smoke suite against {self.vs} ({'this PC' if self.local else 'remote worker'}): {', '.join(sorted(only))}")
-        own_before = None
+        own_before = None; mus_before = None
         try:
             self.wait_idle()
             if self.a.restart_first: self.restart_vs()
+            if self.a.music:   # this run's smoke Shorts get music and musical pauses
+                mus_before = self.get("/api/settings").json().get("music_in_smoke")
+                requests.post(self.vs + "/api/settings", headers=self.h, json={"music_in_smoke": True}, timeout=30)
             if "text" in only:
                 if self.a.text_file:   # your own text (a story, a script): a 30-second smoke Short from it, no presenter
                     t = Path(self.a.text_file).read_text(encoding="utf-8-sig")
@@ -191,6 +194,9 @@ class Suite:
                 self.run("clip", {"transcript": CLIP_TEXT, "src_title": "New Hampshire covered bridges", "clip_hints": "clip1=beat1"},
                          [("clips", clip)], {"own_clip": self.check_clip})
         finally:
+            if mus_before is False:
+                try: requests.post(self.vs + "/api/settings", headers=self.h, json={"music_in_smoke": False}, timeout=30)
+                except Exception: pass
             if own_before is False:
                 try: requests.post(self.vs + "/api/settings", headers=self.h, json={"own_clips": False}, timeout=30)
                 except Exception: pass
@@ -216,5 +222,6 @@ if __name__ == "__main__":
     ap.add_argument("--job-minutes", type=float, default=15)
     ap.add_argument("--text-file", default="", help="make the text test from this file instead of the built-in description")
     ap.add_argument("--title", default="")
+    ap.add_argument("--music", action="store_true", help="smoke Shorts with music and musical pauses")
     ap.add_argument("--restart-first", action="store_true", help="restart the stack in the idle gap before the tests (loads new code)")
     Suite(ap.parse_args()).main()

@@ -897,9 +897,15 @@ def build(job, plan, cfg, log):
     from . import review
     rv = review.load(job)
     beats, parts, t, used = [], [], 0.0, []
+    music = cfg.get("music_on", True) and (not plan.get("smoke") or cfg.get("music_in_smoke", False))
     for i, s in enumerate(secs):
         last = i == len(secs) - 1
         d = (tm[s["id"]]["dur"] + (TAIL if last else GAP)) / speed
+        if music and not last and cfg.get("breathers", True) and not s.get("cta"):
+            # a breather: the narrator pauses and the music comes up (after the hook, then after every Nth beat)
+            every = int(cfg.get("breather_every", 2) or 0)
+            b = float(cfg.get("breather_hook_secs", 2.0)) if i == 0 else (float(cfg.get("breather_secs", 1.5)) if every and i % every == 0 else 0.0)
+            if b: d += b; log(f"  {s['id']}: {b:.1f}s musical pause after this beat")
         words = [[w, round(a / speed, 3), round(b / speed, 3)] for w, a, b in tm[s["id"]]["words"]]
         clips = list(pick.get(s["id"]) or [])
         # top up from other beats' clips until the footage covers the beat (clips play at 0.85x speed)

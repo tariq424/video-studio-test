@@ -6,7 +6,7 @@ Tracks come from your own folder (no downloads, no licences guessed): music_dir 
 Use tracks you are allowed to put on YouTube (YouTube Studio > Audio Library is free and safe). A random track is picked
 per video. No tracks -> no music, the video is unchanged. Any failure leaves the video as it was (never fails the job).
 
-Settings: music_on (true), music_dir, music_hook_db (-5: hook cue, dB under the voice), music_bed_db (-10: bed under the voice; dips ~3 dB more while speaking),
+Settings: music_on (true), music_dir, music_hook_db (-4), music_bed_db (-6): the level in the narrator's pauses (breathers); under speech it dips ~10 dB more,
 music_long (true: explainers get it too)."""
 import json
 import random
@@ -113,7 +113,7 @@ def mix(mp4, cfg, log, hook_secs=6.0, seed=None, text=""):
         log(f"  music: no tracks in the library ({folder(cfg)}); no music added"); return False
     try:
         total = media.dur(mp4); h = max(0.0, min(float(hook_secs), total)) if hook else 0.0
-        hdb, bdb = float(cfg.get("music_hook_db", -5)), float(cfg.get("music_bed_db", -10))
+        hdb, bdb = float(cfg.get("music_hook_db", -4)), float(cfg.get("music_bed_db", -6))
         ins, parts = ["-i", mp4], []
         if hook:
             ins += ["-i", hook]
@@ -128,7 +128,7 @@ def mix(mp4, cfg, log, hook_secs=6.0, seed=None, text=""):
         music = "".join(tracks) + (f"amix=inputs={len(tracks)}:normalize=0:duration=longest" if len(tracks) > 1 else "anull") + ",aformat=channel_layouts=stereo[m];"
         # duck the music under the voice (sidechain), then put the two together; the voice level is untouched
         flt = ";".join(parts) + ";" + music + \
-              "[0:a]asplit=2[v][key];[m][key]sidechaincompress=threshold=0.1:ratio=3:attack=60:release=700[md];" \
+              "[0:a]asplit=2[v][key];[m][key]sidechaincompress=threshold=0.05:ratio=6:attack=40:release=500[md];" \
               "[v][md]amix=inputs=2:normalize=0:duration=first[a]"
         tmp = mp4.with_name("_music_" + mp4.name)
         media.ff(*ins, "-filter_complex", flt, "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
