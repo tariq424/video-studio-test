@@ -124,12 +124,13 @@ d = json.load(open(p)) if os.path.exists(p) else {}
 signed = [s for s in ("chatgpt", "bing") if os.path.isdir(f"{home}/{s}_profile/Default")]   # vs-login was done
 d.update({"jobs_dir": f"{home}/jobs", "imagegen_providers": ["hf"] + signed, "imagegen_rotate": False, "imagegen_per_beat": 1,
           "flow_on": False, "wangp_on_demand": False, "vet_provider": "local", "short_concurrency": 2, "kokoro_online": True,
-          "kokoro_device": "cpu", "talking_head": "hf", "script_provider": d.get("script_provider", "deepseek")})
+          "kokoro_device": "cpu", "talking_head": "hf",
+          "music_dir": f"{home}/music", "music_generate": False,   # music: the PC's library (vs-sync); no Gemini on the laptop "script_provider": d.get("script_provider", "deepseek")})
 json.dump(d, open(p, "w"), indent=1)
 print("   image services on the laptop:", " -> ".join(d["imagegen_providers"]))
 PY
 
-say "9/10 helper commands: vs-login (sign in to ChatGPT / Bing once), vs-sync (pull the code now)"
+say "9/10 helper commands: vs-login (sign in to ChatGPT / Bing once), vs-sync (code + music from the PC now)"
 mkdir -p "$HOME/.local/bin"
 cat > "$HOME/.local/bin/vs-login" <<'EOF'
 #!/usr/bin/env bash
@@ -146,12 +147,20 @@ if s not in l: l.append(s)
 d["imagegen_providers"] = l; json.dump(d, open(p, "w"), indent=1); print("image services:", " -> ".join(l))
 PY
 EOF
+printf 'PC=%s\nPIN=%s\n' "$PC" "$PIN" > "$CONF/sync.env"; chmod 600 "$CONF/sync.env"
 cat > "$HOME/.local/bin/vs-sync" <<'EOF'
 #!/usr/bin/env bash
-# Pull the latest code; restart the service only when something changed and no job is running.
-D="$HOME/video-studio"; old=$(git -C "$D" rev-parse HEAD)
-gh auth status >/dev/null 2>&1 || exit 0   # no GitHub sign-in yet: update by running the setup again
-git -C "$D" pull -q --ff-only || exit 0
+# Hourly: the PC's music library, then the latest code (from the PC; GitHub if signed in).
+# Restarts the service only when the code changed, and only once no job is running.
+[ -f "$HOME/.config/video-studio/sync.env" ] && . "$HOME/.config/video-studio/sync.env"
+D="$HOME/video-studio"; old=$(git -C "$D" rev-parse HEAD); T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+if [ -n "$PC" ] && curl -fsS -m 600 "http://$PC/laptop/music?k=$PIN" -o "$T/m.tgz"; then
+  mkdir -p "$HOME/videos/music" && tar xzf "$T/m.tgz" -C "$HOME/videos/music" && echo "music library synced ($(ls "$HOME/videos/music"/hook "$HOME/videos/music"/bed 2>/dev/null | grep -c '\.'))"
+fi
+if [ -n "$PC" ] && curl -fsS -m 600 "http://$PC/laptop/bundle?k=$PIN" | tar xj -C "$T" && [ -d "$T/vs-laptop/repo/.git" ]; then
+  git -C "$D" pull -q --ff-only "$T/vs-laptop/repo" main || { echo "code update failed"; exit 0; }
+elif gh auth status >/dev/null 2>&1; then git -C "$D" pull -q --ff-only || exit 0
+else exit 0; fi
 new=$(git -C "$D" rev-parse HEAD); [ "$old" = "$new" ] && exit 0
 git -C "$D" diff --name-only "$old" "$new" | grep -q requirements.txt && "$D/app/env/bin/pip" install -q -r "$D/app/requirements.txt"
 git -C "$D" diff --name-only "$old" "$new" | grep -q remotion/package-lock.json && (cd "$D/remotion" && npm ci --silent --no-audit --no-fund)
@@ -194,7 +203,7 @@ ExecStart=$HOME/.local/bin/vs-sync
 EOF
 cat > "$HOME/.config/systemd/user/video-studio-sync.timer" <<EOF
 [Unit]
-Description=Hourly Video Studio code sync
+Description=Hourly Video Studio code + music sync
 [Timer]
 OnBootSec=10min
 OnUnitActiveSec=1h
@@ -206,6 +215,7 @@ systemctl --user enable --now video-studio.service video-studio-awake.service vi
 systemctl --user restart video-studio.service
 sudo loginctl enable-linger "$USER"   # keeps the services running without a desktop login
 for i in $(seq 1 30); do curl -s localhost:42021/api/status >/dev/null && break; sleep 2; done
+"$HOME/.local/bin/vs-sync" | sed 's/^/   /' || true   # the music library now (then hourly)
 
 IFACE=$(ip route show default | awk '{print $5; exit}')
 NAME="$(hostname).local"; IP=$(hostname -I | awk '{print $1}'); MAC=$(cat /sys/class/net/$IFACE/address)
