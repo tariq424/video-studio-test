@@ -175,7 +175,11 @@ class Suite:
             self.wait_idle()
             if self.a.restart_first: self.restart_vs()
             if "text" in only:
-                self.run("text", {"transcript": TEXT, "src_title": "The Old Man of the Mountain", "presenter": "true"}, [], {"talking_head": self.check_head})
+                if self.a.text_file:   # your own text (a story, a script): a 30-second smoke Short from it, no presenter
+                    t = Path(self.a.text_file).read_text(encoding="utf-8-sig")
+                    self.run("text", {"transcript": t, "src_title": self.a.title or Path(self.a.text_file).stem}, [], {})
+                else:
+                    self.run("text", {"transcript": TEXT, "src_title": "The Old Man of the Mountain", "presenter": "true"}, [], {"talking_head": self.check_head})
             if "nlm" in only:
                 au = self.nlm_audio()
                 if au: self.run("nlm", {"src_title": "NotebookLM audio overview"}, [("file", au)], {})
@@ -210,5 +214,7 @@ if __name__ == "__main__":
     ap.add_argument("--vs", default="http://127.0.0.1:42021"); ap.add_argument("--token", default="")
     ap.add_argument("--only", default="text,nlm,clip"); ap.add_argument("--nlm", default="")
     ap.add_argument("--job-minutes", type=float, default=15)
+    ap.add_argument("--text-file", default="", help="make the text test from this file instead of the built-in description")
+    ap.add_argument("--title", default="")
     ap.add_argument("--restart-first", action="store_true", help="restart the stack in the idle gap before the tests (loads new code)")
     Suite(ap.parse_args()).main()
