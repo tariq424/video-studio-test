@@ -57,7 +57,7 @@ def test_key():
 def status():
     cfg = config.load()
     _wg = WanGP(cfg); _run = _wg.running()
-    return jsonify(wangp=_run, wangp_on_demand=_run or _wg.alive(), api_key=bool(cfg.get("anthropic_api_key")), zai_key=bool(cfg.get("zai_api_key")), deepseek_key=bool(cfg.get("deepseek_api_key")), provider=cfg.get("script_provider"), current=studio.current, stages=STAGES)
+    return jsonify(power=_power(), worker=os.environ.get("VS_WORKER", ""), wangp=_run, wangp_on_demand=_run or _wg.alive(), api_key=bool(cfg.get("anthropic_api_key")), zai_key=bool(cfg.get("zai_api_key")), deepseek_key=bool(cfg.get("deepseek_api_key")), provider=cfg.get("script_provider"), current=studio.current, stages=STAGES)
 
 @app.get("/api/jobs")
 def jobs(): return jsonify(studio.list())
@@ -372,6 +372,15 @@ def act(jid, action):
     if action == "stop": return jsonify(ok=True, state=studio.cancel_job(jid))   # Stop video: next safe point
     {"approve": studio.approve, "resume": studio.resume}[action](jid); return jsonify(ok=True)
 
+@app.get("/api/jobs/<jid>/outputs")
+def job_outputs(jid):
+    """What a remote dispatcher (the Newsroom) copies back: output/ files plus the plans and the render timelines."""
+    d = studio.job(jid).dir
+    if not d.exists(): abort(404)
+    out = [f"output/{f.name}" for f in sorted((d / "output").glob("*")) if f.is_file() and not f.name.startswith("_")] if (d / "output").is_dir() else []
+    extra = [r for r in ("plan.json", "short/plan.json", "state.json", "short/public/teaser.json", "build/public/teaser.json") if (d / r).is_file()]
+    return jsonify(files=out + extra)
+
 @app.get("/files/<jid>/<path:p>")
 def files(jid, p):
     d = studio.job(jid).dir.resolve(); f = (d / p).resolve()
@@ -459,6 +468,23 @@ def make_edit():
     err = edit.start_apply(j.dir, b.get("beat", ""), b.get("cands") or [], b.get("fit", "auto"), config.load(), j.log)
     return (jsonify(error=err), 409) if err else jsonify(ok=True)
 
+def _power():
+    """On the Linux worker: is it on AC power? (it only takes jobs plugged in). Elsewhere: None."""
+    import glob
+    for f in glob.glob("/sys/class/power_supply/*/online"):
+        try: return {"ac": open(f).read().strip() == "1"}
+        except OSError: pass
+    return None
+
+# Network worker mode (the Linux laptop): VS_HOST=0.0.0.0 with VS_TOKEN; every request from another machine must carry
+# the token (X-VS-Token header or ?k=). Without VS_TOKEN the server stays on 127.0.0.1 only.
+@app.before_request
+def _worker_guard():
+    tok = os.environ.get("VS_TOKEN", "")
+    if not tok or request.remote_addr in ("127.0.0.1", "::1"): return None
+    if request.headers.get("X-VS-Token") == tok or request.args.get("k") == tok: return None
+    return jsonify(error="token required"), 403
+
 def free_port(p):
     for q in range(p, p + 50):
         with socket.socket() as s:
@@ -475,4 +501,5 @@ if __name__ == "__main__":
     # VS_RELOAD=1: restart automatically when a .py file changes (development only - it also stops a running render;
     # the job is then marked stopped and Resume continues it)
     reload = os.environ.get("VS_RELOAD") == "1"
-    app.run(host="127.0.0.1", port=port, debug=False, threaded=True, use_reloader=reload)
+    host = os.environ.get("VS_HOST", "127.0.0.1") if os.environ.get("VS_TOKEN") else "127.0.0.1"
+    app.run(host=host, port=port, debug=False, threaded=True, use_reloader=reload)

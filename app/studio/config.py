@@ -163,8 +163,12 @@ def load():
     d = dict(DEFAULTS)
     try: _migrate()
     except Exception: pass
-    d.update(_raw())
-    for k in SECRETS: d[k] = _vault_get(k)
+    raw = _raw(); d.update(raw)
+    import os
+    for k in SECRETS:   # Windows vault; on the Linux worker the service's environment (VS_<NAME>) or a plain value
+        plain = raw.get(k) if raw.get(k) not in (None, "", "vault") else ""
+        d[k] = _vault_get(k) or os.environ.get("VS_" + k.upper(), "") or plain
+    if os.environ.get("VS_HF_TOKEN") and not d.get("hf_token"): d["hf_token"] = os.environ["VS_HF_TOKEN"]
     return d
 
 def save(upd):
