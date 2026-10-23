@@ -145,7 +145,9 @@ def nlm(action, name=""):
     from playwright.sync_api import sync_playwright
     with sync_playwright() as pw:
         b, ctx = _connect(pw)
-        page = _page(ctx, "notebooklm.google.com", "https://notebooklm.google.com/")
+        page = _page(ctx, "notebook", "https://notebooklm.google.com/")
+        page.set_default_timeout(20000)   # no step may wait longer than this (a hang at 11:58 waited forever)
+        step = lambda m: log(f"  nlm {action}: {m}")
         page.wait_for_timeout(4000)
         if "accounts.google.com" in page.url: raise SystemExit("NotebookLM: not signed in")
         if action == "list":
@@ -161,17 +163,21 @@ def nlm(action, name=""):
                 if "/notebook/" in page.url: page.goto("https://notebooklm.google.com/", wait_until="domcontentloaded"); page.wait_for_timeout(4000)
                 page.get_by_text(title, exact=False).first.click(timeout=15000); page.wait_for_timeout(6000)
             dest = Path(r"F:\videos_test\smoke\nlm") if os.name == "nt" else OUT / "nlm"; dest.mkdir(parents=True, exist_ok=True)
+            step("closing pop-ups")
             for _ in range(3):   # welcome / news pop-ups
                 x = page.locator("button[aria-label='Close dialog'], button[aria-label='Dismiss banner']")
                 if not x.count() or not x.first.is_visible(): break
                 x.first.click(timeout=3000); page.wait_for_timeout(800)
             # a saved overview in the Studio panel is the row with a Play button; its own "More" menu has Download.
             # (The "Audio Overview" / "Video Overview" tiles CREATE new ones: never clicked.)
+            step("looking for a saved overview (Play button)")
             plays = page.locator("button[aria-label='Play']")
             if not plays.count(): dump(page, "nlm_noitem"); raise SystemExit("no saved overview with a Play button in this notebook")
             row = plays.first.locator("xpath=ancestor::*[.//button[@aria-label='More']][1]")
+            step("opening its menu")
             row.locator("button[aria-label='More']").first.click(timeout=10000); page.wait_for_timeout(1200)
             dump(page, "nlm_menu")
+            step("clicking Download")
             with page.expect_download(timeout=180000) as dl:
                 page.get_by_role("menuitem", name=re.compile("download", re.I)).first.click(timeout=10000)
             f = dest / (re.sub(r"[^\w-]+", "_", title or "notebook")[:60] + f"_{kind}_" + time.strftime("%Y%m%d_%H%M%S") + Path(dl.value.suggested_filename).suffix)
@@ -191,3 +197,5 @@ if __name__ == "__main__":
         else: raise SystemExit(f"unknown command {cmd}: start | goto <app> | tabs | shot | stop")
     except SystemExit as e:
         log(f"bridge {cmd}: {e}"); raise
+    except Exception as e:
+        log(f"bridge {cmd} FAILED: {type(e).__name__}: {' '.join(str(e).split())[:300]}"); raise SystemExit(1)
