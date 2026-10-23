@@ -128,11 +128,14 @@ def presenter_photo(cfg, log):
         res = c.predict(PRESENTER_PROMPT, 7, False, 768, 768, 4, api_name="/infer")
         f = res[0] if isinstance(res, (list, tuple)) else res
         with Image.open(f.get("path") if isinstance(f, dict) else f) as im: im.convert("RGB").save(keep, "JPEG", quality=94)
-    except Exception as e:   # e.g. the free ZeroGPU quota is spent: an AI-generated face (not a real person) instead
-        log(f"  talking head: FLUX unavailable ({' '.join(str(e).split())[:100]}); using a generated face from thispersondoesnotexist.com")
-        import io, requests
-        r = requests.get("https://thispersondoesnotexist.com/", headers={"User-Agent": "Mozilla/5.0"}, timeout=30); r.raise_for_status()
-        with Image.open(io.BytesIO(r.content)) as im: im.convert("RGB").resize((768, 768)).save(keep, "JPEG", quality=94)
+    except Exception as e:   # e.g. the free ZeroGPU quota is spent: Bing Image Creator once (Edge profile, not Google)
+        log(f"  talking head: FLUX unavailable ({' '.join(str(e).split())[:100]}); making the presenter photo with Bing once")
+        from .imagegen import _session_bing
+        tmp = keep.with_name("presenter_bing.jpg")
+        _session_bing(cfg, {"still_prompt": PRESENTER_PROMPT}, "16:9", tmp, 240, log, lambda page, step: None)
+        with Image.open(tmp) as im:   # centre square around the face
+            w, h = im.size; side = min(w, h)
+            im.convert("RGB").crop(((w - side) // 2, (h - side) // 2, (w + side) // 2, (h + side) // 2)).resize((768, 768)).save(keep, "JPEG", quality=94)
     return keep
 
 
