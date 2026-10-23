@@ -34,7 +34,7 @@ def sample_audio(cfg):
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    max_tests = int(sys.argv[1]) if len(sys.argv) > 1 else 4
+    max_tests = int(sys.argv[1]) if len(sys.argv) > 1 else 8
     cfg = config.load()
     from huggingface_hub import HfApi
     api = HfApi(token=cfg.get("hf_token") or None)
@@ -64,6 +64,8 @@ def main():
     img = talkinghead.presenter_photo(cfg, log)
     wav = sample_audio(cfg)
     results = []
+    # CPU Spaces first: no ZeroGPU quota (the free quota is often spent on images by mid-morning), just slower
+    usable.sort(key=lambda u: (u["hardware"].startswith("zero"), -u["likes"]))
     for u in usable[:max_tests]:
         t0 = time.time(); dest = OUT / f"th_{u['space'].replace('/', '_')}.mp4"
         try:

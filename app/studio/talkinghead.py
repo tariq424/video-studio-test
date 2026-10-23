@@ -118,15 +118,21 @@ def presenter_photo(cfg, log):
     if p.is_file(): return p
     keep = Path(cfg.get("jobs_dir") or ".").parent / "presenter_hf.jpg"
     if keep.is_file(): return keep
-    from gradio_client import Client
     from PIL import Image
-    from .imagegen import HF_SPACE
-    log("  talking head: making the presenter photo once (Hugging Face FLUX)")
-    c = Client(cfg.get("hf_space") or HF_SPACE, token=cfg.get("hf_token") or None, verbose=False)
-    res = c.predict(PRESENTER_PROMPT, 7, False, 768, 768, 4, api_name="/infer")
-    f = res[0] if isinstance(res, (list, tuple)) else res
     keep.parent.mkdir(parents=True, exist_ok=True)
-    with Image.open(f.get("path") if isinstance(f, dict) else f) as im: im.convert("RGB").save(keep, "JPEG", quality=94)
+    try:
+        from gradio_client import Client
+        from .imagegen import HF_SPACE
+        log("  talking head: making the presenter photo once (Hugging Face FLUX)")
+        c = Client(cfg.get("hf_space") or HF_SPACE, token=cfg.get("hf_token") or None, verbose=False)
+        res = c.predict(PRESENTER_PROMPT, 7, False, 768, 768, 4, api_name="/infer")
+        f = res[0] if isinstance(res, (list, tuple)) else res
+        with Image.open(f.get("path") if isinstance(f, dict) else f) as im: im.convert("RGB").save(keep, "JPEG", quality=94)
+    except Exception as e:   # e.g. the free ZeroGPU quota is spent: an AI-generated face (not a real person) instead
+        log(f"  talking head: FLUX unavailable ({' '.join(str(e).split())[:100]}); using a generated face from thispersondoesnotexist.com")
+        import io, requests
+        r = requests.get("https://thispersondoesnotexist.com/", headers={"User-Agent": "Mozilla/5.0"}, timeout=30); r.raise_for_status()
+        with Image.open(io.BytesIO(r.content)) as im: im.convert("RGB").resize((768, 768)).save(keep, "JPEG", quality=94)
     return keep
 
 
