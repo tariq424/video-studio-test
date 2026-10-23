@@ -6,7 +6,7 @@ Tracks come from your own folder (no downloads, no licences guessed): music_dir 
 Use tracks you are allowed to put on YouTube (YouTube Studio > Audio Library is free and safe). A random track is picked
 per video. No tracks -> no music, the video is unchanged. Any failure leaves the video as it was (never fails the job).
 
-Settings: music_on (true), music_dir, music_hook_db (-14: hook cue level), music_bed_db (-24: bed level under speech),
+Settings: music_on (true), music_dir, music_hook_db (-5: hook cue, dB under the voice), music_bed_db (-10: bed under the voice; dips ~3 dB more while speaking),
 music_long (true: explainers get it too)."""
 import json
 import random
@@ -15,6 +15,9 @@ from pathlib import Path
 
 from . import media
 
+# every track is first brought to the narration's loudness (-14 LUFS), so the dB settings below mean "this much under the voice"
+# (2026-10-23: raw -14/-24 dB plus a hard 8:1 dip left the music 20-30 dB under the voice: inaudible)
+NORM = "loudnorm=I=-14:TP=-2:LRA=11"
 AUDIO = (".mp3", ".m4a", ".wav", ".ogg", ".aac", ".flac")
 
 
@@ -110,22 +113,22 @@ def mix(mp4, cfg, log, hook_secs=6.0, seed=None, text=""):
         log(f"  music: no tracks in the library ({folder(cfg)}); no music added"); return False
     try:
         total = media.dur(mp4); h = max(0.0, min(float(hook_secs), total)) if hook else 0.0
-        hdb, bdb = float(cfg.get("music_hook_db", -14)), float(cfg.get("music_bed_db", -24))
+        hdb, bdb = float(cfg.get("music_hook_db", -5)), float(cfg.get("music_bed_db", -10))
         ins, parts = ["-i", mp4], []
         if hook:
             ins += ["-i", hook]
             # the cue plays under the hook and fades out over its last second
-            parts.append(f"[{len(ins) // 2 - 1}:a]atrim=0:{h + 1:.2f},asetpts=PTS-STARTPTS,volume={hdb}dB,afade=t=out:st={max(0, h - 0.5):.2f}:d=1.5[mh]")
+            parts.append(f"[{len(ins) // 2 - 1}:a]atrim=0:{h + 1:.2f},asetpts=PTS-STARTPTS,{NORM},volume={hdb}dB,afade=t=out:st={max(0, h - 0.5):.2f}:d=1.5[mh]")
         if bed and total - h > 2:
             ins += ["-stream_loop", "-1", "-i", bed]
             k = len([x for x in ins if x == "-i"]) - 1
-            parts.append(f"[{k}:a]atrim=0:{total - h + 1:.2f},asetpts=PTS-STARTPTS,volume={bdb}dB,afade=t=in:st=0:d=1.5,"
+            parts.append(f"[{k}:a]atrim=0:{total - h + 1:.2f},asetpts=PTS-STARTPTS,{NORM},volume={bdb}dB,afade=t=in:st=0:d=1.5,"
                          f"afade=t=out:st={max(0, total - h - 2):.2f}:d=2,adelay={int(h * 1000)}|{int(h * 1000)}[mb]")
         tracks = [t for t, ok in (("[mh]", hook), ("[mb]", bed and total - h > 2)) if ok]
         music = "".join(tracks) + (f"amix=inputs={len(tracks)}:normalize=0:duration=longest" if len(tracks) > 1 else "anull") + ",aformat=channel_layouts=stereo[m];"
         # duck the music under the voice (sidechain), then put the two together; the voice level is untouched
         flt = ";".join(parts) + ";" + music + \
-              "[0:a]asplit=2[v][key];[m][key]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[md];" \
+              "[0:a]asplit=2[v][key];[m][key]sidechaincompress=threshold=0.1:ratio=3:attack=60:release=700[md];" \
               "[v][md]amix=inputs=2:normalize=0:duration=first[a]"
         tmp = mp4.with_name("_music_" + mp4.name)
         media.ff(*ins, "-filter_complex", flt, "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",

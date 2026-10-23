@@ -65,7 +65,7 @@ DEFAULTS = {
     "voice_ref_text": "Every few months, someone announces that artificial intelligence is about to change everything. Some say it will end work as we know it. Others say it is mostly hype. Stanford economist Chad Jones has spent years building models to answer a simpler question.",
     "music_on": True,                 # music under Shorts/explainers from your own folder (music_dir\hook, music_dir\bed); none there = none
     "music_dir": "",                  # "" = <jobs folder parent>\music
-    "music_hook_db": -14, "music_bed_db": -24, "music_long": True,
+    "music_hook_db": -5, "music_bed_db": -10, "music_long": True,   # dB under the narration's loudness (tracks normalised first)
     "music_generate": True, "music_generate_per_day": 0,   # a new Gemini track when no library track fits the mood (0 = no daily cap)
     "short_fit_3min": False,          # True = drop beats / speed up so a Short stays under 3:00; False = a long Short just runs long
     "story_subject_guard": True,      # every vehicle/aircraft/product shot must be the story's make (closer look); wrong-side interiors dropped
