@@ -24,11 +24,18 @@ T0=$(date +%s)
 
 say "1/10 system packages (sudo password once)"
 sudo -v </dev/tty
-sudo apt-get update -qq
-sudo apt-get install -y -qq git curl wget gpg jq python3-venv python3-pip python3-dev ffmpeg espeak-ng nodejs npm avahi-daemon \
-  libnss3 libatk-bridge2.0-0 libgbm1 libasound2t64 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libpango-1.0-0 \
-  libcairo2 libcups2 libdrm2 fonts-dejavu-core >/dev/null
-command -v gh >/dev/null || sudo apt-get install -y -qq gh >/dev/null
+sudo apt-get update -qq || true
+PKGS="git curl wget gpg jq python3-venv python3-pip python3-dev ffmpeg espeak-ng avahi-daemon libnss3 libatk-bridge2.0-0 libgbm1
+      libasound2t64 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libpango-1.0-0 libcairo2 libcups2 libdrm2 fonts-dejavu-core gh"
+command -v node >/dev/null || PKGS="$PKGS nodejs"
+command -v npm >/dev/null || PKGS="$PKGS npm"
+MISSING=""; for p in $PKGS; do dpkg -s "$p" >/dev/null 2>&1 || MISSING="$MISSING $p"; done
+if [ -n "$MISSING" ] && ! sudo apt-get install -y -qq $MISSING >/dev/null 2>&1; then
+  echo "   one batch failed (a package conflict on this machine); installing one at a time:"
+  FAILED=""; for p in $MISSING; do sudo apt-get install -y -qq "$p" >/dev/null 2>&1 || FAILED="$FAILED $p"; done
+  [ -z "$FAILED" ] || echo "   could not install:$FAILED (continuing; the steps that need them will say so)"
+fi
+echo "   node $(node -v 2>/dev/null || echo missing), npm $(npm -v 2>/dev/null || echo missing), ffmpeg $(command -v ffmpeg >/dev/null && echo ok || echo missing)"
 
 say "2/10 browsers for the image sites (Google Chrome for ChatGPT, Microsoft Edge for Bing)"
 if ! command -v google-chrome >/dev/null; then
@@ -40,13 +47,18 @@ if ! command -v microsoft-edge >/dev/null; then
   sudo apt-get install -y -qq /tmp/edge.deb >/dev/null || echo "   (Edge did not install; Bing stays off on the laptop)"; rm -f /tmp/edge.deb
 fi
 
-say "3/10 GitHub sign-in (the repo is private; a browser code, once)"
-gh auth status >/dev/null 2>&1 || gh auth login --hostname github.com --git-protocol https --web </dev/tty
-gh auth setup-git
-
-say "4/10 code"
-if [ -d "$DIR/.git" ]; then git -C "$DIR" pull -q --ff-only; else gh repo clone "$REPO" "$DIR" -- -q; fi
-git -C "$DIR" log --oneline -1
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo /nonexistent)"
+if [ -d "$HERE/repo/.git" ]; then   # run from the tarball: the code comes with it, no GitHub sign-in needed
+  say "3/10 code from the tarball (no GitHub sign-in)"
+  if [ -d "$DIR/.git" ]; then git -C "$DIR" pull -q --ff-only "$HERE/repo" main; else cp -a "$HERE/repo" "$DIR"; fi
+  gh auth status >/dev/null 2>&1 || echo "   (optional, later: 'gh auth login' lets the hourly sync pull new code from GitHub by itself)"
+else
+  say "3/10 GitHub sign-in (the repo is private; a browser code, once)"
+  gh auth status >/dev/null 2>&1 || gh auth login --hostname github.com --git-protocol https --web </dev/tty
+  gh auth setup-git
+  if [ -d "$DIR/.git" ]; then git -C "$DIR" pull -q --ff-only; else gh repo clone "$REPO" "$DIR" -- -q; fi
+fi
+say "4/10 code: $(git -C "$DIR" log --oneline -1)"
 
 say "5/10 Python environment (app/env) and packages"
 [ -x "$DIR/app/env/bin/python" ] || python3 -m venv "$DIR/app/env"
@@ -120,6 +132,7 @@ cat > "$HOME/.local/bin/vs-sync" <<'EOF'
 #!/usr/bin/env bash
 # Pull the latest code; restart the service only when something changed and no job is running.
 D="$HOME/video-studio"; old=$(git -C "$D" rev-parse HEAD)
+gh auth status >/dev/null 2>&1 || exit 0   # no GitHub sign-in yet: update by running the setup again
 git -C "$D" pull -q --ff-only || exit 0
 new=$(git -C "$D" rev-parse HEAD); [ "$old" = "$new" ] && exit 0
 git -C "$D" diff --name-only "$old" "$new" | grep -q requirements.txt && "$D/app/env/bin/pip" install -q -r "$D/app/requirements.txt"
