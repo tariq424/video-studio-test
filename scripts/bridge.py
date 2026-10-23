@@ -161,12 +161,17 @@ def nlm(action, name=""):
                 if "/notebook/" in page.url: page.goto("https://notebooklm.google.com/", wait_until="domcontentloaded"); page.wait_for_timeout(4000)
                 page.get_by_text(title, exact=False).first.click(timeout=15000); page.wait_for_timeout(6000)
             dest = Path(r"F:\videos_test\smoke\nlm") if os.name == "nt" else OUT / "nlm"; dest.mkdir(parents=True, exist_ok=True)
-            # the overview's own "more" menu in the Studio panel, then Download
-            word = "Audio Overview" if kind == "audio" else "Video Overview"
-            item = page.locator(f"text=/{word}/i").first
-            item.scroll_into_view_if_needed(timeout=10000)
-            more = item.locator("xpath=ancestor::*[.//button][1]").locator("button[aria-label*='More' i], button[aria-label*='options' i], button:has(mat-icon:text('more_vert'))").first
-            more.click(timeout=10000); page.wait_for_timeout(1200)
+            for _ in range(3):   # welcome / news pop-ups
+                x = page.locator("button[aria-label='Close dialog'], button[aria-label='Dismiss banner']")
+                if not x.count() or not x.first.is_visible(): break
+                x.first.click(timeout=3000); page.wait_for_timeout(800)
+            # a saved overview in the Studio panel is the row with a Play button; its own "More" menu has Download.
+            # (The "Audio Overview" / "Video Overview" tiles CREATE new ones: never clicked.)
+            plays = page.locator("button[aria-label='Play']")
+            if not plays.count(): dump(page, "nlm_noitem"); raise SystemExit("no saved overview with a Play button in this notebook")
+            row = plays.first.locator("xpath=ancestor::*[.//button[@aria-label='More']][1]")
+            row.locator("button[aria-label='More']").first.click(timeout=10000); page.wait_for_timeout(1200)
+            dump(page, "nlm_menu")
             with page.expect_download(timeout=180000) as dl:
                 page.get_by_role("menuitem", name=re.compile("download", re.I)).first.click(timeout=10000)
             f = dest / (re.sub(r"[^\w-]+", "_", title or "notebook")[:60] + f"_{kind}_" + time.strftime("%Y%m%d_%H%M%S") + Path(dl.value.suggested_filename).suffix)
