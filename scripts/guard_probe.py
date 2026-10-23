@@ -25,7 +25,13 @@ def main():
         for k in range(4): _jpg(p, work / f"{cid}_f{k}.jpg")
         t0 = time.time()
         ok, why = footage.make_check(cfg, {"id": cid}, work / f"{cid}.jpg", guard, story, print)
-        rows.append({"image": p.name, "verdict": "KEEP" if ok else "DROP", "why": why, "secs": round(time.time() - t0, 1)})
+        raw = ""
+        try:
+            what, who = footage.KIND_WORDS["vehicle"]
+            raw = footage._vision(dict(cfg, vet_provider="local"), work / f"{cid}_pair.jpg", footage.MAKE.format(what=what, who=who)).strip()[:300]
+        except Exception as e: raw = f"(raw failed: {e})"[:200]
+        rows.append({"image": p.name, "verdict": "KEEP" if ok else "DROP", "why": why, "secs": round(time.time() - t0, 1), "raw": raw})
+        print(f"     raw: {raw}", flush=True)
         print(f"  {p.name}: {'KEEP' if ok else 'DROP'} {why} ({rows[-1]['secs']}s)", flush=True)
     (folder / "guard_report.json").write_text(json.dumps(rows, indent=1), encoding="utf-8")
     md = [f"# Story guard probe: {brand}, \"{story}\"", "", "| Image | Verdict | Why |", "|---|---|---|"]
