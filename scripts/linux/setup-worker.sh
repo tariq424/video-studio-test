@@ -8,7 +8,9 @@
 # Flow are never used here. Talking head: Hugging Face. It never publishes. At the end it reports to the PC by itself.
 set -euo pipefail
 {   # the whole script is read before it runs (safe with curl | bash)
-exec > >(tee -a "$HOME/video-studio-setup.log") 2>&1
+# system tools first: a personal ~/bin (e.g. a custom tee) must not replace them in this script
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$HOME/.local/bin"
+exec > >(/usr/bin/tee -a "$HOME/video-studio-setup.log") 2>&1
 DIR="$HOME/video-studio"
 CONF="$HOME/.config/video-studio"
 REPO="tariq424/video-studio-test"
