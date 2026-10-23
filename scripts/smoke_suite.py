@@ -66,7 +66,7 @@ class Suite:
         except ValueError: return 0.0
 
     # ---- the pipeline must not be disturbed
-    def wait_idle(self, max_min=90):
+    def wait_idle(self, max_min=360):   # Short + explainer jobs take ~2.5 h
         if self.local and WIN and not HOLD.exists():
             HOLD.write_text("smoke suite", encoding="utf-8"); self.held = True; self.log("Newsroom held (no new pipeline work while the suite runs)")
         for i in range(max_min * 2):
@@ -75,6 +75,19 @@ class Suite:
             if i % 10 == 0: self.log(f"waiting for the running job {st.get('current')} to finish (it is not touched)")
             time.sleep(30)
         raise RuntimeError(f"Video Studio still busy after {max_min} min; suite not started")
+
+    def restart_vs(self):
+        """In the idle gap: restart the stack so Video Studio loads its newest code (the Newsroom stays held by the file)."""
+        if not (self.local and WIN): return
+        Path(r"F:\code\.restart-request").write_text("", encoding="utf-8")
+        self.log("Video Studio idle: restarting it to load the newest code")
+        time.sleep(20)
+        for _ in range(60):
+            try:
+                if requests.get(self.vs + "/api/status", timeout=5).ok: self.log("Video Studio is back"); time.sleep(5); return
+            except requests.RequestException: pass
+            time.sleep(5)
+        raise RuntimeError("Video Studio did not come back after the restart")
 
     def release(self):
         if self.local and WIN and HOLD.exists() and HOLD.read_text(encoding="utf-8").strip() == "smoke suite":
@@ -160,6 +173,7 @@ class Suite:
         own_before = None
         try:
             self.wait_idle()
+            if self.a.restart_first: self.restart_vs()
             if "text" in only:
                 self.run("text", {"transcript": TEXT, "src_title": "The Old Man of the Mountain", "presenter": "true"}, [], {"talking_head": self.check_head})
             if "nlm" in only:
@@ -196,4 +210,5 @@ if __name__ == "__main__":
     ap.add_argument("--vs", default="http://127.0.0.1:42021"); ap.add_argument("--token", default="")
     ap.add_argument("--only", default="text,nlm,clip"); ap.add_argument("--nlm", default="")
     ap.add_argument("--job-minutes", type=float, default=15)
+    ap.add_argument("--restart-first", action="store_true", help="restart the stack in the idle gap before the tests (loads new code)")
     Suite(ap.parse_args()).main()
