@@ -222,7 +222,7 @@ def sheet(c, out_dir):
         paths, d = _frames_from_video(c["preview"], out_dir, c["id"])
         if not c.get("dur"): c["dur"] = round(d, 1)
         ims = [Image.open(p).convert("RGB") for p in paths]
-    for im in ims: im.thumbnail((640, 640))
+    for k, im in enumerate(ims): im.thumbnail((640, 640)); im.save(out_dir / f"{c['id']}_f{k}.jpg", "JPEG", quality=90)   # make check
     w = sum(i.width for i in ims) + 12 * 3; h = max(i.height for i in ims)
     s = Image.new("RGB", (w, h)); x = 0
     for im in ims: s.paste(im, (x, 0)); x += im.width + 12
@@ -274,7 +274,76 @@ AVOID = """
 6. "forbidden": does any frame show {avoid}? Even partly, even small or in the background. true or false.
 Add "forbidden" to the JSON."""
 
-def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None, narration=""):
+# ------------------------------------------------------------------ story subject guard (owner's rule, 2026-10-23)
+# A story about Tesla must not show a Honda steering wheel, a BMW, a Kia or a classic Triumph: every clip in which a vehicle /
+# aircraft / product is a main subject must be that story's make, recognised from a closer look at two full frames. Unknown
+# makes are dropped too (a stock clip is never shoehorned in). Interiors must drive on the side the story's country does.
+MAKE = """Look closely at this image: two frames from one video clip.
+1. "object": is {what} a main subject of the frames (not just tiny in the far background)? true or false.
+2. "make": the {who} of that main subject, recognised from a badge, logo, livery or unmistakable design (look at the steering-wheel
+   hub, grille, bonnet, boot, wheels, tail fin, screen). "unknown" if you cannot tell for sure. "none" if "object" is false.
+3. "drive_side": if a car interior is shown, is the steering wheel on the "left" or the "right" of the car? "none" otherwise.
+Reply with JSON only: {{"object": false, "make": "none", "drive_side": "none"}}"""
+KIND_WORDS = {"vehicle": ("a car, truck, motorbike or other road vehicle, or a car's interior (steering wheel, dashboard, seats)", "make (brand)"),
+              "aircraft": ("an aircraft, or an aircraft's cabin, wing or tail", "airline or maker"),
+              "train": ("a train", "operator or maker"), "ship": ("a ship or boat", "operator or maker"),
+              "product": ("a phone, computer, gadget or similar product", "brand")}
+RHD = ("united kingdom", "britain", "british", "england", "scotland", "wales", "ireland", "japan", "india", "australia", "new zealand",
+       "south africa", "singapore", "malaysia", "indonesia", "thailand", "hong kong", "pakistan", "bangladesh", "sri lanka", "kenya", "uk")
+LHD = ("china", "chinese", "united states", "america", "american", "u.s.", "usa", "canada", "mexico", "germany", "german", "france",
+       "french", "italy", "spain", "korea", "brazil", "russia", "europe", "european", "taiwan", "vietnam", "turkey", "saudi", "uae", "dubai")
+
+
+def story_guard(job_dir, text):
+    """-> {"kinds": {kind: [brands]}, "side": "left"|"right"|""} from the job's story subjects (entities.json) and its text."""
+    ents = []
+    for d in [Path(job_dir)] + list(Path(job_dir).parents)[:3]:
+        f = d / "entities.json"
+        if f.exists():
+            try: ents = json.loads(f.read_text(encoding="utf-8")); break
+            except Exception: pass
+    kinds = {}
+    for e in ents:
+        if e.get("kind") in KIND_WORDS and (e.get("brand") or "").strip():
+            kinds.setdefault(e["kind"], []).append(e["brand"].strip())
+    return {"kinds": kinds, "side": drive_side(text)}
+
+
+def drive_side(text):
+    t = " " + re.sub(r"[^a-z. ]+", " ", (text or "").lower()) + " "
+    r = any(f" {w} " in t for w in RHD); l = any(f" {w} " in t for w in LHD)
+    return "right" if r and not l else "left" if l and not r else ""
+
+
+def make_check(cfg, c, sheet_path, guard, narration, log):
+    """-> (ok, reason). Only when the story has a branded vehicle/aircraft/product subject (or a known driving side)."""
+    if not guard or not (guard.get("kinds") or guard.get("side")) or not cfg.get("story_subject_guard", True): return True, ""
+    from PIL import Image
+    fr = [sheet_path.with_name(f"{c['id']}_f{k}.jpg") for k in (1, 2)]
+    if not all(f.exists() for f in fr): return True, ""
+    ims = [Image.open(f).convert("RGB") for f in fr]
+    pair = Image.new("RGB", (sum(i.width for i in ims) + 12, max(i.height for i in ims))); x = 0
+    for im in ims: pair.paste(im, (x, 0)); x += im.width + 12
+    pp = sheet_path.with_name(f"{c['id']}_pair.jpg"); pair.save(pp, "JPEG", quality=90)
+    side = drive_side(narration) or guard.get("side", "")
+    for kind, brands in (guard.get("kinds") or {"vehicle": []}).items():
+        what, who = KIND_WORDS[kind]
+        try: j = parse_json(_vision(cfg, pp, MAKE.format(what=what, who=who)))
+        except Exception as e: return False, f"make check unavailable ({str(e)[:50]}); not risking a wrong {kind}"
+        if str(j.get("object", "false")).strip().lower() not in ("true", "yes", "1"): continue
+        make = str(j.get("make") or "unknown").strip()
+        if brands:
+            hit = any(_norm_brand(b) and (_norm_brand(b) in _norm_brand(make) or _norm_brand(make) in _norm_brand(b)) for b in brands) and _norm_brand(make)
+            if not hit:
+                return False, (f"shows a {make} {kind}; the story is about {', '.join(brands)}" if make.lower() not in ("unknown", "none", "")
+                               else f"shows a {kind} that can't be confirmed as {', '.join(brands)}")
+        ds = str(j.get("drive_side") or "none").lower()
+        if kind == "vehicle" and side and ds in ("left", "right") and ds != side:
+            return False, f"{'right' if ds == 'right' else 'left'}-hand-drive interior; the story's country drives with the wheel on the {side}"
+    return True, ""
+
+
+def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None, narration="", guard=None):
     """-> (ok, reason, seen). Generic slots: hard checks + no visible third-party brand.
     Subject-locked slots: the clip must positively match the subject (brand evidence and the vision model agreeing with a reference photo)."""
     from PIL import Image, ImageStat
@@ -308,6 +377,8 @@ def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None, narratio
         if same == "no": return False, f"not {subject['name']}", seen
         if key and not evidence: return False, f"no visible sign of {subject.get('brand')}", seen
         if not key and same != "yes": return False, f"not confirmed as {subject['name']}", seen
+    ok2, why2 = make_check(cfg, c, sheet_path, guard, narration, log)   # a closer look: the story's make, never a lookalike
+    if not ok2: return False, why2, seen
     c["shows"] = str(j.get("shows", j.get("same_subject", ""))).strip().lower()
     return True, "", seen
 
@@ -447,6 +518,10 @@ def fill(cfg, slots, orient, need, out_dir, log, stop, want_long_side, max_secs,
         sj = s_.get("subject")
         if sj and sj.get("name") and sj["name"] not in refs: refs[sj["name"]] = reference(sj, out_dir / "refs", log)
     ensure_vet_model(cfg, log)
+    guard = story_guard(Path(out_dir).parent, " ".join(str(x.get("text") or "") for x in slots))
+    if guard["kinds"] or guard["side"]:
+        log(f"  story guard: {', '.join(f'{k} = {'/'.join(v)}' for k, v in guard['kinds'].items()) or 'no branded subject'}"
+            + (f"; cars drive with the wheel on the {guard['side']}" if guard["side"] else ""))
     try:
         for s in todo:
             if stop(): raise RuntimeError("cancelled")
@@ -468,7 +543,7 @@ def fill(cfg, slots, orient, need, out_dir, log, stop, want_long_side, max_secs,
                 try: sh = sheet(c, out_dir / "sheets")
                 except Exception as e: log(f"  preview of {cid} failed ({str(e)[:60]})"); continue
                 ok, why, seen = verify(cfg, c, sh, log, subject=sj, ref=refs.get(sj["name"]) if sj else None, avoid=s.get("avoid"),
-                                      narration=s.get("narration") or s["text"])
+                                      narration=s.get("narration") or s["text"], guard=guard)
                 if not ok:
                     log(f"  {s['id']}: skipped {c['src']} clip {cid} ({why})")
                     st.setdefault("rejected", {}).setdefault(s["id"], []).append({"id": cid, "src": c["src"], "why": why, "sheet": str(sh), "desc": c.get("desc", "")[:80],

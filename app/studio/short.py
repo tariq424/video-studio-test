@@ -231,9 +231,9 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                 j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=lambda x: None if x.get("beats") else (_ for _ in ()).throw(ValueError("no beats")))
         nw0 = sum(len(x["vo"].split()) for x in j["beats"])
         if j.get("covered") is True and nw0 < words * lo: log(f"  the AI says the source is fully covered at {nw0} of {words} words; kept short (no padding)")
-        if not smoke: log(f"  script: {nw0} words (target {words}, hard limit {wmax} = 3:00){'; over the target, accepted' if nw0 > words * 1.05 else ''}")
+        if not smoke: log(f"  script: {nw0} words (target {words}; 3:00 = {wmax} words){'; over the target, accepted' if nw0 > words * 1.05 else ''}")
         if smoke: j["beats"] = j["beats"][:2]   # a smoke test stays ~30 s even if the length check gave up
-        else:   # hard cut: still more than 10% long -> drop whole middle beats (keep the hook and the payoff)
+        elif cfg.get("short_fit_3min", False):   # off by default (owner 2026-10-23): a long Short just isn't classed as a Short
             while len(j["beats"]) > minb and sum(len(x["vo"].split()) for x in j["beats"]) > wmax:
                 cut = j["beats"].pop(-2); log(f"  script too long; dropped a middle beat ({len(cut['vo'].split())} words)")
         plan = {"target_secs": float(secs), "title": (j.get("title") or title)[:90], "tag": (j.get("tag") or "CONDENSED")[:32].upper(),
@@ -267,7 +267,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             editorial_review(llm, plan, meta, transcript, cfg, log, stop)
             if plan.get("editorial_warnings"):
                 jargon_check(llm, plan, cfg, log, source_notes=notes)   # the review gave up: explanations still go in (protected)
-        punch_up(cfg, plan, log, force=smoke, budget=None if smoke else wmax)   # smoke: every beat gets its joke here; otherwise only beats still without one
+        punch_up(cfg, plan, log, force=smoke, budget=wmax if (not smoke and cfg.get("short_fit_3min", False)) else None)   # smoke: every beat gets its joke here; otherwise only beats still without one
         from . import coherence
         ents = coherence.entities(cfg, Path(srcdir).parent, title, notes, log, stop, llm=llm)
         nl = 0
@@ -278,12 +278,12 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             nl += bool(s.get("subject"))
         if nl: log(f"  {nl} beat(s) locked to a story subject")
     plan = verify_quotes(plan, transcript, log)
-    if not smoke:   # the fact-check can lengthen the script after it passed the length check: cut again (render pace covers the last few %)
+    if not smoke and cfg.get("short_fit_3min", False):   # the fact-check can lengthen the script: cut again (only when fitting 3:00 is on)
         while len(plan["sections"]) > minb and sum(len(x["vo"].split()) for x in plan["sections"]) > wmax:   # only past 3:00
             cut = plan["sections"].pop(-2); log(f"  script grew past the 3:00 limit in the fact-check; dropped a middle beat ({len(cut['vo'].split())} words)")
         for i, x in enumerate(plan["sections"]): x["id"], x["title"] = f"b{i}", f"Beat {i + 1}"
     n = sum(len(x["vo"].split()) for x in plan["sections"])
-    if not smoke and n > wmax: log(f"  NOTE: script is {n} words (target {words}); past the 3:00 limit; it will be sped up to fit")
+    if not smoke and n > wmax: log(f"  NOTE: script is {n} words (target {words}); past 3:00" + ("; it will be sped up to fit" if cfg.get("short_fit_3min", False) else "; kept as is (YouTube will treat it as a regular video, not a Short)"))
     if mode != "both":   # no companion explainer: a promise of one must not survive (the model sometimes adds it anyway)
         promise = re.compile(r"[^.!?]*\b(full (breakdown|video|episode|explainer)|longer video|link(ed)? below|part two|watch the full)\b[^.!?]*[.!?]?\s*", re.I)
         for x in plan["sections"]:
@@ -885,7 +885,7 @@ def build(job, plan, cfg, log):
     tgt = plan.get("target_secs")
     if tgt and abs(raw_total - tgt) > 3:   # length policy (2026-10-14): the narration keeps its natural pace; only past 3:00 is it sped up
         log(f"  narration {raw_total:.0f}s vs target {tgt:.0f}s; natural pace kept")
-    if raw_total / speed > MAX_SECS:
+    if raw_total / speed > MAX_SECS and cfg.get("short_fit_3min", False):
         speed = raw_total / (MAX_SECS - 1)
         if speed > 1.12: log(f"  WARNING: narration is {raw_total:.0f}s; even sped up it would exceed 3 minutes. Shorten the script."); speed = 1.12
         log(f"  narration {raw_total:.0f}s is over the Shorts limit; speeding it up {speed:.2f}x")

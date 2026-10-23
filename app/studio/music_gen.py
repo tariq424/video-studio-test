@@ -27,7 +27,8 @@ def _usage(cfg):
 def allowed(cfg):
     if not cfg.get("music_generate", True): return False
     _, d = _usage(cfg)
-    return d.get(time.strftime("%Y-%m-%d"), 0) < int(cfg.get("music_generate_per_day", 2))
+    cap = int(cfg.get("music_generate_per_day", 0) or 0)
+    return cap <= 0 or d.get(time.strftime("%Y-%m-%d"), 0) < cap   # 0 = on demand, no daily cap (owner 2026-10-23)
 
 
 def _count(cfg):
