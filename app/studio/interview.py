@@ -612,7 +612,8 @@ def own_clips(src, root, log=print, radius=150.0):
                    key=lambda f: (f.stem.upper().startswith("IMG_"), f.name))   # named copies first
     for f in files:
         d, ll = tags(f)
-        if d < 4 or not ll or round(d, 1) in seen or re.search(r"with[-_ ]", f.stem, re.I): continue   # "...-with-clinton": a person's clip
+        if d < 4 or not ll or round(d, 1) in seen: continue
+        if re.search(r"with[-_ ]", f.stem, re.I): seen.add(round(d, 1)); continue   # "...-with-clinton": a person's clip (and its IMG_ copy)
         dist = 6371000 * math.hypot(math.radians(ll[0] - here[0]), math.radians(ll[1] - here[1]) * math.cos(math.radians(here[0])))
         if dist > radius or d > 600: continue
         rot = shots.orient(f, root, log)
