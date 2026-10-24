@@ -376,6 +376,8 @@ Then answer from what you see:
 - "kind_shown": the kind of {kind} the clip shows, in 1-3 words (e.g. "pickup truck", "sedan", "dog", "ballpoint pen"); "none" if no {kind} is shown.
 - "place_seen": a recognisable city, skyline, landmark or country you can identify (e.g. "London skyline", "Eiffel Tower"); "none" if you can't name one.
 - "mood_clash": true if the scene's mood plainly contradicts this narration (calm or happy scenes over a disaster, crime or crisis): "{narration}"
+- "unrelated": true if the clip has nothing to do with the narration's topic at all (a washing machine, a spinning coin or wax
+  seals for a story about an AI company). Loosely related scenes (offices, screens, money, a city for a business story) are false.
 - "stand_in": true if the main subject is one person who would be taken to BE someone the narration names (an official, pilot, politician).
 - "overlay_text": large readable text, caption, title, logo or watermark overlaid on the video, or an advert-style brand logo? true/false.
 - "same_scene": all 4 frames from one continuous scene? true/false.
@@ -383,7 +385,7 @@ Then answer from what you see:
 - "platform": a screen capture of other media (YouTube/social page or player, thumbnail, TV broadcast with channel logo or ticker,
   streaming-app interface, film/TV still, another channel's watermark)? true/false.
 - "brands": every brand you can read or clearly recognise (car badges, airline logos, product logos); [] if none.
-Reply with one JSON object with the keys seen, main_visible, kind_shown, place_seen, mood_clash, stand_in, overlay_text, same_scene,
+Reply with one JSON object with the keys seen, main_visible, kind_shown, place_seen, mood_clash, unrelated, stand_in, overlay_text, same_scene,
 looks_ok, platform, brands, filled in from what you actually see."""
 
 _PLACE_CACHE = {}
@@ -491,6 +493,7 @@ def contra_verdict(cfg, j, mainv, narration_place="", neutral=False, log=print):
         return False, f"doesn't show {main}"
     if kind_clash(kind, str(j.get("kind_shown") or ""), main): return False, f"shows a {str(j.get('kind_shown'))[:30]}, not {main or kind}"
     if yes("mood_clash"): return False, "the mood contradicts the narration"
+    if yes("unrelated"): return False, "nothing to do with what the narration says"
     if yes("stand_in"): return False, "a stranger would be taken for a real person the narration names"
     return True, ""
 
