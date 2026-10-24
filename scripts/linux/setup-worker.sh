@@ -125,7 +125,8 @@ signed = [s for s in ("chatgpt", "bing") if os.path.isdir(f"{home}/{s}_profile/D
 d.update({"jobs_dir": f"{home}/jobs", "imagegen_providers": ["hf"] + signed, "imagegen_rotate": False, "imagegen_per_beat": 1,
           "flow_on": False, "wangp_on_demand": False, "vet_provider": "local", "short_concurrency": 2, "kokoro_online": True,
           "kokoro_device": "cpu", "talking_head": "hf",
-          "music_dir": f"{home}/music", "music_generate": False,   # music: the PC's library (vs-sync); no Gemini on the laptop "script_provider": d.get("script_provider", "deepseek")})
+          "music_dir": f"{home}/music", "music_generate": False,   # music: the PC's library (vs-sync); no Gemini on the laptop
+          "script_provider": d.get("script_provider", "deepseek")})
 json.dump(d, open(p, "w"), indent=1)
 print("   image services on the laptop:", " -> ".join(d["imagegen_providers"]))
 PY
