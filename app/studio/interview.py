@@ -28,7 +28,7 @@ from pathlib import Path
 from . import media
 
 VIDEO_EXT = (".mov", ".mp4", ".m4v", ".mkv")
-CUT_VERSION = "8"   # bump when the way parts are cut changes, so cached parts are made again
+CUT_VERSION = "9"   # bump when the way parts are cut changes, so cached parts are made again
 PLAN = """You edit a documentary from the creator's OWN interview footage. The interview audio is the star: viewers should mostly
 hear the people on camera. Your narration only bridges: a hook, where we are, a line between topics, a closing line.
 
@@ -515,8 +515,9 @@ class Ladder:
       2. stock video (Pexels / Pixabay / Internet Archive) through the clip checker (Bermuda, the right kind of thing)
       3. his own footage of that moment, blurred
     Short stretches (< 4 s) go straight to the blur, so pictures don't flash by. (AI images / Marble scenes: not in this edit.)"""
-    def __init__(self, cfg, src, flip, kd, kind, log=print, own=None):
+    def __init__(self, cfg, src, flip, kd, kind, log=print, own=None, scenic=None):
         self.cfg, self.src, self.flip, self.kd, self.kind, self.log = cfg, src, flip, Path(kd), kind, log
+        self.scenic = scenic   # (file, start, flip, rotation): the bay, blurred under a stretch where only the holder is in shot
         self.photos, self.stock, self.uses, self.stock_tries = {}, {}, {}, 0
         self.own, self.own_i, self.own_pos = list(own or []), 0, {}
         (self.kd / "ladder").mkdir(exist_ok=True)
@@ -562,7 +563,7 @@ class Ladder:
             _log(self.log, f"    stock search failed ({str(e)[:80]})")
         return self.stock[visual]
 
-    def picture(self, a, b, out, visual="", text=""):
+    def picture(self, a, b, out, visual="", text="", why=""):
         """A silent video for a..b of the source -> (path, how, credit)."""
         from . import shots
         d = b - a
@@ -584,6 +585,11 @@ class Ladder:
                 vf = shots.vf_frame(self.kind, None, 0.0, False, 1080 if self.kind == "short" else 1920, 1920 if self.kind == "short" else 1080)
                 media.ff(*(["-stream_loop", "-1"] if fd < d else []), "-i", f, "-t", f"{d:.2f}", "-an", "-vf", vf, *ENC[:6], out, timeout=900)
                 return out, "stock", credit
+        if why == "self" and self.scenic:   # a blurred face is still a face: the holder's shots go under the blurred bay instead
+            f, st, fl, rot = self.scenic
+            vf = (rot + "," if rot else "") + shots.vf_frame(self.kind, None, 0.0, fl) + ",boxblur=20:2,eq=brightness=-0.1"
+            media.ff("-stream_loop", "-1", "-ss", f"{st + (a * 1.3) % 20:.2f}", "-i", f, "-t", f"{d:.2f}", "-an", "-vf", vf, *ENC[:6], out, timeout=900)
+            return out, "blurred bay", ""
         vf = shots.vf_frame(self.kind, None, 0.0, self.flip) + ",boxblur=24:2,eq=brightness=-0.06"
         media.ff("-ss", f"{a:.2f}", "-i", self.src, "-t", f"{d:.2f}", "-an", "-vf", vf, *ENC[:6], out, timeout=900)
         return out, "blur", ""
@@ -653,7 +659,7 @@ def cut_bite_framed(src, t0, t1, out, kind, flip, an, cuts, log=print, ladder=No
         v = tmpd / f"s{n:02}.mp4"; d = b - a
         if k == "guest" and not shots.holder_out(kind, g): k = "self"   # owner: "cut me out completely" - no crop can, so cut away
         if k in ("self", "empty") and ladder is not None:   # his voice goes on; the picture comes from the ladder
-            _, how, credit = ladder.picture(a, b, v, visual, text)
+            _, how, credit = ladder.picture(a, b, v, visual, text, why=k)
             if credits is not None: credits.append((a - t0, b - t0, how, credit))
             _log(log, f"    {a:.0f}-{b:.0f}s: {'holder in shot' if k == 'self' else 'ceiling / blank'} -> {how}" + (f" ({credit})" if credit else ""))
         elif k in ("self", "empty"):   # cutaway: the sound goes on, the picture shows the guest elsewhere / B-roll
@@ -862,7 +868,7 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
             (kd / "narr").mkdir(exist_ok=True); tts.kokoro_batch(cfg, batch, log, f"interview narration ({kind})")
         used = [(segs[int(x["bite"][0])]["start"], segs[int(x["bite"][1])]["end"]) for x in items if "bite" in x]
         cuts = Cutaways(src, an, used, bfiles, root, flip, log)
-        ladder = Ladder(cfg, src, flip, kd, kind, log, own=own_clips(src, root, log))
+        ladder = Ladder(cfg, src, flip, kd, kind, log, own=own_clips(src, root, log), scenic=card_bg)
         hk = hook(cfg, segs, context, kind, work, log) if cfg.get("interview_hook", True) and not (kind == "short" and sp) else None
         if kind == "short" and sp and items and "bite" in items[0]:   # the Short's own opener is its cold open: hook text from its thread
             items[0] = dict(items[0], hook_text=str(sp.get("hook") or "")[:48])
