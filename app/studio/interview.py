@@ -143,6 +143,44 @@ def plan(cfg, segs, context, broll, work, log=print, short_secs=90, doc_min=8, d
     return j
 
 
+SHORT = """Cut a YouTube Short (60-{short_secs} seconds) from a mini-documentary's material. The interview audio leads.
+About the footage: {context}
+The documentary's soundbites (segment numbers with their words) and context notes:
+{material}
+Rules: open with the single most gripping soundbite (a complete thought, under 20 seconds); then 2-4 more soundbites that tell
+one clear story (each 5-20 seconds; you may use a sub-range of a soundbite's segments); at most ONE context insert from the notes
+(only what the note says) and at most two one-sentence narration lines; end on a strong line. No small talk, no logistics.
+Reply with JSON only: {{"items": [{{"bite": [first, last]}} | {{"narr": "...", "broll": ""}} | {{"insert": "...", "note": n, "visual": "...", "card": "..."}}]}}"""
+
+
+def short_plan(cfg, segs, pl, context, notes, work, log=print, short_secs=90):
+    """The Short, cut from the documentary's chosen material (a separate pass: one plan for both came out weak). Cached."""
+    out = Path(work) / "short_plan.json"
+    if out.exists(): return json.loads(out.read_text(encoding="utf-8"))
+    from .llm import LLM
+    bites = sorted({tuple(it["bite"]) for c in pl["documentary"]["chapters"] for it in c.get("items", []) if "bite" in it})
+    mat = "\n".join(f"[{a}-{b}] " + " ".join(segs[i]["text"] for i in range(a, b + 1))[:600] for a, b in bites)
+    mat += "\n\nNotes:\n" + ("\n".join(f"[{i}] {n['fact']}" for i, n in enumerate(notes or [])) or "(none)")
+    n = len(segs)
+    def check(j):
+        its = j.get("items") or []
+        if not its or "bite" not in its[0]: raise ValueError("the Short must open with a soundbite")
+        for it in its:
+            if "bite" in it:
+                a, b = int(it["bite"][0]), int(it["bite"][1])
+                if not 0 <= a <= b < n: raise ValueError(f"bite {it['bite']} out of range")
+                if segs[b]["end"] - segs[a]["start"] > 25: raise ValueError(f"bite {it['bite']} is longer than 20 s; use fewer segments")
+        if total_secs(its, segs) > short_secs + 10: raise ValueError(f"the Short is {total_secs(its, segs):.0f} s; keep it under {short_secs} s")
+    try:
+        with LLM(dict(cfg), log, lambda: False) as llm:
+            j = llm.chat_json("You are a YouTube Shorts editor. Reply with JSON only.",
+                              SHORT.format(short_secs=short_secs, context=context, material=mat[:40000]), max_tokens=1500, check=check)
+    except Exception as e:
+        _log(log, f"  short plan: kept the combined plan's Short ({str(e)[:100]})"); return None
+    out.write_text(json.dumps(j, indent=1, ensure_ascii=False), encoding="utf-8")
+    return j
+
+
 def total_secs(items, segs):
     """Rough runtime: soundbites from the transcript, narration at ~2.6 words a second."""
     t = 0.0
@@ -382,10 +420,12 @@ def hook(cfg, segs, context, kind, work, log=print):
                               max_tokens=300, check=check)
     except Exception as e:
         _log(log, f"  hook: none ({str(e)[:100]})"); return None
-    words = [w for x in segs[max(0, int(j["seg"]) - 1):int(j["seg"]) + 2] for w in x["words"]]   # the segment and its neighbours
     q = [_norm(w) for w in str(j["quote"]).split() if _norm(w)]
-    have = [_norm(w[0]) for w in words]
-    m = difflib.SequenceMatcher(None, have, q, autojunk=False).find_longest_match(0, len(have), 0, len(q))
+    for lo, hi in ((int(j["seg"]) - 3, int(j["seg"]) + 4), (0, len(segs))):   # near the named segment, else anywhere
+        words = [w for x in segs[max(0, lo):hi] for w in x["words"]]
+        have = [_norm(w[0]) for w in words]
+        m = difflib.SequenceMatcher(None, have, q, autojunk=False).find_longest_match(0, len(have), 0, len(q))
+        if m.size >= max(3, len(q) // 2): break
     if m.size < max(3, len(q) // 2): _log(log, "  hook: the quote wasn't found in the transcript; no cold open"); return None
     a = max(0, m.a - (m.b if m.b else 0)); b = min(len(words) - 1, m.a + m.size - 1 + (len(q) - m.b - m.size))
     res = {"t0": max(0.0, words[a][1] - 0.15), "t1": words[b][2] + 0.35, "text": str(j["text"]).strip()[:48], "quote": j["quote"],
@@ -406,8 +446,10 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
     bdir = src.parent
     outs = {}
     for kind in kinds:
-        items = _items(pl.get("short") or {}) if kind == "short" else [x for c in pl["documentary"]["chapters"] for x in c.get("items", [])]
-        kd = work / kind; kd.mkdir(exist_ok=True)
+        sp = short_plan(cfg, segs, pl, context, notes, work, log) if kind == "short" and cfg.get("interview_short_pass", True) else None
+        items = (_items(sp) if sp else _items(pl.get("short") or {})) if kind == "short" else [x for c in pl["documentary"]["chapters"] for x in c.get("items", [])]
+        import hashlib   # cuts are cached per plan: a changed plan never reuses another plan's numbered parts
+        kd = work / f"{kind}_{hashlib.md5(json.dumps(items, sort_keys=True).encode()).hexdigest()[:6]}"; kd.mkdir(exist_ok=True)
         parts, rnd = [], random.Random(7)
         from . import tts
         batch = [(it["narr"], kd / "narr" / f"n{k}.wav") for k, it in enumerate(items) if it.get("narr")] + \
