@@ -598,6 +598,9 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                 wav = kd / "narr" / f"i{k}.wav"; wav.parent.mkdir(exist_ok=True)
                 tts.kokoro_batch(cfg, [(it["insert"], wav)], log, "interview context")
                 f = kd / f"{k:02}_insert.mp4"; credit = ""
+                try: had = json.loads((kd / f"{k:02}_insert.json").read_text(encoding="utf-8")).get("credit", "")
+                except Exception: had = None
+                if media.ok(f, 0.5) and had == "": f.unlink(missing_ok=True)   # made without a photo last time: try Commons again
                 if not media.ok(f, 0.5):
                     img, credit = commons_photo(str(it.get("visual") or it["insert"])[:80], kd / f"{k:02}_photo.jpg", log)
                     if img: still_part(img, wav, f, kind)
