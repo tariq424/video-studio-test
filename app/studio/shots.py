@@ -19,6 +19,7 @@ from . import media
 
 SELF_AREA = 0.06      # a face this big (share of the frame) is the camera holder, filming himself
 EDGE_SELF_AREA = 0.035   # ...or a smaller one cut off at the left/right edge (the holder half in shot beside the guest)
+GUEST_LOW = 0.78     # a guest face centred this low is his head poking up at the bottom edge (a shot of the room, not of him)
 GUEST_MIN_AREA = 0.008   # smaller than this is a mirror, a poster, a passer-by far away
 CEILING_TOP = 0.65    # the top of the picture this flat = a car ceiling / blank wall, not a shot of anything
 DETECTOR = "yunet1"   # bump to re-detect faces in a cached analysis
@@ -156,6 +157,7 @@ def analyze(src, work, flip=True, log=print):
 def kind_of(s):
     small, big = split(s["faces"])
     ceiling = s.get("top", 0) > CEILING_TOP
+    if small and min(f[1] for f in small) > GUEST_LOW: return "empty"   # only the top of his head at the bottom: cut away to him elsewhere
     if small and not (ceiling and max(f[1] for f in small) > 0.7): return "guest"   # (the guest's head poking up under a ceiling: no)
     if big: return "self"
     if ceiling or s.get("plain", 0) > 0.6: return "empty"   # a car ceiling / blank wall: covered by a cutaway like the holder's face

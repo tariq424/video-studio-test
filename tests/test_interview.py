@@ -78,3 +78,9 @@ def test_short_ends_on_soundbite():
     from studio import interview
     its = interview.end_on_bite([{"bite": [0, 1]}, {"narr": "x"}, {"bite": [3, 4]}, {"narr": "closing"}, {"insert": "y"}])
     assert its[-1] == {"bite": [3, 4]} and len(its) == 3
+
+
+def test_shots_head_at_bottom_edge_is_cut_away():
+    from studio import shots
+    assert shots.kind_of({"faces": [[0.5, 0.9, 0.12, 0.2]]}) == "empty"
+    assert shots.kind_of({"faces": [[0.5, 0.45, 0.12, 0.2]]}) == "guest"
