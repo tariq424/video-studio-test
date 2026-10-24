@@ -6,9 +6,9 @@ the call is built from the Space's own API description: the image input gets the
 narration, everything else keeps the Space's default. scripts/talking_head_probe.py finds Spaces that work today and
 prints the list to put in settings. Optional: any failure leaves the Short as it was (never fails the job).
 
-Engines (talking_head): "wangp" = this PC's WanGP (LTX-2 with the narration as the audio guide, the same model the explainer
-presenter uses; local GPU, no quota, started on demand and stopped afterwards), "hf" = Hugging Face Spaces, "off".
-"wangp" falls back to "hf" when WanGP isn't installed (the Linux laptop). It only runs for a Short with "presenter" ticked.
+Engines (talking_head): "hf" = Hugging Face Spaces (default), "off". "wangp" exists in code but is NOT to be used: the owner
+rejected WanGP talking heads (no lip sync, stutter, freezes) and does not want WanGP at all. It only runs for a Short with
+"presenter" ticked.
 
 Settings: talking_head ("wangp" | "hf" | "off"), talking_head_spaces, talking_head_max_secs (10), talking_head_timeout (600),
 presenter_image ("" = one presenter photo made once with Hugging Face FLUX and kept next to the jobs folder)."""
@@ -28,7 +28,7 @@ VIDEO_EXT = (".mp4", ".webm", ".mov", ".mkv")
 
 
 def engine(cfg):
-    return str(cfg.get("talking_head", "wangp")).lower()
+    return str(cfg.get("talking_head", "hf")).lower()
 
 
 def enabled(cfg):
