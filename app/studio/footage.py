@@ -347,7 +347,133 @@ def make_check(cfg, c, sheet_path, guard, narration, log):
     return True, ""
 
 
-def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None, narration="", guard=None):
+# ------------------------------------------------------------------ clip check v2 (owner, 2026-10-23): "does it contradict?"
+# The old question ("would a viewer find it a sensible illustration?") threw out good clips and let wrong ones through.
+# Now: describe what is actually there, then reject only for a contradiction:
+#  - the beat's main subject must be visible (a "beachfront property" beat needs buildings, not empty cliffs);
+#  - a general subject must be the same KIND (no pickup truck for "a car", no dog for "a cat", no ballpoint for "a fountain pen");
+#  - a specific subject must be the same LOOK (make/model/livery: the reference-photo check + the make check);
+#  - a recognisable place must be the story's place (no London skyline in a Cyprus story; the closing card shows no place at all);
+#  - mood, stand-in people, overlays, screen captures and cuts as before.
+MAINS = """For each numbered narration line of a news video, name what a matching shot must SHOW.
+"main": the concrete thing on screen, 2-6 words ("beachfront apartment buildings", "a fountain pen", "an electric car", "a cat");
+        "" when the line is abstract (numbers, opinions, a summary) and no particular thing must be shown.
+"kind": the general kind of that thing in 1-3 words ("buildings", "car", "pen", "cat"), "" when main is "".
+"place": the country / city / region the line is set in, if the story says so ("Cyprus", "Shanghai"), else "".
+Story so far: {story}
+Lines:
+{lines}
+Reply with JSON only: {{"<line id>": {{"main": "...", "kind": "...", "place": "..."}}, ...}}"""
+
+CONTRA = """These are 4 frames, in order, from one short stock video clip.
+First write "seen": one sentence describing what is actually in the frames (things, people, setting, any city, skyline or landmark).
+Then answer from what you see:
+- "main_visible": is {main} clearly visible in the clip (the thing itself, not just its surroundings)? "yes", "no" or "unclear".
+- "kind_shown": the kind of {kind} the clip shows, in 1-3 words (e.g. "pickup truck", "sedan", "dog", "ballpoint pen"); "none" if no {kind} is shown.
+- "place_seen": a recognisable city, skyline, landmark or country you can identify (e.g. "London skyline", "Eiffel Tower"); "none" if you can't name one.
+- "mood_clash": true if the scene's mood plainly contradicts this narration (calm or happy scenes over a disaster, crime or crisis): "{narration}"
+- "stand_in": true if the main subject is one person who would be taken to BE someone the narration names (an official, pilot, politician).
+- "overlay_text": large readable text, caption, title, logo or watermark overlaid on the video, or an advert-style brand logo? true/false.
+- "same_scene": all 4 frames from one continuous scene? true/false.
+- "looks_ok": clear, real footage (not blurry, glitchy, distorted or disturbing)? true/false.
+- "platform": a screen capture of other media (YouTube/social page or player, thumbnail, TV broadcast with channel logo or ticker,
+  streaming-app interface, film/TV still, another channel's watermark)? true/false.
+- "brands": every brand you can read or clearly recognise (car badges, airline logos, product logos); [] if none.
+Reply with one JSON object with the keys seen, main_visible, kind_shown, place_seen, mood_clash, stand_in, overlay_text, same_scene,
+looks_ok, platform, brands, filled in from what you actually see."""
+
+_PLACE_CACHE = {}
+
+
+def beat_mains(cfg, slots, log, cache_file=None):
+    """-> {slot_id: {"main", "kind", "place"}} for the slots (DeepSeek, one call per 20 lines; cached in cache_file)."""
+    have = {}
+    if cache_file and Path(cache_file).exists():
+        try: have = json.loads(Path(cache_file).read_text(encoding="utf-8"))
+        except Exception: have = {}
+    todo = [s for s in slots if s["id"] not in have and not s.get("cta")]
+    if todo:
+        story = " ".join(str(s.get("narration") or s.get("text") or "") for s in slots)[:1500].replace('"', "'")
+        try:
+            with LLM(cfg, log, lambda: False) as llm:
+                for i in range(0, len(todo), 20):
+                    b = todo[i:i + 20]
+                    lines = "\n".join(f"{s['id']}: {str(s.get('narration') or s.get('text') or '')[:300]}" for s in b)
+                    j = llm.chat_json("You are a precise video editor. Reply with JSON only.", MAINS.format(story=story, lines=lines), max_tokens=2000)
+                    for s in b:
+                        v = j.get(s["id"]) if isinstance(j.get(s["id"]), dict) else {}
+                        have[s["id"]] = {k: str(v.get(k) or "").strip()[:60] for k in ("main", "kind", "place")}
+        except Exception as e:
+            log(f"  clip check: couldn't name the beats' main subjects ({str(e)[:100]}); checking contradictions only")
+        if cache_file:
+            try: Path(cache_file).write_text(json.dumps(have, indent=1), encoding="utf-8")
+            except Exception: pass
+    return have
+
+
+def _none(x): return str(x or "").strip().lower() in ("", "none", "no", "n/a", "na", "unknown", "null", "false", "nothing")
+
+
+def place_ok(cfg, seen, story_place, log=print):
+    """Is the recognised place `seen` consistent with the story's place? (no place in the story -> any real place is fine,
+    except on the closing card). Cached; asks the script AI only when the names don't already match."""
+    if _none(seen): return True
+    if not story_place: return True
+    a, b = _subject_words([seen]), _subject_words([story_place])
+    if a & b: return True
+    key = (seen.lower(), story_place.lower())
+    if key not in _PLACE_CACHE:
+        try:
+            with LLM(cfg, log, lambda: False) as llm:
+                j = llm.chat_json("Answer with JSON only.", f'Is "{seen}" located in, or a well-known part of, "{story_place}"? '
+                                  'Reply {"inside": true} or {"inside": false}.', max_tokens=50)
+            _PLACE_CACHE[key] = str(j.get("inside")).strip().lower() in ("true", "yes", "1")
+        except Exception:
+            _PLACE_CACHE[key] = True   # can't tell: not a contradiction we can prove
+    return _PLACE_CACHE[key]
+
+
+_KIND_SYN = {"car": {"car", "sedan", "saloon", "hatchback", "suv", "coupe", "convertible", "electric car", "ev", "estate", "wagon", "crossover", "taxi", "vehicle"},
+             "pen": {"pen", "fountain pen"}, "cat": {"cat", "kitten"}, "dog": {"dog", "puppy"},
+             "buildings": {"building", "buildings", "apartment", "apartments", "house", "houses", "villa", "villas", "hotel", "tower", "towers", "property", "homes", "home", "skyline"}}
+
+
+def kind_clash(kind, shown, main=""):
+    """True when the clip shows another kind of thing than the beat's (a pickup truck for "a car", a dog for "a cat",
+    a ballpoint for "a fountain pen")."""
+    if _none(kind) or _none(shown): return False
+    k, sh, m = kind.lower().strip(), shown.lower().strip(), (main or "").lower()
+    if "fountain pen" in m and "fountain" not in sh: return "pen" in sh or "ballpoint" in sh or "marker" in sh
+    if re.search(r"\b(pickup|pick-up|truck|lorry|van|bus|tractor|motorbike|motorcycle|scooter|bicycle)\b", sh) and k in ("car", "cars", "electric car", "vehicle") \
+            and not re.search(r"\b(truck|pickup|van|bus|motorbike|motorcycle)\b", m):
+        return True
+    syn = _KIND_SYN.get(k.rstrip("s") if k.rstrip("s") in _KIND_SYN else k, {k, k.rstrip("s")})
+    words = set(re.findall(r"[a-z]+", sh)) | {sh}
+    if words & syn or any(w.rstrip("s") in syn for w in words): return False
+    animals = {"cat", "dog", "horse", "bird", "cow", "sheep", "goat", "fish", "rabbit", "mouse"}
+    if k.rstrip("s") in animals and words & animals: return True   # one animal shown for another
+    return False   # different wording, not a proven contradiction
+
+
+def contra_verdict(cfg, j, mainv, narration_place="", neutral=False, log=print):
+    """-> (ok, reason) from the CONTRA answers."""
+    yes = lambda k, d=False: str(j.get(k, d)).strip().lower() in ("true", "yes", "1")
+    if yes("platform"): return False, "copyright: screen capture / thumbnail / channel watermark"
+    if yes("overlay_text"): return False, "text/logo overlay"
+    if not yes("same_scene", True): return False, "scene cut"
+    if not yes("looks_ok", True): return False, "poor footage"
+    main, kind, place = (mainv or {}).get("main", ""), (mainv or {}).get("kind", ""), (mainv or {}).get("place", "") or narration_place
+    seen_place = str(j.get("place_seen") or "none").strip()
+    if neutral and not _none(seen_place): return False, f"shows a recognisable place ({seen_place[:40]}); the closing card stays neutral"
+    if not place_ok(cfg, seen_place, place, log): return False, f"shows {seen_place[:40]}; the story is set in {place}"
+    if main and str(j.get("main_visible", "unclear")).strip().lower() == "no": return False, f"doesn't show {main}"
+    if kind_clash(kind, str(j.get("kind_shown") or ""), main): return False, f"shows a {str(j.get('kind_shown'))[:30]}, not {main or kind}"
+    if yes("mood_clash"): return False, "the mood contradicts the narration"
+    if yes("stand_in"): return False, "a stranger would be taken for a real person the narration names"
+    return True, ""
+
+
+def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None, narration="", guard=None, mainv=None, place="", neutral=False):
     """-> (ok, reason, seen). Generic slots: hard checks + no visible third-party brand.
     Subject-locked slots: the clip must positively match the subject (brand evidence and the vision model agreeing with a reference photo)."""
     from PIL import Image, ImageStat
@@ -358,7 +484,13 @@ def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None, narratio
     img = sheet_path
     if subject and ref:
         img = side_by_side(ref, sheet_path, sheet_path.with_name(sheet_path.stem + "_vs.jpg"))
-    prompt = STRICT.format(subject=subject["name"]) if (subject and ref) else VET.format(query=subject["name"] if subject else c["query"], narration=(narration or c["query"])[:400].replace('"', "'"))
+    v2 = cfg.get("clip_check_v2", True) and not subject
+    mv = mainv or {}
+    if v2:
+        prompt = CONTRA.format(main=mv.get("main") or "the thing the narration is about", kind=mv.get("kind") or "thing",
+                               narration=(narration or c["query"])[:300].replace('"', "'"))
+    else:
+        prompt = STRICT.format(subject=subject["name"]) if (subject and ref) else VET.format(query=subject["name"] if subject else c["query"], narration=(narration or c["query"])[:400].replace('"', "'"))
     if avoid and not subject: prompt += AVOID.format(avoid="; or ".join(avoid)[:500])
     try: j = parse_json(_vision(cfg, img, prompt))
     except Exception as e:
@@ -366,6 +498,17 @@ def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None, narratio
         log(f"  vision check unavailable ({str(e)[:80]}); accepting {c['id']}"); return True, "", c["desc"]
     yes = lambda k, d: str(j.get(k, d)).strip().lower() in ("true", "yes", "1")
     seen = str(j.get("seen") or c["desc"])[:160]
+    if v2:
+        ok, why = contra_verdict(cfg, j, mv, place, neutral, log)
+        if not ok: return False, why, seen
+        story_brands = [b for v in ((guard or {}).get("kinds") or {}).values() for b in v]
+        other = [b for b in _brands(j) if not any(_norm_brand(sb) and (_norm_brand(sb) in _norm_brand(b) or _norm_brand(b) in _norm_brand(sb)) for sb in story_brands)]
+        if other: return False, f"shows another brand ({', '.join(other)[:60]})", seen
+        if avoid and yes("forbidden", False): return False, "shows something the story is about, but not the right one", seen
+        ok2, why2 = make_check(cfg, c, sheet_path, guard, narration, log)
+        if not ok2: return False, why2, seen
+        c["shows"] = str(j.get("main_visible", "")).strip().lower()
+        return True, "", seen
     if yes("platform", False): return False, "copyright: screen capture / thumbnail / channel watermark", seen
     if yes("overlay_text", False): return False, "text/logo overlay", seen
     if not yes("same_scene", True): return False, "scene cut", seen
@@ -523,6 +666,11 @@ def fill(cfg, slots, orient, need, out_dir, log, stop, want_long_side, max_secs,
         if sj and sj.get("name") and sj["name"] not in refs: refs[sj["name"]] = reference(sj, out_dir / "refs", log)
     ensure_vet_model(cfg, log)
     guard = story_guard(Path(out_dir).parent, " ".join(str(x.get("text") or "") for x in slots))
+    mains = beat_mains(cfg, slots, log, out_dir / "mains.json") if cfg.get("clip_check_v2", True) else {}
+    places = [v.get("place") for v in mains.values() if v.get("place")]
+    story_place = max(set(places), key=places.count) if places else ""
+    if mains: log("  clip check: each clip must show the beat's main subject, the same kind of thing, and no other place than the story's"
+                  + (f" ({story_place})" if story_place else ""))
     if guard["kinds"] or guard["side"]:
         log(f"  story guard: {', '.join(f'{k} = {'/'.join(v)}' for k, v in guard['kinds'].items()) or 'no branded subject'}"
             + (f"; cars drive with the wheel on the {guard['side']}" if guard["side"] else ""))
@@ -546,8 +694,10 @@ def fill(cfg, slots, orient, need, out_dir, log, stop, want_long_side, max_secs,
                     continue
                 try: sh = sheet(c, out_dir / "sheets")
                 except Exception as e: log(f"  preview of {cid} failed ({str(e)[:60]})"); continue
+                mv = mains.get(s["id"], {})
                 ok, why, seen = verify(cfg, c, sh, log, subject=sj, ref=refs.get(sj["name"]) if sj else None, avoid=s.get("avoid"),
-                                      narration=s.get("narration") or s["text"], guard=guard)
+                                      narration=s.get("narration") or s["text"], guard=guard, mainv=mv,
+                                      place=mv.get("place") or story_place, neutral=bool(s.get("cta")))
                 if not ok:
                     log(f"  {s['id']}: skipped {c['src']} clip {cid} ({why})")
                     st.setdefault("rejected", {}).setdefault(s["id"], []).append({"id": cid, "src": c["src"], "why": why, "sheet": str(sh), "desc": c.get("desc", "")[:80],

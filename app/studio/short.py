@@ -324,7 +324,8 @@ def do_stock(job, plan, cfg, log, stop):
     for s in plan["sections"]:
         if s["id"] in own: continue
         if s.get("cta"):
-            slots.append({"id": s["id"], "text": "calm, general background for the closing end card", "queries": ["city skyline dusk aerial", "night sky stars timelapse"], "cta": True})
+            # neutral: no city or landmark (a London skyline closed a Cyprus story); the clip check rejects any recognisable place
+            slots.append({"id": s["id"], "text": "calm, neutral background for the closing end card", "queries": ["night sky stars timelapse", "soft clouds sky timelapse", "abstract bokeh lights"], "cta": True})
             need[s["id"]] = 1
         elif s.get("subject"):
             continue   # locked to a specific subject: stock libraries don't have it; real photos / reconstruction come in short_fallback
