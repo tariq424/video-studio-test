@@ -612,15 +612,15 @@ def own_clips(src, root, log=print, radius=150.0):
                    key=lambda f: (f.stem.upper().startswith("IMG_"), f.name))   # named copies first
     for f in files:
         d, ll = tags(f)
-        if d < 4 or not ll or round(d, 1) in seen: continue
+        if d < 4 or not ll or round(d, 1) in seen or re.search(r"with[-_ ]", f.stem, re.I): continue   # "...-with-clinton": a person's clip
         dist = 6371000 * math.hypot(math.radians(ll[0] - here[0]), math.radians(ll[1] - here[1]) * math.cos(math.radians(here[0])))
         if dist > radius or d > 600: continue
         rot = shots.orient(f, root, log)
         faces = False
         if cv2:
-            for k in range(3):   # nobody's face: the place, not people (and never the camera holder)
+            for k in range(8):   # nobody's face: the place, not people (and never the camera holder)
                 tmp = Path(root) / "_own.jpg"
-                media.ff("-ss", f"{d * (k + 1) / 4:.2f}", "-i", f, "-frames:v", 1, "-vf", (rot + "," if rot else "") + "scale=640:-2", tmp, timeout=120)
+                media.ff("-ss", f"{d * (k + 1) / 9:.2f}", "-i", f, "-frames:v", 1, "-vf", (rot + "," if rot else "") + "scale=640:-2", tmp, timeout=120)
                 im = cv2.imread(str(tmp))
                 if im is not None and any(x[2] * x[3] > 0.004 for x in shots._faces(cv2, cv2.cvtColor(im, cv2.COLOR_BGR2GRAY), im)): faces = True; break
         if faces: continue
