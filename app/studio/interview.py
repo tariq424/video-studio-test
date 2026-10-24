@@ -515,10 +515,23 @@ class Ladder:
       2. stock video (Pexels / Pixabay / Internet Archive) through the clip checker (Bermuda, the right kind of thing)
       3. his own footage of that moment, blurred
     Short stretches (< 4 s) go straight to the blur, so pictures don't flash by. (AI images / Marble scenes: not in this edit.)"""
-    def __init__(self, cfg, src, flip, kd, kind, log=print):
+    def __init__(self, cfg, src, flip, kd, kind, log=print, own=None):
         self.cfg, self.src, self.flip, self.kd, self.kind, self.log = cfg, src, flip, Path(kd), kind, log
         self.photos, self.stock, self.uses, self.stock_tries = {}, {}, {}, 0
+        self.own, self.own_i, self.own_pos = list(own or []), 0, {}
         (self.kd / "ladder").mkdir(exist_ok=True)
+
+    OWN_WORDS = re.compile(r"mosque|masjid|musallah|islamic|prayer|center|centre|imam|muslim", re.I)
+
+    def _own(self, visual, d):
+        """Your own footage of the place he's talking about (clips filmed within ~150 m of the interview, no one's face in
+        them): the mosque's prayer hall, its hallways. Only for stretches about that place."""
+        if not self.own or not self.OWN_WORDS.search(visual or ""): return None
+        for _ in range(len(self.own)):
+            f, dur, rot = self.own[self.own_i % len(self.own)]; self.own_i += 1
+            st = self.own_pos.get(str(f), 0.5)
+            if dur - st >= d: self.own_pos[str(f)] = st + d + 0.5; return f, st, rot
+        return None
 
     def _photo(self, visual, text):
         if visual not in self.photos:
@@ -540,6 +553,9 @@ class Ladder:
                                "portrait" if self.kind == "short" else "landscape", {sid: 1}, self.kd / "ladder" / "stock", self.log, lambda: False,
                                1920, 12, self.kd / "ladder" / f"stock_{sid}.json")
             c = (got.get(sid) or [None])[0]
+            if c and "bermuda" not in (str(c.get("desc", "")) + " " + str(c.get("seen", ""))).lower():
+                _log(self.log, f"    stock clip {c.get('id')} not used: nothing says it is Bermuda ({str(c.get('desc', ''))[:50]}); a mosque elsewhere would mislead")
+                c = None
             f = self.kd / "ladder" / "stock" / "clips" / f"{c['id']}.mp4" if c else None
             self.stock[visual] = (f, f"{c.get('src', 'stock')}: {c.get('author', '')}".strip(": ")) if f and f.exists() else None
         except Exception as e:
@@ -551,6 +567,12 @@ class Ladder:
         from . import shots
         d = b - a
         if d >= 4 and visual:
+            ow = self._own(visual, d)
+            if ow:
+                f, st, rot = ow
+                vf = (rot + "," if rot else "") + shots.vf_frame(self.kind, None, 0.0, False)
+                media.ff("-ss", f"{st:.2f}", "-i", f, "-t", f"{d:.2f}", "-an", "-vf", vf, *ENC[:6], out, timeout=900)
+                return out, "own footage", ""
             img, credit = self._photo(visual, text)
             if img:
                 still_clip(img, d, out, self.kind); return out, "photo", credit
@@ -564,6 +586,48 @@ class Ladder:
         vf = shots.vf_frame(self.kind, None, 0.0, self.flip) + ",boxblur=24:2,eq=brightness=-0.06"
         media.ff("-ss", f"{a:.2f}", "-i", self.src, "-t", f"{d:.2f}", "-an", "-vf", vf, *ENC[:6], out, timeout=900)
         return out, "blur", ""
+
+
+def own_clips(src, root, log=print, radius=150.0):
+    """Your other clips filmed near the interview (GPS in the files: iPhone ISO6709), with no face in them (the prayer hall,
+    hallways): [(file, seconds, rotation)]. Copies with the same length count once. Cached in own_clips.json."""
+    cache = Path(root) / "own_clips.json"
+    if cache.exists():
+        try: return [(Path(f), d, r) for f, d, r in json.loads(cache.read_text(encoding="utf-8"))]
+        except Exception: pass
+    import subprocess
+    def tags(p):
+        try:
+            j = json.loads(subprocess.run(["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", str(p)], capture_output=True, text=True, timeout=30).stdout or "{}")
+            fm = j.get("format", {}); t = fm.get("tags", {})
+            m = re.match(r"([+-]\d+\.\d+)([+-]\d+\.\d+)", t.get("com.apple.quicktime.location.ISO6709", ""))
+            return float(fm.get("duration") or 0), ((float(m[1]), float(m[2])) if m else None)
+        except Exception: return 0.0, None
+    _, here = tags(src)
+    if not here: return []
+    from . import shots
+    cv2, np = shots._cv()
+    out, seen = [], set()
+    files = sorted([f for f in Path(src).parent.iterdir() if f.suffix.lower() in VIDEO_EXT and f.resolve() != Path(src).resolve()],
+                   key=lambda f: (f.stem.upper().startswith("IMG_"), f.name))   # named copies first
+    for f in files:
+        d, ll = tags(f)
+        if d < 4 or not ll or round(d, 1) in seen: continue
+        dist = 6371000 * math.hypot(math.radians(ll[0] - here[0]), math.radians(ll[1] - here[1]) * math.cos(math.radians(here[0])))
+        if dist > radius or d > 600: continue
+        rot = shots.orient(f, root, log)
+        faces = False
+        if cv2:
+            for k in range(3):   # nobody's face: the place, not people (and never the camera holder)
+                tmp = Path(root) / "_own.jpg"
+                media.ff("-ss", f"{d * (k + 1) / 4:.2f}", "-i", f, "-frames:v", 1, "-vf", (rot + "," if rot else "") + "scale=640:-2", tmp, timeout=120)
+                im = cv2.imread(str(tmp))
+                if im is not None and any(x[2] * x[3] > 0.004 for x in shots._faces(cv2, cv2.cvtColor(im, cv2.COLOR_BGR2GRAY), im)): faces = True; break
+        if faces: continue
+        seen.add(round(d, 1)); out.append((f, d, rot))
+    cache.write_text(json.dumps([(str(f), d, r) for f, d, r in out], indent=1), encoding="utf-8")
+    _log(log, f"  own footage near the interview (no faces): {', '.join(f'{f.stem} ({d:.0f}s)' for f, d, _ in out) or 'none'}")
+    return out
 
 
 def still_clip(img, d, out, kind):
@@ -796,7 +860,7 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
             (kd / "narr").mkdir(exist_ok=True); tts.kokoro_batch(cfg, batch, log, f"interview narration ({kind})")
         used = [(segs[int(x["bite"][0])]["start"], segs[int(x["bite"][1])]["end"]) for x in items if "bite" in x]
         cuts = Cutaways(src, an, used, bfiles, root, flip, log)
-        ladder = Ladder(cfg, src, flip, kd, kind, log)
+        ladder = Ladder(cfg, src, flip, kd, kind, log, own=own_clips(src, root, log))
         hk = hook(cfg, segs, context, kind, work, log) if cfg.get("interview_hook", True) and not (kind == "short" and sp) else None
         if kind == "short" and sp and items and "bite" in items[0]:   # the Short's own opener is its cold open: hook text from its thread
             items[0] = dict(items[0], hook_text=str(sp.get("hook") or "")[:48])

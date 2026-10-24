@@ -13,6 +13,8 @@ from studio import config, interview  # noqa: E402
 
 
 def main():
+    try: sys.stdout.reconfigure(encoding="utf-8", errors="replace"); sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception: pass   # a Windows console in cp1252 can't print every letter (a Turkish i in a stock clip's title stopped a run)
     a = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     work = Path(a["work"]); work.mkdir(parents=True, exist_ok=True)
     lf = open(work / "interview.log", "a", encoding="utf-8")
