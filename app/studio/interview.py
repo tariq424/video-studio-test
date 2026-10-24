@@ -55,12 +55,12 @@ Each item is one of:
     characters (e.g. '~1,000 Muslims, 0.8% of Bermuda')"}}  a short context tidbit right after the soundbite it explains.
 Rules:
 - short: {short_secs} seconds or less in total; open with the single most striking soundbite or a one-line hook, 3-6 soundbites.
-- documentary: {doc_min}-{doc_max} minutes in total, 3-6 chapters in a sensible order (you may rearrange the footage's order).
+- documentary: {doc_min}-{doc_max} minutes in total, 4-7 chapters in a sensible order (you may rearrange the footage's order).
 - Soundbites: complete thoughts (start and end at sentence boundaries), each 6-60 seconds; skip small talk, dead air,
   directions, repeated points and anything the speaker would not want aired (private details, addresses, phone numbers).
 - Context inserts: sparingly, only where a soundbite raises a question a viewer would have (history, numbers, what happened
-  next). short: at most 1; documentary: at most one per chapter. Every insert uses exactly one research note and says only what
-  that note says. Narration and inserts together stay under 25% of the runtime; the interview stays the main driver.
+  next). short: at most 2; documentary: one or two per chapter (use most of the notes somewhere). Every insert uses exactly one research note and says only what
+  that note says. Narration and inserts together stay under 30% of the runtime; the interview stays the main driver.
 - Narration: at most 15% of the runtime, first person plural is fine ("we"), never invent facts that are not in the transcript
   or the creator's note, respectful and warm toward the people and their faith; light humour only at our own expense.
 - Never put words in anyone's mouth; a soundbite is exactly what was said."""
@@ -147,9 +147,11 @@ SHORT = """Cut a YouTube Short (60-{short_secs} seconds) from a mini-documentary
 About the footage: {context}
 The documentary's soundbites (segment numbers with their words) and context notes:
 {material}
-Rules: open with the single most gripping soundbite (a complete thought, under 20 seconds); then 2-4 more soundbites that tell
-one clear story (each 5-20 seconds; you may use a sub-range of a soundbite's segments); at most ONE context insert from the notes
-(only what the note says) and at most two one-sentence narration lines; end on a strong line. No small talk, no logistics.
+Rules: tell ONE story with a beginning, middle and end (pick the strongest thread, e.g. the land that was taken, or the community
+that went from the Nation of Islam to its own mosque). Open with the most gripping soundbite of that thread (under 20 seconds);
+then 2-4 more soundbites from the SAME thread (each 5-20 seconds; a sub-range of a soundbite's segments is fine), joined by up to
+three one-sentence narration lines that carry the story forward; up to TWO context inserts from the notes that explain the
+history behind it (only what the note says); end on a line that lands the story. No small talk, no logistics, nothing off-thread.
 Reply with JSON only: {{"items": [{{"bite": [first, last]}} | {{"narr": "...", "broll": ""}} | {{"insert": "...", "note": n, "visual": "...", "card": "..."}}]}}"""
 
 
@@ -284,7 +286,8 @@ def still_part(img, wav, out, kind):
     w, h = (1080, 1920) if kind == "short" else (1920, 1080)
     d = media.dur(wav) + 0.35; n = int(d * 30) + 1
     vf = (f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase,crop={w * 2}:{h * 2},"
-          f"zoompan=z='min(zoom+0.0006,1.10)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={n}:s={w}x{h}:fps=30,format=yuv420p,setsar=1")
+          f"zoompan=z='min(zoom+0.0006,1.10)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={n}:s={w}x{h}:fps=30,format=yuv420p,setsar=1,"
+          f"fade=t=in:st=0:d=0.35,fade=t=out:st={d - 0.35:.2f}:d=0.35")
     media.ff("-loop", 1, "-i", img, "-i", wav, "-t", f"{d:.2f}", "-map", "0:v:0", "-map", "1:a:0", "-vf", vf,
              "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,apad", *ENC, "-shortest", out, timeout=900)
     return out
@@ -302,6 +305,65 @@ def cut_bite(src, t0, t1, out, kind, k, flip=True):
     return out
 
 
+class Cutaways:
+    """Pictures to cover a soundbite where only the camera holder's face is on screen: the guest elsewhere in the video first,
+    then your B-roll clips (turned upright when filmed sideways). Each stretch is used once while others remain."""
+    def __init__(self, src, an, used, broll_files, work, flip, log=print):
+        from . import shots
+        self.src, self.flip, self.work, self.log = src, flip, work, log
+        self.runs = [[a, b] for a, b in shots.cutaway_pool(an, used)]
+        self.an = an
+        self.broll = [(f, media.dur(f)) for f in broll_files]
+        self.bi = 0
+
+    def take(self, secs):
+        """-> (file, start, flip, guest_box, rotation)"""
+        from . import shots
+        for r in self.runs:
+            if r[1] - r[0] >= secs:
+                a = r[0]; r[0] += secs + 1
+                gs = [f for s in self.an["secs"] if a <= s["t"] < a + secs for f in s["faces"] if f[2] * f[3] < shots.SELF_AREA]
+                g = [sum(x[n] for x in gs) / len(gs) for n in range(4)] if gs else None
+                return self.src, float(a), self.flip, g, ""
+        if self.broll:
+            f, d = self.broll[self.bi % len(self.broll)]; self.bi += 1
+            st = (self.bi * 7.3) % max(0.1, d - secs) if d > secs else 0.0
+            return f, st, False, None, shots.orient(f, self.work, self.log)
+        return self.src, 0.0, self.flip, None, ""
+
+
+def cut_bite_framed(src, t0, t1, out, kind, flip, an, cuts, log=print):
+    """A soundbite with its own audio and a framed picture: on the guest, level, and covered by a cutaway where only the
+    holder's face would show."""
+    if media.ok(out, 0.5): return out
+    from . import shots
+    tmpd = Path(out).with_suffix(""); tmpd.mkdir(exist_ok=True)
+    segs, lst = [], tmpd / "v.txt"
+    for n, (a, b, k, g, tilt) in enumerate(shots.plan_shots(an, t0, t1)):
+        v = tmpd / f"s{n:02}.mp4"; d = b - a
+        if k == "self":   # cutaway: the sound goes on, the picture shows the guest elsewhere / B-roll
+            f, st, fl, gb, rot = cuts.take(d)
+            vf = (rot + "," if rot else "") + shots.vf_frame(kind, gb, 0.0, fl)
+            media.ff("-ss", f"{st:.2f}", "-i", f, "-t", f"{d:.2f}", "-an", "-vf", vf, *ENC[:6], v, timeout=900)
+        else:
+            media.ff("-ss", f"{a:.2f}", "-i", src, "-t", f"{d:.2f}", "-an", "-vf", shots.vf_frame(kind, g, tilt, flip), *ENC[:6], v, timeout=900)
+        segs.append(v)
+    lst.write_text("".join(f"file '{x.as_posix()}'\n" for x in segs), encoding="utf-8")
+    media.ff("-f", "concat", "-safe", 0, "-i", lst, "-ss", f"{t0:.2f}", "-i", src, "-t", f"{t1 - t0:.2f}", "-map", "0:v:0", "-map", "1:a:0",
+             "-c:v", "copy", "-af", "loudnorm=I=-16:TP=-1.5:LRA=11", *ENC[6:], "-shortest", out, timeout=1800)
+    return out
+
+
+def card_part(text_bg, d, out, kind, cfg=None):
+    """A title / end card: a picture (file, start, flip, rotation) blurred and darkened, silent (the music carries it)."""
+    from . import shots
+    f, st, fl, rot = text_bg
+    vf = (rot + "," if rot else "") + shots.vf_frame(kind, None, 0.0, fl) + f",boxblur=18,eq=brightness=-0.18,fade=t=in:st=0:d=0.4,fade=t=out:st={d - 0.5:.2f}:d=0.5"
+    media.ff("-ss", f"{st:.2f}", "-i", f, "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", f"{d:.2f}", "-map", "0:v:0", "-map", "1:a:0",
+             "-vf", vf, *ENC, "-shortest", out, timeout=600)
+    return out
+
+
 def cut_bridge(cfg, text, picture, out, kind, work, k, log=print):
     """Narration (Kokoro) over a muted picture: (file, start, flip) for B-roll or the next soundbite's footage."""
     if media.ok(out, 0.5): return out
@@ -309,9 +371,11 @@ def cut_bridge(cfg, text, picture, out, kind, work, k, log=print):
     wav = Path(work) / "narr" / f"n{k}.wav"; wav.parent.mkdir(exist_ok=True)
     tts.kokoro_batch(cfg, [(text, wav)], log, "interview narration")
     d = media.dur(wav) + 0.35
-    f, start, flip = picture
+    from . import shots
+    f, start, flip = picture[:3]; rot = picture[3] if len(picture) > 3 else ""; g = picture[4] if len(picture) > 4 else None
+    vf = (rot + "," if rot else "") + shots.vf_frame(kind, g, 0.0, flip) + f",fade=t=in:st=0:d=0.3,fade=t=out:st={d - 0.3:.2f}:d=0.3"
     media.ff("-ss", f"{start:.2f}", "-i", f, "-i", wav, "-t", f"{d:.2f}", "-map", "0:v:0", "-map", "1:a:0",
-             "-vf", _vf(kind, None, 1.0, flip), "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,apad", *ENC, "-shortest", out, timeout=900)
+             "-vf", vf, "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,apad", *ENC, "-shortest", out, timeout=900)
     return out
 
 
@@ -329,6 +393,8 @@ Style: Cap,Arial,{fs},&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,1,0,0,0,100,10
 Style: Narr,Arial,{fs},&H0066E0FF,&H0066E0FF,&H00000000,&H96000000,1,1,0,0,100,100,0,0,1,5,2,2,{ml},{ml},{mv},1
 Style: Credit,Arial,{cs},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,1,7,30,30,30,1
 Style: Hook,Arial Black,{hs},&H0000D7FF,&H0000D7FF,&H00000000,&HA0000000,1,0,0,0,100,100,0,0,1,7,3,8,60,60,{hv},1
+Style: Title,Arial Black,{ts},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,6,3,5,80,80,0,1
+Style: Sub,Arial,{ss},&H0000D7FF,&H0000D7FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,4,2,5,80,80,0,1
 Style: Card,Arial,{ks},&H00FFFFFF,&H00FFFFFF,&H00000000,&HA0000000,1,0,0,0,100,100,0,0,3,18,0,5,60,60,0,1
 
 [Events]
@@ -357,6 +423,7 @@ def assemble(parts, out, kind, work, cfg, log=print, title=""):
     fs, ml, mv, maxw = (70, 90, 430, 5) if kind == "short" else (54, 160, 60, 9)
     cs, ks = (30, 76) if kind == "short" else (24, 64)
     hs, hv = (92, 300) if kind == "short" else (80, 90)
+    ts, ss = (96, 58) if kind == "short" else (96, 52)
     ev, t = [], 0.0
     lst = Path(work) / f"{kind}_concat.txt"
     with open(lst, "w", encoding="utf-8") as fh:
@@ -364,6 +431,8 @@ def assemble(parts, out, kind, work, cfg, log=print, title=""):
             fh.write(f"file '{Path(p['file']).as_posix()}'\n")
             d = media.dur(p["file"])
             if p.get("credit"): ev.append(f"Dialogue: 1,{_t(t)},{_t(t + d)},Credit,,0,0,0,,{p['credit']}\n")
+            for line, style, dy in p.get("titles") or []:   # title / end card text: centred lines
+                ev.append(f"Dialogue: 2,{_t(t + 0.3)},{_t(t + d - 0.3)},{style},,0,0,0,,{{\\fad(300,300)\\pos({w // 2},{h // 2 + dy})}}{line}\n")
             if p.get("hook"): ev.append(f"Dialogue: 2,{_t(t)},{_t(t + d)},Hook,,0,0,0,,{{\\fad(0,250)}}{p['hook']}\n")
             if p.get("card"): ev.append(f"Dialogue: 1,{_t(t + 0.3)},{_t(t + d - 0.2)},Card,,0,0,0,,{{\\fad(200,200)}}{p['card']}\n")
             for txt, a, b in _caption_lines(p.get("words") or [], maxw):
@@ -371,7 +440,7 @@ def assemble(parts, out, kind, work, cfg, log=print, title=""):
                 ev.append(f"Dialogue: 0,{_t(t + a)},{_t(t + min(b + 0.15, d))},{p.get('style', 'Cap')},,0,0,0,,{{\\fad(80,60)}}{txt}\n")
             t += d
     ass = Path(work) / f"{kind}.ass"
-    ass.write_text(ASS.format(w=w, h=h, fs=fs, ml=ml, mv=mv, cs=cs, ks=ks, hs=hs, hv=hv) + "".join(ev), encoding="utf-8")
+    ass.write_text(ASS.format(w=w, h=h, fs=fs, ml=ml, mv=mv, cs=cs, ks=ks, hs=hs, hv=hv, ts=ts, ss=ss) + "".join(ev), encoding="utf-8")
     joined = Path(work) / f"_{kind}_joined.mp4"
     media.ff("-f", "concat", "-safe", 0, "-i", lst, "-c", "copy", joined, timeout=1800)
     sub = ass.as_posix().replace(":", "\\:")
@@ -380,7 +449,7 @@ def assemble(parts, out, kind, work, cfg, log=print, title=""):
     joined.unlink(missing_ok=True)
     try:
         from . import music
-        music.mix(out, dict(cfg, music_bed_db=float(cfg.get("interview_music_db", -12)), music_hook_db=float(cfg.get("interview_music_db", -12))),
+        music.mix(out, dict(cfg, music_bed_db=float(cfg.get("interview_music_db", -8)), music_hook_db=float(cfg.get("interview_music_db", -8))),
                   log, 6.0, seed=title or kind, text=title)   # quieter than a narrated Short: the interview is the star
     except Exception as e:
         _log(log, f"  music skipped ({str(e)[:120]})")
@@ -444,6 +513,11 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
     bf.write_text(json.dumps(broll, indent=1), encoding="utf-8")
     pl = plan(cfg, segs, context, broll, work, log, notes=notes)
     bdir = src.parent
+    from . import shots
+    an = shots.analyze(src, root, flip, log)
+    bfiles = [x for x in sorted(bdir.iterdir()) if x.stem in broll and x.suffix.lower() in VIDEO_EXT]
+    nice = next((x for x in bfiles if "bay" in x.stem.lower() or "wave" in x.stem.lower()), bfiles[0] if bfiles else None)
+    card_bg = (nice, 2.0, False, shots.orient(nice, root, log)) if nice else (src, 30.0, flip, "")
     outs = {}
     for kind in kinds:
         sp = short_plan(cfg, segs, pl, context, notes, work, log) if kind == "short" and cfg.get("interview_short_pass", True) else None
@@ -456,15 +530,20 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                 [(it["insert"], kd / "narr" / f"i{k}.wav") for k, it in enumerate(items) if it.get("insert")]
         if batch:   # all of this video's narration in one Kokoro run (each separate run costs ~2 min of start-up)
             (kd / "narr").mkdir(exist_ok=True); tts.kokoro_batch(cfg, batch, log, f"interview narration ({kind})")
+        used = [(segs[int(x["bite"][0])]["start"], segs[int(x["bite"][1])]["end"]) for x in items if "bite" in x]
+        cuts = Cutaways(src, an, used, bfiles, root, flip, log)
         hk = hook(cfg, segs, context, kind, work, log) if cfg.get("interview_hook", True) else None
         if hk:   # cold open: the most striking line, with the hook text on screen, before the story starts
-            f = cut_bite(src, hk["t0"], hk["t1"], kd / "hook.mp4", kind, 1, flip)
+            f = cut_bite_framed(src, hk["t0"], hk["t1"], kd / "hook.mp4", kind, flip, an, cuts, log)
             parts.append({"file": f, "words": [(w, s - hk["t0"], e - hk["t0"]) for w, s, e in hk["words"]], "style": "Cap", "hook": hk["text"]})
+        tt = kd / "title.mp4"   # title card: what this is, before the story
+        if not media.ok(tt, 0.5): card_part(card_bg, 3.2, tt, kind)
+        parts.append({"file": tt, "words": [], "titles": [(pl.get("title", name), "Title", -50), ("A conversation in Bermuda", "Sub", 90)]})
         for k, it in enumerate(items):
             if "bite" in it:
                 a, b = int(it["bite"][0]), int(it["bite"][1])
                 t0 = max(0.0, segs[a]["start"] - 0.15); t1 = segs[b]["end"] + 0.3
-                f = cut_bite(src, t0, t1, kd / f"{k:02}_bite.mp4", kind, k, flip)
+                f = cut_bite_framed(src, t0, t1, kd / f"{k:02}_bite.mp4", kind, flip, an, cuts, log)
                 words = [(wd, s - t0, e - t0) for x in segs[a:b + 1] for wd, s, e in x["words"]]
                 parts.append({"file": f, "words": words, "style": "Cap"})
                 _log(log, f"  {kind} {k:02}: soundbite {t0:.0f}-{t1:.0f}s \"{segs[a]['text'][:60]}\"")
@@ -472,11 +551,10 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                 br = str(it.get("broll") or "")
                 if br in broll:
                     bf = next((x for x in bdir.iterdir() if x.stem == br and x.suffix.lower() in VIDEO_EXT), None)
-                    pic = (bf, rnd.uniform(0, max(0.0, broll[br] - 8)), False)   # B-roll from the back camera: not mirrored
-                else:   # the next soundbite's picture, muted
-                    nxt = next((x for x in items[k + 1:] if "bite" in x), None)
-                    st = segs[int(nxt["bite"][0])]["start"] if nxt else segs[-1]["start"]
-                    pic = (src, st, flip)
+                    pic = (bf, rnd.uniform(0, max(0.0, broll[br] - 8)), False, shots.orient(bf, root, log))   # back camera: not mirrored
+                else:   # the guest elsewhere in the video (framed on him), muted
+                    f_, st_, fl_, g_, rot_ = cuts.take(8)
+                    pic = (f_, st_, fl_, rot_, g_)
                 f = cut_bridge(cfg, it["narr"], pic, kd / f"{k:02}_narr.mp4", kind, kd, k, log)
                 from . import captions
                 try: words = captions.word_times(kd / "narr" / f"n{k}.wav", it["narr"])
@@ -507,6 +585,10 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                 parts.append({"file": f, "words": words, "style": "Narr", "credit": credit, "card": str(it.get("card") or "")[:48],
                               "source": note.get("source", "")})
                 _log(log, f"  {kind} {k:02}: context \"{it['insert'][:60]}\"" + (f" [{credit}]" if credit else " (over blurred footage)"))
+        ec = kd / "end.mp4"   # end card: thanks + subscribe, music carries it out
+        if not media.ok(ec, 0.5): card_part(card_bg, 6.0 if kind == "documentary" else 4.0, ec, kind)
+        parts.append({"file": ec, "words": [], "titles": [("Thank you, Mr. Clinton", "Title", -90), ("and the Islamic Center of Bermuda", "Sub", 20),
+                                                          ("Subscribe for more journeys", "Sub", 120)]})
         outs[kind] = assemble(parts, work / f"{name}_{kind}.mp4", kind, kd, cfg, log, pl.get("title", name))
     srcs = sorted({n.get("source", "") for n in (notes or []) if n.get("source")})
     (work / "sources.txt").write_text("Sources for the context notes:\n" + "\n".join(srcs), encoding="utf-8")

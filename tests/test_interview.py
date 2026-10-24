@@ -42,3 +42,11 @@ def test_fit_trims_long_bites_and_short():
     assert all(segs[it["bite"][1]]["end"] - segs[it["bite"][0]]["start"] <= 40 for it in j["short"]["items"] if "bite" in it)
     assert I.total_secs(j["short"]["items"], segs) <= 100
     b = j["documentary"]["chapters"][0]["items"][0]["bite"]; assert segs[b[1]]["end"] - segs[b[0]]["start"] <= 60
+
+
+def test_shots_holder_closeup_becomes_cutaway():
+    from studio import shots
+    an = {"secs": [{"t": t, "faces": ([[0.5, 0.4, 0.3, 0.3]] if t < 3 else [[0.3, 0.4, 0.05, 0.08]]), "tilt": 0} for t in range(6)]}
+    sh = shots.plan_shots(an, 0, 6)
+    assert [x[2] for x in sh] == ["self", "guest"] and sh[1][3][0] == 0.3
+    assert "rotate=" in shots.vf_frame("documentary", None, 6.0) and "rotate=" not in shots.vf_frame("documentary", None, 1.0)
