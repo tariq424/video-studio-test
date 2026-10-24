@@ -251,6 +251,7 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
 Style: Cap,Arial,{fs},&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,1,0,0,0,100,100,0,0,1,5,2,2,{ml},{ml},{mv},1
 Style: Narr,Arial,{fs},&H0066E0FF,&H0066E0FF,&H00000000,&H96000000,1,1,0,0,100,100,0,0,1,5,2,2,{ml},{ml},{mv},1
 Style: Credit,Arial,{cs},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,1,7,30,30,30,1
+Style: Hook,Arial Black,{hs},&H0000D7FF,&H0000D7FF,&H00000000,&HA0000000,1,0,0,0,100,100,0,0,1,7,3,8,60,60,{hv},1
 Style: Card,Arial,{ks},&H00FFFFFF,&H00FFFFFF,&H00000000,&HA0000000,1,0,0,0,100,100,0,0,3,18,0,5,60,60,0,1
 
 [Events]
@@ -278,6 +279,7 @@ def assemble(parts, out, kind, work, cfg, log=print, title=""):
     w, h = (1080, 1920) if kind == "short" else (1920, 1080)
     fs, ml, mv, maxw = (70, 90, 430, 5) if kind == "short" else (54, 160, 60, 9)
     cs, ks = (30, 76) if kind == "short" else (24, 64)
+    hs, hv = (92, 300) if kind == "short" else (80, 90)
     ev, t = [], 0.0
     lst = Path(work) / f"{kind}_concat.txt"
     with open(lst, "w", encoding="utf-8") as fh:
@@ -285,13 +287,14 @@ def assemble(parts, out, kind, work, cfg, log=print, title=""):
             fh.write(f"file '{Path(p['file']).as_posix()}'\n")
             d = media.dur(p["file"])
             if p.get("credit"): ev.append(f"Dialogue: 1,{_t(t)},{_t(t + d)},Credit,,0,0,0,,{p['credit']}\n")
+            if p.get("hook"): ev.append(f"Dialogue: 2,{_t(t)},{_t(t + d)},Hook,,0,0,0,,{{\\fad(0,250)}}{p['hook']}\n")
             if p.get("card"): ev.append(f"Dialogue: 1,{_t(t + 0.3)},{_t(t + d - 0.2)},Card,,0,0,0,,{{\\fad(200,200)}}{p['card']}\n")
             for txt, a, b in _caption_lines(p.get("words") or [], maxw):
                 if a >= d: break
                 ev.append(f"Dialogue: 0,{_t(t + a)},{_t(t + min(b + 0.15, d))},{p.get('style', 'Cap')},,0,0,0,,{{\\fad(80,60)}}{txt}\n")
             t += d
     ass = Path(work) / f"{kind}.ass"
-    ass.write_text(ASS.format(w=w, h=h, fs=fs, ml=ml, mv=mv, cs=cs, ks=ks) + "".join(ev), encoding="utf-8")
+    ass.write_text(ASS.format(w=w, h=h, fs=fs, ml=ml, mv=mv, cs=cs, ks=ks, hs=hs, hv=hv) + "".join(ev), encoding="utf-8")
     joined = Path(work) / f"_{kind}_joined.mp4"
     media.ff("-f", "concat", "-safe", 0, "-i", lst, "-c", "copy", joined, timeout=1800)
     sub = ass.as_posix().replace(":", "\\:")
@@ -309,6 +312,50 @@ def assemble(parts, out, kind, work, cfg, log=print, title=""):
 
 
 # ------------------------------------------------------------------ the whole edit
+HOOK = """Pick the cold open for a YouTube {what} made from this interview: the single most surprising, emotional or
+curiosity-making line actually said (an exact quote, 6-20 words, from ONE segment), plus a hook line shown on screen over it.
+About the footage: {context}
+Transcript:
+{segments}
+Rules: the quote must be copied exactly from the segment; the hook text is under 45 characters, true to what is said, no
+clickbait lies, respectful to the people in it; never private details. Reply with JSON only:
+{{"seg": <segment number>, "quote": "exact words", "text": "on-screen hook"}}"""
+
+
+def _norm(w): return re.sub(r"[^a-z0-9]", "", w.lower())
+
+
+def hook(cfg, segs, context, kind, work, log=print):
+    """-> {"t0", "t1", "text", "quote"} for the cold open (cached in hook_<kind>.json), or None."""
+    out = Path(work) / f"hook_{kind}.json"
+    if out.exists(): return json.loads(out.read_text(encoding="utf-8"))
+    import difflib
+    from .llm import LLM
+    lines = "\n".join(f"[{x['i']}] {x['text']}" for x in segs)
+    def check(j):
+        i = int(j.get("seg", -1))
+        if not 0 <= i < len(segs): raise ValueError("seg out of range")
+        if not str(j.get("text") or "").strip() or len(str(j.get("quote") or "").split()) < 4: raise ValueError("quote and text needed")
+    try:
+        with LLM(dict(cfg), log, lambda: False) as llm:
+            j = llm.chat_json("You are a YouTube documentary editor. Reply with JSON only.",
+                              HOOK.format(what="Short" if kind == "short" else "mini-documentary", context=context, segments=lines[:60000]),
+                              max_tokens=300, check=check)
+    except Exception as e:
+        _log(log, f"  hook: none ({str(e)[:100]})"); return None
+    words = [w for x in segs[max(0, int(j["seg"]) - 1):int(j["seg"]) + 2] for w in x["words"]]   # the segment and its neighbours
+    q = [_norm(w) for w in str(j["quote"]).split() if _norm(w)]
+    have = [_norm(w[0]) for w in words]
+    m = difflib.SequenceMatcher(None, have, q, autojunk=False).find_longest_match(0, len(have), 0, len(q))
+    if m.size < max(3, len(q) // 2): _log(log, "  hook: the quote wasn't found in the transcript; no cold open"); return None
+    a = max(0, m.a - (m.b if m.b else 0)); b = min(len(words) - 1, m.a + m.size - 1 + (len(q) - m.b - m.size))
+    res = {"t0": max(0.0, words[a][1] - 0.15), "t1": words[b][2] + 0.35, "text": str(j["text"]).strip()[:48], "quote": j["quote"],
+           "words": [(w[0], w[1], w[2]) for w in words[a:b + 1]]}
+    out.write_text(json.dumps(res, indent=1, ensure_ascii=False), encoding="utf-8")
+    _log(log, f"  hook ({kind}): \"{res['text']}\" over \"{res['quote'][:70]}\" ({res['t1'] - res['t0']:.1f}s)")
+    return res
+
+
 def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), flip=True, name="interview", version="", notes=None):
     src = Path(src); root = Path(work); root.mkdir(parents=True, exist_ok=True)
     segs = transcribe(src, root, log)
@@ -321,6 +368,10 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
         items = _items(pl.get("short") or {}) if kind == "short" else [x for c in pl["documentary"]["chapters"] for x in c.get("items", [])]
         kd = work / kind; kd.mkdir(exist_ok=True)
         parts, rnd = [], random.Random(7)
+        hk = hook(cfg, segs, context, kind, work, log) if cfg.get("interview_hook", True) else None
+        if hk:   # cold open: the most striking line, with the hook text on screen, before the story starts
+            f = cut_bite(src, hk["t0"], hk["t1"], kd / "hook.mp4", kind, 1, flip)
+            parts.append({"file": f, "words": [(w, s - hk["t0"], e - hk["t0"]) for w, s, e in hk["words"]], "style": "Cap", "hook": hk["text"]})
         for k, it in enumerate(items):
             if "bite" in it:
                 a, b = int(it["bite"][0]), int(it["bite"][1])
