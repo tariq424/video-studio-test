@@ -113,3 +113,11 @@ def test_cut_points_join_without_repeats():
     _, a1 = interview._cut_points(segs, 0, 1)
     b0, _ = interview._cut_points(segs, 2, 3)
     assert a1 <= b0 and a1 > segs[1]["end"] and b0 < segs[2]["start"]
+
+
+def test_missed_seconds_beside_holder_are_covered():
+    from studio import shots
+    secs = [{"t": 0, "faces": [[0.5, 0.5, 0.5, 1.0]], "tilt": 0}, {"t": 1, "faces": [], "tilt": 0}, {"t": 2, "faces": [], "tilt": 0},
+            {"t": 3, "faces": [[0.5, 0.5, 0.5, 1.0]], "tilt": 0}] + [{"t": t, "faces": [], "tilt": 0} for t in range(4, 12)]
+    sh = shots.plan_shots({"secs": secs}, 0, 12)
+    assert sh[0][2] == "self" and sh[0][1] >= 5 and sh[-1][2] == "none"

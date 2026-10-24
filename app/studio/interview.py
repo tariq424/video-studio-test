@@ -28,7 +28,7 @@ from pathlib import Path
 from . import media
 
 VIDEO_EXT = (".mov", ".mp4", ".m4v", ".mkv")
-CUT_VERSION = "7"   # bump when the way parts are cut changes, so cached parts are made again
+CUT_VERSION = "8"   # bump when the way parts are cut changes, so cached parts are made again
 PLAN = """You edit a documentary from the creator's OWN interview footage. The interview audio is the star: viewers should mostly
 hear the people on camera. Your narration only bridges: a hook, where we are, a line between topics, a closing line.
 
@@ -570,7 +570,8 @@ class Ladder:
             ow = self._own(visual, d)
             if ow:
                 f, st, rot = ow
-                vf = (rot + "," if rot else "") + shots.vf_frame(self.kind, None, 0.0, False)
+                W, H = (1080, 1920) if self.kind == "short" else (1920, 1080)   # fill the frame (a portrait clip in a wide video: no black bars)
+                vf = (rot + "," if rot else "") + f"scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H},fps=30,format=yuv420p,setsar=1"
                 media.ff("-ss", f"{st:.2f}", "-i", f, "-t", f"{d:.2f}", "-an", "-vf", vf, *ENC[:6], out, timeout=900)
                 return out, "own footage", ""
             img, credit = self._photo(visual, text)
@@ -923,12 +924,13 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                                  "-vf", shots.vf_frame(kind, None, 0.0, False, 1080 if kind == "short" else 1920, 1920 if kind == "short" else 1080)
                                  + f",fade=t=in:st=0:d=0.3,fade=t=out:st={d - 0.3:.2f}:d=0.3",
                                  "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,apad", *ENC, "-shortest", f, timeout=900)
-                    else:
-                        nxt = next((x for x in items[k + 1:] if "bite" in x), None)
-                        st = segs[int(nxt["bite"][0])]["start"] if nxt else segs[-1]["start"]
+                    else:   # no photo / clip: the scenic background (the bay), heavily blurred - never a person's face
+                        bf_, bst_, bfl_, brot_ = card_bg
                         d = media.dur(wav) + 0.35
-                        media.ff("-ss", f"{st:.2f}", "-i", src, "-i", wav, "-t", f"{d:.2f}", "-map", "0:v:0", "-map", "1:a:0",
-                                 "-vf", _vf(kind, None, 1.0, flip) + ",boxblur=12", "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,apad", *ENC, "-shortest", f, timeout=900)
+                        media.ff(*(["-stream_loop", "-1"] if media.dur(bf_) < bst_ + d else []), "-ss", f"{bst_ + (k * 3.7) % 20:.2f}", "-i", bf_, "-i", wav,
+                                 "-t", f"{d:.2f}", "-map", "0:v:0", "-map", "1:a:0",
+                                 "-vf", (brot_ + "," if brot_ else "") + shots.vf_frame(kind, None, 0.0, bfl_) + ",boxblur=20:2,eq=brightness=-0.1",
+                                 "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,apad", *ENC, "-shortest", f, timeout=900)
                     (kd / f"{k:02}_insert.json").write_text(json.dumps({"credit": credit}), encoding="utf-8")
                 else:
                     try: credit = json.loads((kd / f"{k:02}_insert.json").read_text(encoding="utf-8")).get("credit", "")

@@ -20,7 +20,8 @@ from . import media
 SELF_AREA = 0.06      # a face this big (share of the frame) is the camera holder, filming himself
 EDGE_SELF_AREA = 0.035   # ...or a smaller one cut off at the left/right edge (the holder half in shot beside the guest)
 GUEST_LOW = 0.78     # a guest face centred this low is his head poking up at the bottom edge (a shot of the room, not of him)
-GUEST_MIN_AREA = 0.008   # smaller than this is a mirror, a poster, a passer-by far away
+GUEST_MIN_AREA = 0.008
+NEAR = 2              # seconds: a "nobody" second this close to the holder or a ceiling counts as that (missed detections)   # smaller than this is a mirror, a poster, a passer-by far away
 CEILING_TOP = 0.65    # the top of the picture this flat = a car ceiling / blank wall, not a shot of anything
 DETECTOR = "yunet1"   # bump to re-detect faces in a cached analysis
 MODEL = Path(__file__).resolve().parents[2] / "models" / "face_detection_yunet_2023mar.onnx"
@@ -172,6 +173,10 @@ def plan_shots(an, t0, t1, min_len=2.0):
     while t < t1:
         s = by.get(t) or {"faces": [], "tilt": 0}
         k = kind_of(s)
+        if k == "none":   # a second with no face found, right beside the holder / a ceiling: the detector missed, not a clean shot
+            near = [kind_of(by[u]) for u in range(t - NEAR, t + NEAR + 1) if u != t and u in by]
+            if "self" in near: k = "self"
+            elif "empty" in near: k = "empty"
         g = None
         if k == "guest":
             gs, ss = split(s["faces"])
