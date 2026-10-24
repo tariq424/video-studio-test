@@ -20,7 +20,7 @@ from . import media
 SELF_AREA = 0.06      # a face this big (share of the frame) is the camera holder, filming himself
 EDGE_SELF_AREA = 0.035   # ...or a smaller one cut off at the left/right edge (the holder half in shot beside the guest)
 GUEST_MIN_AREA = 0.008   # smaller than this is a mirror, a poster, a passer-by far away
-CEILING_TOP = 0.70    # the top of the picture this flat = a car ceiling / blank wall, not a shot of anything
+CEILING_TOP = 0.65    # the top of the picture this flat = a car ceiling / blank wall, not a shot of anything
 DETECTOR = "yunet1"   # bump to re-detect faces in a cached analysis
 MODEL = Path(__file__).resolve().parents[2] / "models" / "face_detection_yunet_2023mar.onnx"
 GUEST_H = {"short": 0.20, "documentary": 0.26}   # the guest's face height as a share of the output frame
@@ -202,6 +202,17 @@ def plan_shots(an, t0, t1, min_len=2.0):
     return res
 
 
+def holder_out(kind, guest, src_w=1920, src_h=1080):
+    """Can the guest be framed with the camera holder fully out of the picture? (no holder in the shot = yes)"""
+    if not guest or len(guest) < 5: return True
+    W, H = (1080, 1920) if kind == "short" else (1920, 1080)
+    cx, cy, gw, gh = guest[:4]; holder = guest[4]
+    hl, hr = holder[0] - holder[2] / 2, holder[0] + holder[2] / 2
+    gl, gr = max(0.0, cx - gw * 0.75), min(1.0, cx + gw * 0.75)
+    room = hl if holder[0] > cx else 1.0 - hr
+    return room >= gr - gl and room >= (W / H) * src_h / src_w / 2.6
+
+
 def vf_frame(kind, guest=None, tilt=0.0, flip=True, src_w=1920, src_h=1080):
     """Filter: mirror removed, level, framed on the guest (or centred), scaled to the output."""
     W, H = (1080, 1920) if kind == "short" else (1920, 1080)
@@ -289,7 +300,7 @@ def cutaway_pool(an, used, min_len=3.0):
     """Stretches of the source where the guest is on screen and the holder isn't (for cutaways), outside the used ranges."""
     runs, cur = [], None
     for s in an.get("secs", []):
-        ok = kind_of(s) == "guest" and not any(a - 1 <= s["t"] <= b + 1 for a, b in used)
+        ok = kind_of(s) == "guest" and not split(s["faces"])[1] and not any(a - 1 <= s["t"] <= b + 1 for a, b in used)
         if ok:
             if cur and s["t"] == cur[1]: cur[1] = s["t"] + 1
             else:

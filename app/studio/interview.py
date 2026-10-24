@@ -28,7 +28,7 @@ from pathlib import Path
 from . import media
 
 VIDEO_EXT = (".mov", ".mp4", ".m4v", ".mkv")
-CUT_VERSION = "5"   # bump when the way parts are cut changes, so cached parts are made again
+CUT_VERSION = "6"   # bump when the way parts are cut changes, so cached parts are made again
 PLAN = """You edit a documentary from the creator's OWN interview footage. The interview audio is the star: viewers should mostly
 hear the people on camera. Your narration only bridges: a hook, where we are, a line between topics, a closing line.
 
@@ -407,6 +407,7 @@ def cut_bite_framed(src, t0, t1, out, kind, flip, an, cuts, log=print):
     segs, lst = [], tmpd / "v.txt"
     for n, (a, b, k, g, tilt) in enumerate(shots.plan_shots(an, t0, t1)):
         v = tmpd / f"s{n:02}.mp4"; d = b - a
+        if k == "guest" and not shots.holder_out(kind, g): k = "self"   # owner: "cut me out completely" - no crop can, so cut away
         if k in ("self", "empty"):   # cutaway: the sound goes on, the picture shows the guest elsewhere / B-roll
             f, st, fl, gb, rot = cuts.take(d)
             vf = (rot + "," if rot else "") + shots.vf_frame(kind, gb, 0.0, fl)
