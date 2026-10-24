@@ -152,7 +152,8 @@ that went from the Nation of Islam to its own mosque). Open with the most grippi
 then 2-4 more soundbites from the SAME thread (each 5-20 seconds; a sub-range of a soundbite's segments is fine), joined by up to
 three one-sentence narration lines that carry the story forward; up to TWO context inserts from the notes that explain the
 history behind it (only what the note says); end on a line that lands the story. No small talk, no logistics, nothing off-thread.
-Reply with JSON only: {{"items": [{{"bite": [first, last]}} | {{"narr": "...", "broll": ""}} | {{"insert": "...", "note": n, "visual": "...", "card": "..."}}]}}"""
+Also write "hook": an on-screen line for the opening soundbite, under 45 characters, true to the story.
+Reply with JSON only: {{"hook": "...", "items": [{{"bite": [first, last]}} | {{"narr": "...", "broll": ""}} | {{"insert": "...", "note": n, "visual": "...", "card": "..."}}]}}"""
 
 
 def short_plan(cfg, segs, pl, context, notes, work, log=print, short_secs=90):
@@ -164,19 +165,24 @@ def short_plan(cfg, segs, pl, context, notes, work, log=print, short_secs=90):
     mat = "\n".join(f"[{a}-{b}] " + " ".join(segs[i]["text"] for i in range(a, b + 1))[:600] for a, b in bites)
     mat += "\n\nNotes:\n" + ("\n".join(f"[{i}] {n['fact']}" for i, n in enumerate(notes or [])) or "(none)")
     n = len(segs)
-    def check(j):
+    def check(j, strict=True):
         its = j.get("items") or []
-        if not its or "bite" not in its[0]: raise ValueError("the Short must open with a soundbite")
+        if not its or not any("bite" in it for it in its): raise ValueError("the Short needs soundbites")
         for it in its:
             if "bite" in it:
                 a, b = int(it["bite"][0]), int(it["bite"][1])
                 if not 0 <= a <= b < n: raise ValueError(f"bite {it['bite']} out of range")
-                if segs[b]["end"] - segs[a]["start"] > 25: raise ValueError(f"bite {it['bite']} is longer than 20 s; use fewer segments")
-        if total_secs(its, segs) > short_secs + 10: raise ValueError(f"the Short is {total_secs(its, segs):.0f} s; keep it under {short_secs} s")
+                if strict and segs[b]["end"] - segs[a]["start"] > 30: raise ValueError(f"bite {it['bite']} is longer than 20 s; use fewer segments")
+        if strict and total_secs(its, segs) > short_secs + 20: raise ValueError(f"the Short is {total_secs(its, segs):.0f} s; keep it under {short_secs} s")
     try:
         with LLM(dict(cfg), log, lambda: False) as llm:
-            j = llm.chat_json("You are a YouTube Shorts editor. Reply with JSON only.",
-                              SHORT.format(short_secs=short_secs, context=context, material=mat[:40000]), max_tokens=1500, check=check)
+            try: j = llm.chat_json("You are a YouTube Shorts editor. Reply with JSON only.",
+                                   SHORT.format(short_secs=short_secs, context=context, material=mat[:40000]), max_tokens=1500, check=check)
+            except RuntimeError:   # still too long after 3 tries: take its story and trim it to size
+                j = llm.chat_json("You are a YouTube Shorts editor. Reply with JSON only.",
+                                  SHORT.format(short_secs=short_secs, context=context, material=mat[:40000]), max_tokens=1500,
+                                  check=lambda x: check(x, False))
+        j = fit({"short": j, "documentary": {"chapters": []}}, segs, short_secs, bite_max_short=22)["short"]
     except Exception as e:
         _log(log, f"  short plan: kept the combined plan's Short ({str(e)[:100]})"); return None
     out.write_text(json.dumps(j, indent=1, ensure_ascii=False), encoding="utf-8")
@@ -532,20 +538,27 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
             (kd / "narr").mkdir(exist_ok=True); tts.kokoro_batch(cfg, batch, log, f"interview narration ({kind})")
         used = [(segs[int(x["bite"][0])]["start"], segs[int(x["bite"][1])]["end"]) for x in items if "bite" in x]
         cuts = Cutaways(src, an, used, bfiles, root, flip, log)
-        hk = hook(cfg, segs, context, kind, work, log) if cfg.get("interview_hook", True) else None
+        hk = hook(cfg, segs, context, kind, work, log) if cfg.get("interview_hook", True) and not (kind == "short" and sp) else None
+        if kind == "short" and sp and items and "bite" in items[0]:   # the Short's own opener is its cold open: hook text from its thread
+            items[0] = dict(items[0], hook_text=str(sp.get("hook") or "")[:48])
         if hk:   # cold open: the most striking line, with the hook text on screen, before the story starts
             f = cut_bite_framed(src, hk["t0"], hk["t1"], kd / "hook.mp4", kind, flip, an, cuts, log)
             parts.append({"file": f, "words": [(w, s - hk["t0"], e - hk["t0"]) for w, s, e in hk["words"]], "style": "Cap", "hook": hk["text"]})
-        tt = kd / "title.mp4"   # title card: what this is, before the story
-        if not media.ok(tt, 0.5): card_part(card_bg, 3.2, tt, kind)
-        parts.append({"file": tt, "words": [], "titles": [(pl.get("title", name), "Title", -50), ("A conversation in Bermuda", "Sub", 90)]})
+        if hk or not (kind == "short" and sp):   # title card: what this is, before the story (the Short's comes after its opener)
+            tt = kd / "title.mp4"
+            if not media.ok(tt, 0.5): card_part(card_bg, 3.2, tt, kind)
+            parts.append({"file": tt, "words": [], "titles": [(pl.get("title", name), "Title", -50), ("A conversation in Bermuda", "Sub", 90)]})
         for k, it in enumerate(items):
             if "bite" in it:
                 a, b = int(it["bite"][0]), int(it["bite"][1])
                 t0 = max(0.0, segs[a]["start"] - 0.15); t1 = segs[b]["end"] + 0.3
                 f = cut_bite_framed(src, t0, t1, kd / f"{k:02}_bite.mp4", kind, flip, an, cuts, log)
                 words = [(wd, s - t0, e - t0) for x in segs[a:b + 1] for wd, s, e in x["words"]]
-                parts.append({"file": f, "words": words, "style": "Cap"})
+                parts.append({"file": f, "words": words, "style": "Cap", "hook": it.get("hook_text", "")})
+                if it.get("hook_text"):   # the title card goes right after the opener
+                    tt = kd / "title.mp4"
+                    if not media.ok(tt, 0.5): card_part(card_bg, 3.2, tt, kind)
+                    parts.append({"file": tt, "words": [], "titles": [(pl.get("title", name), "Title", -50), ("A conversation in Bermuda", "Sub", 90)]})
                 _log(log, f"  {kind} {k:02}: soundbite {t0:.0f}-{t1:.0f}s \"{segs[a]['text'][:60]}\"")
             elif it.get("narr"):
                 br = str(it.get("broll") or "")
