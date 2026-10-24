@@ -28,7 +28,7 @@ from pathlib import Path
 from . import media
 
 VIDEO_EXT = (".mov", ".mp4", ".m4v", ".mkv")
-CUT_VERSION = "10"   # bump when the way parts are cut changes, so cached parts are made again
+CUT_VERSION = "11"   # bump when the way parts are cut changes, so cached parts are made again
 PLAN = """You edit a documentary from the creator's OWN interview footage. The interview audio is the star: viewers should mostly
 hear the people on camera. Your narration only bridges: a hook, where we are, a line between topics, a closing line.
 
@@ -533,7 +533,7 @@ class TripFootage:
             except Exception: continue
             p = Path(r.get("original", ""))
             if str(p).lower() in ex or not p.exists() or "vision failed" in str(r.get("description", "")): continue
-            words = (" ".join(r.get("tags") or []) + " " + str(r.get("description", ""))).lower()
+            words = (str(r.get("subject", "")) + " " + str(r.get("description", ""))).lower()   # (tags echo the prompt's examples: not used)
             if r.get("face_closeup") or str(r.get("quality", "good")) in ("shaky", "dark", "blurry") or str(r.get("people", "")) == "one": continue
             if any(k in words for k in self.SKIP): continue
             vid = p.suffix.lower() in VIDEO_EXT
@@ -572,12 +572,47 @@ class TripFootage:
             if sc > bs: best, bs = r, sc
         if not best: return None
         f = Path(best["original"])
+        if not self._faceless(f, best, d):   # someone's face in the stretch we'd use (you, family): never; try the next best
+            self.recs = [r for r in self.recs if r is not best]
+            return self.pick(visual, text, d, mode)
         self.last = best["original"]
         if best["_vid"]:
             st = self.pos.get(best["original"], 0.5); self.pos[best["original"]] = st + d + 0.5
         else:
             st = 0.0; self.pos[best["original"]] = 1
         return f, st, best
+
+    def _faceless(self, f, r, d):
+        """No face bigger than a passer-by (> 1% of the frame) in the part of the clip we'd use (5 frames) / the photo.
+        The catalogue's people / close-up flags missed family selfies; this checks the pixels."""
+        from . import shots
+        cv2, np = shots._cv()
+        if not cv2: return True
+        tmp = Path(self.root or ".") / "_trip_face.jpg"
+        try:
+            if r["_vid"]:
+                st = self.pos.get(r["original"], 0.5); fd = float(r.get("seconds") or 0)
+                times = [min(max(0.0, fd - 0.2), st + d * k / 4) for k in range(5)]
+            else:
+                times = [None]
+            for t in times:
+                if t is None:
+                    if f.suffix.lower() == ".heic":
+                        import pillow_heif; from PIL import Image
+                        pillow_heif.register_heif_opener(); Image.open(f).convert("RGB").save(tmp, quality=90)
+                    else: tmp = f
+                else:
+                    media.ff("-ss", f"{t:.2f}", "-i", f, "-frames:v", 1, "-vf", "scale=640:-2", tmp, timeout=120)
+                im = cv2.imread(str(tmp))
+                if im is None: continue
+                if im.shape[1] > 960: im = cv2.resize(im, (960, int(im.shape[0] * 960 / im.shape[1])))
+                for rot in (None, cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_90_COUNTERCLOCKWISE):   # sideways clips too
+                    im2 = im if rot is None else cv2.rotate(im, rot)
+                    if any(x[2] * x[3] > 0.01 for x in shots._faces(cv2, cv2.cvtColor(im2, cv2.COLOR_BGR2GRAY), im2)):
+                        _log(self.log, f"    trip clip {f.name} skipped: a face in it"); return False
+            return True
+        except Exception:
+            return False
 
     def render(self, pick, d, out, kind):
         from . import shots

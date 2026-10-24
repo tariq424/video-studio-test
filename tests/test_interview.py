@@ -136,6 +136,7 @@ def test_trip_footage_place_subject_scenery(tmp_path):
     rec("selfie", "Hamilton", ["man", "street"], "A man's face close to the camera.", face_closeup=True)
     rec("plane", "Apron VII", ["airplane", "cabin"], "Inside an airplane cabin.")
     tf = interview.TripFootage(cat, root=None)
+    tf._faceless = lambda f, r, d: True   # (fake files: the pixel face check is exercised live)
     assert len(tf.recs) == 2   # face close-up and airplane clips are never used
     assert tf.pick("St. George's church", "they built it in St. George's", 6, "place")[2]["original"].endswith("stg.MOV")
     assert tf.pick("Tucker's Town", "the land in Tucker's Town", 6, "place") is None   # not filmed there: no place match
