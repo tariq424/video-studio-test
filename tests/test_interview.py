@@ -121,3 +121,23 @@ def test_missed_seconds_beside_holder_are_covered():
             {"t": 3, "faces": [[0.5, 0.5, 0.5, 1.0]], "tilt": 0}] + [{"t": t, "faces": [], "tilt": 0} for t in range(4, 12)]
     sh = shots.plan_shots({"secs": secs}, 0, 12)
     assert sh[0][2] == "self" and sh[0][1] >= 5 and sh[-1][2] == "none"
+
+
+def test_trip_footage_place_subject_scenery(tmp_path):
+    import json
+    from studio import interview
+    cat = tmp_path / "catalog"; cat.mkdir()
+    def rec(name, place, tags, desc, secs=20, **kw):
+        f = tmp_path / f"{name}.MOV"; f.write_bytes(b"x")
+        (cat / f"{name}.json").write_text(json.dumps(dict(original=str(f), seconds=secs, place=place, area="", address=place, tags=tags,
+                                                        description=desc, **({"people": "none", "face_closeup": False, "quality": "good"} | kw))))
+    rec("stg", "Town of St. George", ["church", "street"], "An old stone church on a narrow street.")
+    rec("beach", "Horseshoe Bay Beach Road", ["beach", "ocean", "sky"], "A pink sand beach with turquoise water.")
+    rec("selfie", "Hamilton", ["man", "street"], "A man's face close to the camera.", face_closeup=True)
+    rec("plane", "Apron VII", ["airplane", "cabin"], "Inside an airplane cabin.")
+    tf = interview.TripFootage(cat, root=None)
+    assert len(tf.recs) == 2   # face close-up and airplane clips are never used
+    assert tf.pick("St. George's church", "they built it in St. George's", 6, "place")[2]["original"].endswith("stg.MOV")
+    assert tf.pick("Tucker's Town", "the land in Tucker's Town", 6, "place") is None   # not filmed there: no place match
+    assert tf.pick("Tucker's Town", "the land in Tucker's Town", 6, "scenery") is None   # named place: no anonymous scenery as if it were it
+    assert tf.pick("", "it's very nice here", 6, "scenery")[2]["original"].endswith("beach.MOV")

@@ -28,7 +28,7 @@ from pathlib import Path
 from . import media
 
 VIDEO_EXT = (".mov", ".mp4", ".m4v", ".mkv")
-CUT_VERSION = "9"   # bump when the way parts are cut changes, so cached parts are made again
+CUT_VERSION = "10"   # bump when the way parts are cut changes, so cached parts are made again
 PLAN = """You edit a documentary from the creator's OWN interview footage. The interview audio is the star: viewers should mostly
 hear the people on camera. Your narration only bridges: a hook, where we are, a line between topics, a closing line.
 
@@ -508,6 +508,96 @@ class Cutaways:
         return self.src, 0.0, self.flip, None, ""
 
 
+class TripFootage:
+    """Your other trip clips and photos, from the catalogue (scripts/label_media.py catalog: place from GPS, what is seen, what
+    is said). Used under his voice where the picture is bad (owner, 2026-10-24: "use my other Bermuda videos to replace blur"):
+      place    - only clips GPS puts at a place he names (St. George's, Hamilton, Dockyard...)
+      subject  - clips showing the kind of thing he talks about (houses, harbour, church, school, field...)
+      scenery  - neutral Bermuda scenery (water, beach, street, sky) for stretches that name no place
+    Never: face close-ups, shaky / dark clips, airport / plane / hotel-room clips; each stretch of a clip is used once."""
+    SCENIC = {"beach", "ocean", "sea", "water", "harbour", "harbor", "bay", "coast", "coastline", "sunset", "sky", "boat", "boats",
+              "landscape", "street", "road", "houses", "house", "town", "view", "island", "palm", "trees", "garden", "cliff", "lighthouse"}
+    SKIP = {"airplane", "airport", "plane", "aircraft", "cabin", "seat", "hotel room", "bed", "bathroom", "screenshot", "phone", "menu",
+            "selfie", "receipt", "document", "screen"}
+    STOP = set("the a an and or of in on at to for with from by is are was were this that these those it its he she they them his her their "
+               "what who where when how very just like yeah okay oh so but not no yes there here have has had be been do does did will "
+               "would can could about over into up down out all some many more most also bermuda".split())
+
+    def __init__(self, catalog_dir, exclude=(), root=None, log=print):
+        self.log, self.root, self.recs, self.pos = log, root, [], {}
+        ex = {str(Path(x)).lower() for x in exclude}
+        lens = {round(float(x[1]), 1) for x in exclude if isinstance(x, tuple)}
+        for f in sorted(Path(catalog_dir).glob("*.json")) if catalog_dir and Path(catalog_dir).is_dir() else []:
+            try: r = json.loads(f.read_text(encoding="utf-8"))
+            except Exception: continue
+            p = Path(r.get("original", ""))
+            if str(p).lower() in ex or not p.exists() or "vision failed" in str(r.get("description", "")): continue
+            words = (" ".join(r.get("tags") or []) + " " + str(r.get("description", ""))).lower()
+            if r.get("face_closeup") or str(r.get("quality", "good")) in ("shaky", "dark", "blurry") or str(r.get("people", "")) == "one": continue
+            if any(k in words for k in self.SKIP): continue
+            vid = p.suffix.lower() in VIDEO_EXT
+            if vid and float(r.get("seconds") or 0) < 3: continue
+            r["_vid"], r["_words"] = vid, set(re.findall(r"[a-z]{3,}", words)) - self.STOP
+            r["_where"] = " ".join(str(r.get(k, "")) for k in ("place", "area", "address")).lower()
+            self.recs.append(r)
+        _log(log, f"  trip footage: {len(self.recs)} usable clip(s) / photo(s) from the catalogue")
+
+    def _places(self, text):
+        out = set()
+        for m in re.finditer(r"\b(St\.? George'?s?|Hamilton|Dockyard|Somerset|Sandys|Paget|Warwick|Southampton|Horseshoe Bay|Tucker'?s Town|"
+                             r"Flatts|Smith'?s|Devonshire|Pembroke|Crystal Caves?|Elbow Beach|Coco Reef|North Village|Bernard'?s Park|Front Street)\b", text, re.I):
+            out.add(re.sub(r"[^a-z ]", "", m.group(1).lower()).replace("st georges", "st george").replace("st george s", "st george").strip())
+        return out
+
+    def pick(self, visual, text, d, mode):
+        want = set(re.findall(r"[a-z]{3,}", (visual + " " + text).lower())) - self.STOP
+        places = self._places(visual + " " + text)
+        best, bs = None, 0.0
+        for r in self.recs:
+            if r["_vid"]:
+                used = self.pos.get(r["original"], 0.5)
+                if float(r.get("seconds") or 0) - used < min(d, 4.0): continue
+            elif self.pos.get(r["original"]): continue
+            if mode == "place":
+                if not places or not any(pl in r["_where"].replace("'", "").replace(".", "") for pl in places): continue
+                sc = 3 + len(want & r["_words"])
+            elif mode == "subject":
+                sc = len(want & r["_words"])
+                if sc < 2: continue
+            else:
+                sc = len(r["_words"] & self.SCENIC)
+                if sc < 2 or places: continue   # a named place he talks about never gets anonymous scenery as if it were it
+            sc += 0.5 if r["_vid"] else 0
+            if sc > bs: best, bs = r, sc
+        if not best: return None
+        f = Path(best["original"])
+        self.last = best["original"]
+        if best["_vid"]:
+            st = self.pos.get(best["original"], 0.5); self.pos[best["original"]] = st + d + 0.5
+        else:
+            st = 0.0; self.pos[best["original"]] = 1
+        return f, st, best
+
+    def render(self, pick, d, out, kind):
+        from . import shots
+        f, st, r = pick
+        W, H = (1080, 1920) if kind == "short" else (1920, 1080)
+        if r["_vid"]:
+            rot = shots.orient(f, self.root, self.log) if self.root else ""
+            fd = float(r.get("seconds") or 0)
+            vf = (rot + "," if rot else "") + f"scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H},fps=30,format=yuv420p,setsar=1"
+            media.ff(*(["-stream_loop", "-1"] if fd - st < d else []), "-ss", f"{min(st, max(0.0, fd - 1)):.2f}", "-i", f, "-t", f"{d:.2f}", "-an", "-vf", vf, *ENC[:6], out, timeout=900)
+        else:
+            img = f
+            if f.suffix.lower() == ".heic":
+                try:
+                    import pillow_heif; from PIL import Image
+                    pillow_heif.register_heif_opener(); img = Path(out).with_suffix(".jpg"); Image.open(f).convert("RGB").save(img, quality=92)
+                except Exception: return None
+            still_clip(img, d, out, kind)
+        return out
+
+
 class Ladder:
     """The picture for a stretch where his story is good but the picture isn't (car ceiling, blank wall, the camera holder):
     his voice goes on and the picture comes from the ladder, wherever it lands neatly (owner, 2026-10-24):
@@ -515,8 +605,9 @@ class Ladder:
       2. stock video (Pexels / Pixabay / Internet Archive) through the clip checker (Bermuda, the right kind of thing)
       3. his own footage of that moment, blurred
     Short stretches (< 4 s) go straight to the blur, so pictures don't flash by. (AI images / Marble scenes: not in this edit.)"""
-    def __init__(self, cfg, src, flip, kd, kind, log=print, own=None, scenic=None):
+    def __init__(self, cfg, src, flip, kd, kind, log=print, own=None, scenic=None, trip=None):
         self.cfg, self.src, self.flip, self.kd, self.kind, self.log = cfg, src, flip, Path(kd), kind, log
+        self.trip = trip
         self.scenic = scenic   # (file, start, flip, rotation): the bay, blurred under a stretch where only the holder is in shot
         self.photos, self.stock, self.uses, self.stock_tries = {}, {}, {}, 0
         self.own, self.own_i, self.own_pos = list(own or []), 0, {}
@@ -563,6 +654,16 @@ class Ladder:
             _log(self.log, f"    stock search failed ({str(e)[:80]})")
         return self.stock[visual]
 
+    def trip_clip(self, visual, text, d, out, modes):
+        """Your own trip footage for d seconds -> (out, how, credit) or None."""
+        if not self.trip: return None
+        for m in modes:
+            pk = self.trip.pick(visual or "", text or "", d, m)
+            if pk and self.trip.render(pk, d, out, self.kind):
+                r = pk[2]
+                return out, f"trip {m}", ""
+        return None
+
     def picture(self, a, b, out, visual="", text="", why=""):
         """A silent video for a..b of the source -> (path, how, credit)."""
         from . import shots
@@ -575,9 +676,13 @@ class Ladder:
                 vf = (rot + "," if rot else "") + f"scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H},fps=30,format=yuv420p,setsar=1"
                 media.ff("-ss", f"{st:.2f}", "-i", f, "-t", f"{d:.2f}", "-an", "-vf", vf, *ENC[:6], out, timeout=900)
                 return out, "own footage", ""
+            got = self.trip_clip(visual, text, d, out, ("place",))
+            if got: return got
             img, credit = self._photo(visual, text)
             if img:
                 still_clip(img, d, out, self.kind); return out, "photo", credit
+            got = self.trip_clip(visual, text, d, out, ("subject",))
+            if got: return got
             st = self._stock(visual, text)
             if st:
                 f, credit = st
@@ -585,6 +690,9 @@ class Ladder:
                 vf = shots.vf_frame(self.kind, None, 0.0, False, 1080 if self.kind == "short" else 1920, 1920 if self.kind == "short" else 1080)
                 media.ff(*(["-stream_loop", "-1"] if fd < d else []), "-i", f, "-t", f"{d:.2f}", "-an", "-vf", vf, *ENC[:6], out, timeout=900)
                 return out, "stock", credit
+        if d >= 3:
+            got = self.trip_clip(visual, text, d, out, ("scenery",))
+            if got: return got
         if why == "self" and self.scenic:   # a blurred face is still a face: the holder's shots go under the blurred bay instead
             f, st, fl, rot = self.scenic
             vf = (rot + "," if rot else "") + shots.vf_frame(self.kind, None, 0.0, fl) + ",boxblur=20:2,eq=brightness=-0.1"
@@ -661,7 +769,8 @@ def cut_bite_framed(src, t0, t1, out, kind, flip, an, cuts, log=print, ladder=No
         if k in ("self", "empty") and ladder is not None:   # his voice goes on; the picture comes from the ladder
             _, how, credit = ladder.picture(a, b, v, visual, text, why=k)
             if credits is not None: credits.append((a - t0, b - t0, how, credit))
-            _log(log, f"    {a:.0f}-{b:.0f}s: {'holder in shot' if k == 'self' else 'ceiling / blank'} -> {how}" + (f" ({credit})" if credit else ""))
+            _log(log, f"    {a:.0f}-{b:.0f}s: {'holder in shot' if k == 'self' else 'ceiling / blank'} -> {how}" + (f" ({credit})" if credit else "")
+                 + (f" [{Path(ladder.trip.last).name}]" if how.startswith("trip") and ladder.trip and getattr(ladder.trip, "last", None) else ""))
         elif k in ("self", "empty"):   # cutaway: the sound goes on, the picture shows the guest elsewhere / B-roll
             f, st, fl, gb, rot = cuts.take(d)
             vf = (rot + "," if rot else "") + shots.vf_frame(kind, gb, 0.0, fl)
@@ -851,7 +960,7 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
     bfiles = [x for x in sorted(bdir.iterdir()) if x.stem in broll and x.suffix.lower() in VIDEO_EXT]
     nice = next((x for x in bfiles if "bay" in x.stem.lower() or "wave" in x.stem.lower()), bfiles[0] if bfiles else None)
     card_bg = (nice, 2.0, False, shots.orient(nice, root, log)) if nice else (src, 30.0, flip, "")
-    outs = {}
+    outs, trip = {}, None
     for kind in kinds:
         sp = short_plan(cfg, segs, pl, context, notes, work, log) if kind == "short" and cfg.get("interview_short_pass", True) else None
         tri = triage(cfg, segs, context, notes, work, log) if kind == "documentary" and cfg.get("interview_doc_mode", "augment") == "augment" else None
@@ -868,7 +977,10 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
             (kd / "narr").mkdir(exist_ok=True); tts.kokoro_batch(cfg, batch, log, f"interview narration ({kind})")
         used = [(segs[int(x["bite"][0])]["start"], segs[int(x["bite"][1])]["end"]) for x in items if "bite" in x]
         cuts = Cutaways(src, an, used, bfiles, root, flip, log)
-        ladder = Ladder(cfg, src, flip, kd, kind, log, own=own_clips(src, root, log), scenic=card_bg)
+        oc = own_clips(src, root, log)
+        if trip is None:
+            trip = TripFootage(Path(src).parent / "labeled" / "catalog", [src] + [f for f, _, _ in oc], root, log) if cfg.get("interview_trip_footage", True) else False
+        ladder = Ladder(cfg, src, flip, kd, kind, log, own=oc, scenic=card_bg, trip=trip or None)
         hk = hook(cfg, segs, context, kind, work, log) if cfg.get("interview_hook", True) and not (kind == "short" and sp) else None
         if kind == "short" and sp and items and "bite" in items[0]:   # the Short's own opener is its cold open: hook text from its thread
             items[0] = dict(items[0], hook_text=str(sp.get("hook") or "")[:48])
@@ -930,6 +1042,10 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                                  "-vf", shots.vf_frame(kind, None, 0.0, False, 1080 if kind == "short" else 1920, 1920 if kind == "short" else 1080)
                                  + f",fade=t=in:st=0:d=0.3,fade=t=out:st={d - 0.3:.2f}:d=0.3",
                                  "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,apad", *ENC, "-shortest", f, timeout=900)
+                    elif ladder.trip_clip(str(it.get("visual") or ""), it["insert"], media.dur(wav) + 0.35, kd / f"{k:02}_insert_pic.mp4", ("place", "subject", "scenery")):
+                        d = media.dur(wav) + 0.35   # your own trip footage under the fact
+                        media.ff("-i", kd / f"{k:02}_insert_pic.mp4", "-i", wav, "-t", f"{d:.2f}", "-map", "0:v:0", "-map", "1:a:0",
+                                 "-vf", f"fade=t=in:st=0:d=0.3,fade=t=out:st={d - 0.3:.2f}:d=0.3", "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,apad", *ENC, "-shortest", f, timeout=900)
                     else:   # no photo / clip: the scenic background (the bay), heavily blurred - never a person's face
                         bf_, bst_, bfl_, brot_ = card_bg
                         d = media.dur(wav) + 0.35
