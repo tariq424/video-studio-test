@@ -31,7 +31,7 @@ def main():
                                        narration=c["narration"][:300].replace('"', "'"))
         try:
             raw = footage._vision(cfg, img, prompt); j = parse_json(raw)
-            ok, why = footage.contra_verdict(cfg, j, mv, mv.get("place", "") or c.get("place", ""), c.get("neutral", False), log, narration=c["narration"])
+            ok, why = footage.contra_verdict(cfg, j, mv, mv.get("place", "") or c.get("place", ""), c.get("neutral", False), log, narration=c["narration"], story=c.get("story", ""))
         except Exception as e:
             raw, j, ok, why = str(e), {}, None, f"error: {str(e)[:120]}"
         verdict = "KEEP" if ok else "DROP"

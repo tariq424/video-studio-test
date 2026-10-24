@@ -479,15 +479,16 @@ def kind_clash(kind, shown, main=""):
 
 
 RELATE = """A news video's narration line and a description of a stock clip that would play over it.
-Narration: "{narration}"
+What the whole video is about: "{story}"
+Narration line: "{narration}"
 Clip shows: "{seen}"
-Is the clip clearly UNRELATED to what the line is about (a washing machine, a spinning coin or wax seals over a line about an AI
+Is the clip clearly UNRELATED to the line and to the video's story (a washing machine, a spinning coin or wax seals over a line about an AI
 company's funding)? Loosely related scenes are fine (offices, screens, money, documents, a city skyline for a business story;
 people at work for a company story). Reply with JSON only: {{"unrelated": true or false, "why": "a few words"}}"""
 _RELATE_CACHE = {}
 
 
-def text_unrelated(cfg, narration, seen, log=print):
+def text_unrelated(cfg, narration, seen, log=print, story=""):
     """The script AI (stronger at meaning than the small vision model) judges the vision model's description against the
     narration. -> reason string when clearly unrelated, else "". Can't tell -> "" (not a proven contradiction)."""
     if not cfg.get("clip_relate_check", True) or not seen or not narration: return ""
@@ -496,14 +497,25 @@ def text_unrelated(cfg, narration, seen, log=print):
         try:
             with LLM(cfg, log, lambda: False) as llm:
                 j = llm.chat_json("You are a precise video editor. Reply with JSON only.",
-                                  RELATE.format(narration=narration[:400].replace('"', "'"), seen=seen[:300].replace('"', "'")), max_tokens=80)
+                                  RELATE.format(story=(story or narration)[:400].replace('"', "'"), narration=narration[:400].replace('"', "'"),
+                                                seen=seen[:300].replace('"', "'")), max_tokens=80)
             _RELATE_CACHE[key] = (str(j.get("why") or "unrelated")[:60]) if str(j.get("unrelated")).strip().lower() in ("true", "yes", "1") else ""
         except Exception:
             _RELATE_CACHE[key] = ""
     return _RELATE_CACHE[key]
 
 
-def contra_verdict(cfg, j, mainv, narration_place="", neutral=False, log=print, narration=""):
+def literal(main, kind, narration):
+    """The beat's main subject only binds when the line actually names it ("beachfront property" for a line about property
+    transfers, not "a bank vault" the script AI imagined for a line about money)."""
+    if not narration: return True
+    have = {_stem(w) for w in re.findall(r"[a-z0-9]+", narration.lower())}
+    want = {_stem(w) for w in _syn(kind) for w in re.findall(r"[a-z0-9]+", w)} if kind else set()
+    want |= {_stem(w) for w in re.findall(r"[a-z0-9]+", (main or "").lower()) if len(w) > 3 and w not in GENERIC}
+    return bool(have & want)
+
+
+def contra_verdict(cfg, j, mainv, narration_place="", neutral=False, log=print, narration="", story=""):
     """-> (ok, reason) from the CONTRA answers."""
     yes = lambda k, d=False: str(j.get(k, d)).strip().lower() in ("true", "yes", "1")
     if yes("platform"): return False, "copyright: screen capture / thumbnail / channel watermark"
@@ -514,19 +526,19 @@ def contra_verdict(cfg, j, mainv, narration_place="", neutral=False, log=print, 
     seen_place = str(j.get("place_seen") or "none").strip()
     if neutral and not _none(seen_place): return False, f"shows a recognisable place ({seen_place[:40]}); the closing card stays neutral"
     if not place_ok(cfg, seen_place, place, log): return False, f"shows {seen_place[:40]}; the story is set in {place}"
-    if main and str(j.get("main_visible", "unclear")).strip().lower() == "no" and not kind_match(kind, str(j.get("kind_shown") or "")):
+    if main and literal(main, kind, narration) and str(j.get("main_visible", "unclear")).strip().lower() == "no" and not kind_match(kind, str(j.get("kind_shown") or "")):
         return False, f"doesn't show {main}"
     if kind_clash(kind, str(j.get("kind_shown") or ""), main): return False, f"shows a {str(j.get('kind_shown'))[:30]}, not {main or kind}"
     if yes("mood_clash"): return False, "the mood contradicts the narration"
     if yes("unrelated"): return False, "nothing to do with what the narration says"
     if yes("stand_in"): return False, "a stranger would be taken for a real person the narration names"
     if not neutral:
-        why = text_unrelated(cfg, narration, str(j.get("seen") or ""), log)
+        why = text_unrelated(cfg, narration, str(j.get("seen") or ""), log, story)
         if why: return False, f"unrelated to the narration ({why})"
     return True, ""
 
 
-def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None, narration="", guard=None, mainv=None, place="", neutral=False):
+def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None, narration="", guard=None, mainv=None, place="", neutral=False, story=""):
     """-> (ok, reason, seen). Generic slots: hard checks + no visible third-party brand.
     Subject-locked slots: the clip must positively match the subject (brand evidence and the vision model agreeing with a reference photo)."""
     from PIL import Image, ImageStat
@@ -552,7 +564,7 @@ def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None, narratio
     yes = lambda k, d: str(j.get(k, d)).strip().lower() in ("true", "yes", "1")
     seen = str(j.get("seen") or c["desc"])[:160]
     if v2:
-        ok, why = contra_verdict(cfg, j, mv, place, neutral, log, narration=narration or c.get("query", ""))
+        ok, why = contra_verdict(cfg, j, mv, place, neutral, log, narration=narration or c.get("query", ""), story=story)
         if not ok: return False, why, seen
         story_brands = [b for v in ((guard or {}).get("kinds") or {}).values() for b in v]
         other = [b for b in _brands(j) if not any(_norm_brand(sb) and (_norm_brand(sb) in _norm_brand(b) or _norm_brand(b) in _norm_brand(sb)) for sb in story_brands)]
@@ -720,6 +732,7 @@ def fill(cfg, slots, orient, need, out_dir, log, stop, want_long_side, max_secs,
     ensure_vet_model(cfg, log)
     guard = story_guard(Path(out_dir).parent, " ".join(str(x.get("text") or "") for x in slots))
     mains = beat_mains(cfg, slots, log, out_dir / "mains.json") if cfg.get("clip_check_v2", True) else {}
+    story_text = " ".join(str(x.get("narration") or x.get("text") or "") for x in slots if not x.get("cta"))[:600]
     places = [v.get("place") for v in mains.values() if v.get("place")]
     story_place = max(set(places), key=places.count) if places else ""
     if mains: log("  clip check: each clip must show the beat's main subject, the same kind of thing, and no other place than the story's"
@@ -750,7 +763,7 @@ def fill(cfg, slots, orient, need, out_dir, log, stop, want_long_side, max_secs,
                 mv = mains.get(s["id"], {})
                 ok, why, seen = verify(cfg, c, sh, log, subject=sj, ref=refs.get(sj["name"]) if sj else None, avoid=s.get("avoid"),
                                       narration=s.get("narration") or s["text"], guard=guard, mainv=mv,
-                                      place=mv.get("place") or story_place, neutral=bool(s.get("cta")))
+                                      place=mv.get("place") or story_place, neutral=bool(s.get("cta")), story=story_text)
                 if not ok:
                     log(f"  {s['id']}: skipped {c['src']} clip {cid} ({why})")
                     st.setdefault("rejected", {}).setdefault(s["id"], []).append({"id": cid, "src": c["src"], "why": why, "sheet": str(sh), "desc": c.get("desc", "")[:80],
