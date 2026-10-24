@@ -35,16 +35,17 @@ def main():
         except Exception as e:
             raw, j, ok, why = str(e), {}, None, f"error: {str(e)[:120]}"
         verdict = "KEEP" if ok else "DROP"
-        hit = verdict == c["expect"]; good += hit
+        hit = None if c["expect"] == "?" else verdict == c["expect"]; good += bool(hit)   # "?" = for a human to judge
         rows.append({"image": c["image"], "expect": c["expect"], "verdict": verdict, "pass": hit, "why": why, "main": mv,
                      "seen": j.get("seen", "") if isinstance(j, dict) else "", "secs": round(time.time() - t, 1), "raw": raw[:600]})
-        log(f"{'PASS' if hit else 'FAIL'} {c['image']}: expect {c['expect']}, got {verdict} {('(' + why + ')') if why else ''}")
+        log(f"{'REVIEW' if hit is None else 'PASS' if hit else 'FAIL'} {c['image']}: expect {c['expect']}, got {verdict} {('(' + why + ')') if why else ''}")
     footage.unload_vet_model(cfg)
     (d / "report.json").write_text(json.dumps(rows, indent=1), encoding="utf-8")
-    md = [f"# Clip check regression: {good}/{len(rows)} pass", "", "| case | expect | got | why | main subject | seen |", "|---|---|---|---|---|---|"]
-    md += [f"| {r['image']} | {r['expect']} | {r['verdict']}{'' if r['pass'] else ' FAIL'} | {r['why']} | {r['main'].get('main', '')} / {r['main'].get('place', '')} | {r['seen'][:90]} |" for r in rows]
+    scored = [r for r in rows if r["pass"] is not None]
+    md = [f"# Clip check regression: {good}/{len(scored)} pass ({len(rows) - len(scored)} for review)", "", "| case | expect | got | why | main subject | seen |", "|---|---|---|---|---|---|"]
+    md += [f"| {r['image']} | {r['expect']} | {r['verdict']}{' (review)' if r['pass'] is None else '' if r['pass'] else ' FAIL'} | {r['why']} | {r['main'].get('main', '')} / {r['main'].get('place', '')} | {r['seen'][:90]} |" for r in rows]
     (d / "report.md").write_text("\n".join(md), encoding="utf-8")
-    print(f"{good}/{len(rows)} pass")
+    print(f"{good}/{len(scored)} pass, {len(rows) - len(scored)} for review")
 
 
 if __name__ == "__main__":
