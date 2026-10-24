@@ -28,6 +28,7 @@ from pathlib import Path
 from . import media
 
 VIDEO_EXT = (".mov", ".mp4", ".m4v", ".mkv")
+CUT_VERSION = "3"   # bump when the way parts are cut changes, so cached parts are made again
 PLAN = """You edit a documentary from the creator's OWN interview footage. The interview audio is the star: viewers should mostly
 hear the people on camera. Your narration only bridges: a hook, where we are, a line between topics, a closing line.
 
@@ -366,7 +367,7 @@ def cut_bite_framed(src, t0, t1, out, kind, flip, an, cuts, log=print):
     segs, lst = [], tmpd / "v.txt"
     for n, (a, b, k, g, tilt) in enumerate(shots.plan_shots(an, t0, t1)):
         v = tmpd / f"s{n:02}.mp4"; d = b - a
-        if k == "self":   # cutaway: the sound goes on, the picture shows the guest elsewhere / B-roll
+        if k in ("self", "empty"):   # cutaway: the sound goes on, the picture shows the guest elsewhere / B-roll
             f, st, fl, gb, rot = cuts.take(d)
             vf = (rot + "," if rot else "") + shots.vf_frame(kind, gb, 0.0, fl)
             media.ff("-ss", f"{st:.2f}", "-i", f, "-t", f"{d:.2f}", "-an", "-vf", vf, *ENC[:6], v, timeout=900)
@@ -548,7 +549,7 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
         sp = short_plan(cfg, segs, pl, context, notes, work, log) if kind == "short" and cfg.get("interview_short_pass", True) else None
         items = (_items(sp) if sp else _items(pl.get("short") or {})) if kind == "short" else [x for c in pl["documentary"]["chapters"] for x in c.get("items", [])]
         import hashlib   # cuts are cached per plan: a changed plan never reuses another plan's numbered parts
-        kd = work / f"{kind}_{hashlib.md5(json.dumps(items, sort_keys=True).encode()).hexdigest()[:6]}"; kd.mkdir(exist_ok=True)
+        kd = work / f"{kind}_{hashlib.md5((CUT_VERSION + json.dumps(items, sort_keys=True)).encode()).hexdigest()[:6]}"; kd.mkdir(exist_ok=True)
         parts, rnd = [], random.Random(7)
         from . import tts
         batch = [(it["narr"], kd / "narr" / f"n{k}.wav") for k, it in enumerate(items) if it.get("narr")] + \

@@ -56,10 +56,27 @@ def _tilt(cv2, np, g):
     devs.sort(); return float(devs[len(devs) // 2])
 
 
+def _plain(cv2, np, g):
+    """Share of the picture with almost no detail (a car ceiling, a blank wall): 16-px blocks whose texture is flat."""
+    lap = np.abs(cv2.Laplacian(g, cv2.CV_32F))
+    h, w = lap.shape; bs = 16
+    blocks = lap[:h - h % bs, :w - w % bs].reshape(h // bs, bs, w // bs, bs).mean(axis=(1, 3))
+    return float((blocks < 4.0).mean())
+
+
 def analyze(src, work, flip=True, log=print):
     """-> {"secs": [{"t", "faces": [[cx, cy, w, h]], "tilt"}]} cached in work/faces.json."""
     out = Path(work) / "faces.json"
-    if out.exists(): return json.loads(out.read_text(encoding="utf-8"))
+    if out.exists():
+        res = json.loads(out.read_text(encoding="utf-8"))
+        if res.get("secs") and "plain" not in res["secs"][0]:   # older analysis: add the plain-picture measure
+            cv2, np = _cv(); fd = Path(work) / "frames1s"
+            if cv2 and fd.is_dir():
+                for sec in res["secs"]:
+                    im = cv2.imread(str(fd / f"{sec['t'] + 1:05d}.jpg"))
+                    sec["plain"] = round(_plain(cv2, np, cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)), 2) if im is not None else 0
+                out.write_text(json.dumps(res), encoding="utf-8")
+        return res
     cv2, np = _cv()
     if not cv2: return {"secs": []}
     fd = Path(work) / "frames1s"; fd.mkdir(parents=True, exist_ok=True)
@@ -71,7 +88,8 @@ def analyze(src, work, flip=True, log=print):
         im = cv2.imread(str(f))
         if im is None: continue
         g = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
-        secs.append({"t": int(f.stem) - 1, "faces": [[round(v, 3) for v in b] for b in _faces(cv2, g)], "tilt": round(_tilt(cv2, np, g), 1)})
+        secs.append({"t": int(f.stem) - 1, "faces": [[round(v, 3) for v in b] for b in _faces(cv2, g)], "tilt": round(_tilt(cv2, np, g), 1),
+                     "plain": round(_plain(cv2, np, g), 2)})
     res = {"secs": secs}
     out.write_text(json.dumps(res), encoding="utf-8")
     log(f"  framing: {len(secs)} s analysed; holder close-ups in {sum(1 for s in secs if kind_of(s) == 'self')} s")
@@ -83,6 +101,7 @@ def kind_of(s):
     small = [f for f in s["faces"] if f[2] * f[3] < SELF_AREA]
     if small: return "guest"
     if big: return "self"
+    if s.get("plain", 0) > 0.6: return "empty"   # a car ceiling / blank wall: covered by a cutaway like the holder's face
     return "none"
 
 
@@ -153,7 +172,7 @@ def orient(clip, work, log=print):
     except (OSError, ValueError): known = {}
     key = Path(clip).name
     if key in known: return known[key]
-    cv2, np = _cv(); best = ""
+    cv2, np = _cv(); best = ""; score = {}
     if cv2:
         tmp = Path(work) / "_orient.jpg"; score = {"": 0, "transpose=1": 0, "transpose=2": 0}
         try:
@@ -167,10 +186,26 @@ def orient(clip, work, log=print):
             best = max(score, key=score.get) if max(score.values()) > score[""] else ""
         except Exception:
             best = ""
+    if cv2 and not best and score and max(score.values()) == 0:   # no faces to go by: ask the local vision model once
+        best = _orient_vision(clip, work)
     known[key] = best
     cache.write_text(json.dumps(known, indent=1), encoding="utf-8")
     if best: log(f"    {key}: filmed sideways, turned upright ({best})")
     return best
+
+
+def _orient_vision(clip, work):
+    try:
+        from . import config, footage
+        cfg = dict(config.load())
+        if cfg.get("vet_provider", "local") in ("off", "", None): cfg["vet_provider"] = "local"
+        tmp = Path(work) / "_orient_v.jpg"
+        media.ff("-ss", f"{media.dur(clip) / 2:.2f}", "-i", clip, "-frames:v", 1, "-vf", "scale=640:-2", tmp, timeout=120)
+        a = str(footage._vision(cfg, tmp, "Is this photo upright? Look at the floor, ceiling, doors, people and text. Answer with one word: "
+                                     "upright, clockwise (it must be turned clockwise to be upright) or counterclockwise.")).lower()
+        return "transpose=1" if "counter" not in a and "clockwise" in a else "transpose=2" if "counter" in a else ""
+    except Exception:
+        return ""
 
 
 def cutaway_pool(an, used, min_len=3.0):
