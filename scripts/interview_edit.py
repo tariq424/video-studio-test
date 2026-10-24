@@ -1,6 +1,7 @@
 """Run an interview edit (app/studio/interview.py) on your own footage.
 Args file (JSON): {"src": "F:\\\\bermuda\\\\clip.MOV", "work": "F:\\\\videos\\\\interview\\\\bermuda", "name": "bermuda",
-                   "context": "who / where / what", "kinds": ["short", "documentary"], "flip": true}
+                   "context": "who / where / what", "kinds": ["short", "documentary"], "flip": true,
+                   "version": "v2" (subfolder for this plan), "notes": [{"fact": "...", "source": "url"}] (checked context facts)}
 Run: python scripts/interview_edit.py <args.json>   (log: <work>\\interview.log)"""
 import json
 import sys
@@ -20,7 +21,7 @@ def main():
     cfg = config.load()
     try:
         outs = interview.build(cfg, a["src"], work, a.get("context", ""), log, tuple(a.get("kinds") or ("short", "documentary")),
-                               bool(a.get("flip", True)), a.get("name", "interview"))
+                               bool(a.get("flip", True)), a.get("name", "interview"), a.get("version", ""), a.get("notes"))
         log(f"DONE: {outs}")
     except Exception as e:
         import traceback

@@ -38,19 +38,29 @@ Transcript, numbered segments with times (seconds from the start of the footage)
 
 Other clips in the same folder you may use as B-roll under narration (name: seconds): {broll}
 
+Research notes (checked facts with sources; the ONLY facts you may add beyond the transcript):
+{notes}
+
 Write JSON only:
 {{
  "title": "a YouTube title, under 70 characters, honest, no clickbait",
  "short": {{"items": [ ... ]}},
  "documentary": {{"chapters": [{{"title": "chapter title", "items": [ ... ]}}, ...]}}
 }}
-Each item is either {{"bite": [first_segment, last_segment]}} (consecutive segments played with their own audio) or
-{{"narr": "one or two short sentences", "broll": "a clip name from the list, or empty"}}.
+Each item is one of:
+  {{"bite": [first_segment, last_segment]}}  consecutive segments played with their own audio (the main thing);
+  {{"narr": "one or two short sentences", "broll": "a clip name from the list, or empty"}}  a bridge;
+  {{"insert": "one or two sentences of context", "note": <research note number>, "visual": "what a photo for it should show,
+    3-8 words (e.g. 'Sea Venture shipwreck painting', 'Hamilton Bermuda harbour')", "card": "optional on-screen fact, under 40
+    characters (e.g. '~1,000 Muslims, 0.8% of Bermuda')"}}  a short context tidbit right after the soundbite it explains.
 Rules:
 - short: {short_secs} seconds or less in total; open with the single most striking soundbite or a one-line hook, 3-6 soundbites.
 - documentary: {doc_min}-{doc_max} minutes in total, 3-6 chapters in a sensible order (you may rearrange the footage's order).
 - Soundbites: complete thoughts (start and end at sentence boundaries), each 6-60 seconds; skip small talk, dead air,
   directions, repeated points and anything the speaker would not want aired (private details, addresses, phone numbers).
+- Context inserts: sparingly, only where a soundbite raises a question a viewer would have (history, numbers, what happened
+  next). short: at most 1; documentary: at most one per chapter. Every insert uses exactly one research note and says only what
+  that note says. Narration and inserts together stay under 25% of the runtime; the interview stays the main driver.
 - Narration: at most 15% of the runtime, first person plural is fine ("we"), never invent facts that are not in the transcript
   or the creator's note, respectful and warm toward the people and their faith; light humour only at our own expense.
 - Never put words in anyone's mouth; a soundbite is exactly what was said."""
@@ -98,7 +108,7 @@ def broll_list(src):
     return out
 
 
-def plan(cfg, segs, context, broll, work, log=print, short_secs=90, doc_min=8, doc_max=12):
+def plan(cfg, segs, context, broll, work, log=print, short_secs=90, doc_min=8, doc_max=12, notes=None):
     out = Path(work) / "plan.json"
     if out.exists(): return json.loads(out.read_text(encoding="utf-8"))
     lines = "\n".join(f"[{s['i']}] {s['start']:.0f}-{s['end']:.0f}: {s['text']}" for s in segs)
@@ -114,6 +124,7 @@ def plan(cfg, segs, context, broll, work, log=print, short_secs=90, doc_min=8, d
     with LLM(dict(cfg), log, lambda: False) as llm:
         j = llm.chat_json("You are an award-winning documentary editor. Reply with JSON only.",
                           PLAN.format(context=context, segments=lines[:60000], broll=json.dumps(broll), short_secs=short_secs,
+                                      notes="\n".join(f"[{i}] {n['fact']}" for i, n in enumerate(notes or [])) or "(none)",
                                       doc_min=doc_min, doc_max=doc_max), max_tokens=6000, check=check)
     out.write_text(json.dumps(j, indent=1, ensure_ascii=False), encoding="utf-8")
     return j
@@ -165,6 +176,43 @@ def _vf(kind, xc=None, zoom=1.0, flip=True):
     return ",".join(f)
 
 
+def commons_photo(query, out, log=print):
+    """A freely licensed photo from Wikimedia Commons for the query, with its credit. -> (path, credit) or (None, "")."""
+    import requests
+    UA = {"User-Agent": "VideoStudio/1.0 (interview edit; contact via YouTube channel)"}
+    try:
+        r = requests.get("https://commons.wikimedia.org/w/api.php", headers=UA, timeout=30, params={
+            "action": "query", "format": "json", "generator": "search", "gsrsearch": f"{query} filetype:bitmap", "gsrnamespace": 6,
+            "gsrlimit": 10, "prop": "imageinfo", "iiprop": "url|size|mime|extmetadata", "iiurlwidth": 1600,
+            "iiextmetadatafilter": "Artist|LicenseShortName"})
+        pages = sorted((r.json().get("query") or {}).get("pages", {}).values(), key=lambda p: p.get("index", 99))
+        for pg in pages:
+            ii = (pg.get("imageinfo") or [{}])[0]
+            if ii.get("mime") not in ("image/jpeg", "image/png") or (ii.get("width") or 0) < 800: continue
+            meta = ii.get("extmetadata") or {}
+            lic = re.sub(r"<.*?>", "", (meta.get("LicenseShortName") or {}).get("value", "")).strip()
+            if not lic or not re.search(r"CC|Public domain|PD", lic, re.I): continue
+            artist = re.sub(r"<.*?>", "", (meta.get("Artist") or {}).get("value", "")).strip()[:60] or "Wikimedia Commons"
+            img = requests.get(ii.get("thumburl") or ii["url"], headers=UA, timeout=60); img.raise_for_status()
+            Path(out).write_bytes(img.content)
+            _log(log, f"    Commons photo for '{query}': {pg.get('title', '')[:70]} ({lic})")
+            return out, f"Photo: {artist} / Wikimedia Commons, {lic}"
+    except Exception as e:
+        _log(log, f"    Commons search failed ({str(e)[:80]})")
+    return None, ""
+
+
+def still_part(img, wav, out, kind):
+    """A still with a slow push-in (CPU) under the narration."""
+    w, h = (1080, 1920) if kind == "short" else (1920, 1080)
+    d = media.dur(wav) + 0.35; n = int(d * 30) + 1
+    vf = (f"scale={w * 2}:{h * 2}:force_original_aspect_ratio=increase,crop={w * 2}:{h * 2},"
+          f"zoompan=z='min(zoom+0.0006,1.10)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={n}:s={w}x{h}:fps=30,format=yuv420p,setsar=1")
+    media.ff("-loop", 1, "-i", img, "-i", wav, "-t", f"{d:.2f}", "-map", "0:v:0", "-map", "1:a:0", "-vf", vf,
+             "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,apad", *ENC, "-shortest", out, timeout=900)
+    return out
+
+
 ENC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"]
 
 
@@ -202,6 +250,8 @@ ScaledBorderAndShadow: yes
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Cap,Arial,{fs},&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,1,0,0,0,100,100,0,0,1,5,2,2,{ml},{ml},{mv},1
 Style: Narr,Arial,{fs},&H0066E0FF,&H0066E0FF,&H00000000,&H96000000,1,1,0,0,100,100,0,0,1,5,2,2,{ml},{ml},{mv},1
+Style: Credit,Arial,{cs},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,1,7,30,30,30,1
+Style: Card,Arial,{ks},&H00FFFFFF,&H00FFFFFF,&H00000000,&HA0000000,1,0,0,0,100,100,0,0,3,18,0,5,60,60,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -227,18 +277,21 @@ def assemble(parts, out, kind, work, cfg, log=print, title=""):
     """parts: [{"file", "words": [(w, start, end)] relative to the part, "style": "Cap"|"Narr"}]."""
     w, h = (1080, 1920) if kind == "short" else (1920, 1080)
     fs, ml, mv, maxw = (70, 90, 430, 5) if kind == "short" else (54, 160, 60, 9)
+    cs, ks = (30, 76) if kind == "short" else (24, 64)
     ev, t = [], 0.0
     lst = Path(work) / f"{kind}_concat.txt"
     with open(lst, "w", encoding="utf-8") as fh:
         for p in parts:
             fh.write(f"file '{Path(p['file']).as_posix()}'\n")
             d = media.dur(p["file"])
+            if p.get("credit"): ev.append(f"Dialogue: 1,{_t(t)},{_t(t + d)},Credit,,0,0,0,,{p['credit']}\n")
+            if p.get("card"): ev.append(f"Dialogue: 1,{_t(t + 0.3)},{_t(t + d - 0.2)},Card,,0,0,0,,{{\\fad(200,200)}}{p['card']}\n")
             for txt, a, b in _caption_lines(p.get("words") or [], maxw):
                 if a >= d: break
                 ev.append(f"Dialogue: 0,{_t(t + a)},{_t(t + min(b + 0.15, d))},{p.get('style', 'Cap')},,0,0,0,,{{\\fad(80,60)}}{txt}\n")
             t += d
     ass = Path(work) / f"{kind}.ass"
-    ass.write_text(ASS.format(w=w, h=h, fs=fs, ml=ml, mv=mv) + "".join(ev), encoding="utf-8")
+    ass.write_text(ASS.format(w=w, h=h, fs=fs, ml=ml, mv=mv, cs=cs, ks=ks) + "".join(ev), encoding="utf-8")
     joined = Path(work) / f"_{kind}_joined.mp4"
     media.ff("-f", "concat", "-safe", 0, "-i", lst, "-c", "copy", joined, timeout=1800)
     sub = ass.as_posix().replace(":", "\\:")
@@ -256,11 +309,12 @@ def assemble(parts, out, kind, work, cfg, log=print, title=""):
 
 
 # ------------------------------------------------------------------ the whole edit
-def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), flip=True, name="interview"):
-    src = Path(src); work = Path(work); work.mkdir(parents=True, exist_ok=True)
-    segs = transcribe(src, work, log)
+def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), flip=True, name="interview", version="", notes=None):
+    src = Path(src); root = Path(work); root.mkdir(parents=True, exist_ok=True)
+    segs = transcribe(src, root, log)
+    work = root / version if version else root; work.mkdir(parents=True, exist_ok=True)
     broll = broll_list(src)
-    pl = plan(cfg, segs, context, broll, work, log)
+    pl = plan(cfg, segs, context, broll, work, log, notes=notes)
     bdir = src.parent
     outs = {}
     for kind in kinds:
@@ -290,6 +344,32 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                 except Exception: words = []
                 parts.append({"file": f, "words": words, "style": "Narr"})
                 _log(log, f"  {kind} {k:02}: narration \"{it['narr'][:60]}\"" + (f" over {br}" if br in broll else ""))
+            elif it.get("insert"):   # a context tidbit: narration over a Commons photo (credited), else over your footage
+                from . import tts, captions
+                wav = kd / "narr" / f"i{k}.wav"; wav.parent.mkdir(exist_ok=True)
+                tts.kokoro_batch(cfg, [(it["insert"], wav)], log, "interview context")
+                f = kd / f"{k:02}_insert.mp4"; credit = ""
+                if not media.ok(f, 0.5):
+                    img, credit = commons_photo(str(it.get("visual") or it["insert"])[:80], kd / f"{k:02}_photo.jpg", log)
+                    if img: still_part(img, wav, f, kind)
+                    else:
+                        nxt = next((x for x in items[k + 1:] if "bite" in x), None)
+                        st = segs[int(nxt["bite"][0])]["start"] if nxt else segs[-1]["start"]
+                        d = media.dur(wav) + 0.35
+                        media.ff("-ss", f"{st:.2f}", "-i", src, "-i", wav, "-t", f"{d:.2f}", "-map", "0:v:0", "-map", "1:a:0",
+                                 "-vf", _vf(kind, None, 1.0, flip) + ",boxblur=12", "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,apad", *ENC, "-shortest", f, timeout=900)
+                    (kd / f"{k:02}_insert.json").write_text(json.dumps({"credit": credit}), encoding="utf-8")
+                else:
+                    try: credit = json.loads((kd / f"{k:02}_insert.json").read_text(encoding="utf-8")).get("credit", "")
+                    except Exception: credit = ""
+                try: words = captions.word_times(wav, it["insert"])
+                except Exception: words = []
+                note = (notes or [{}] * 99)[int(it.get("note", 0))] if notes and str(it.get("note", "")).isdigit() and int(it["note"]) < len(notes) else {}
+                parts.append({"file": f, "words": words, "style": "Narr", "credit": credit, "card": str(it.get("card") or "")[:48],
+                              "source": note.get("source", "")})
+                _log(log, f"  {kind} {k:02}: context \"{it['insert'][:60]}\"" + (f" [{credit}]" if credit else " (over blurred footage)"))
         outs[kind] = assemble(parts, work / f"{name}_{kind}.mp4", kind, kd, cfg, log, pl.get("title", name))
-    (work / "result.json").write_text(json.dumps({k: str(v) for k, v in outs.items()} | {"title": pl.get("title", "")}, indent=1), encoding="utf-8")
+    srcs = sorted({n.get("source", "") for n in (notes or []) if n.get("source")})
+    (work / "sources.txt").write_text("Sources for the context notes:\n" + "\n".join(srcs), encoding="utf-8")
+    (work / "result.json").write_text(json.dumps({k: str(v) for k, v in outs.items()} | {"title": pl.get("title", ""), "sources": srcs}, indent=1), encoding="utf-8")
     return outs
