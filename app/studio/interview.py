@@ -518,7 +518,8 @@ class TripFootage:
     SCENIC = {"beach", "ocean", "sea", "water", "harbour", "harbor", "bay", "coast", "coastline", "sunset", "sky", "boat", "boats",
               "landscape", "street", "road", "houses", "house", "town", "view", "island", "palm", "trees", "garden", "cliff", "lighthouse"}
     SKIP = {"airplane", "airport", "plane", "aircraft", "cabin", "seat", "hotel room", "bed", "bathroom", "screenshot", "phone", "menu",
-            "selfie", "receipt", "document", "screen"}
+            "selfie", "receipt", "document", "screen", "hotel", "guest room", "ironing", "couch", "sofa", "bedroom", "dimly lit",
+            "traveller", "traveler", "tourist"}   # (the catalogue calls the person filming "the traveller": that is you)
     STOP = set("the a an and or of in on at to for with from by is are was were this that these those it its he she they them his her their "
                "what who where when how very just like yeah okay oh so but not no yes there here have has had be been do does did will "
                "would can could about over into up down out all some many more most also bermuda".split())
