@@ -30,7 +30,7 @@ say "1/10 system packages (sudo password once)"
 sudo -v </dev/tty
 sudo apt-get update -qq || true
 PKGS="git curl wget gpg jq python3-venv python3-pip python3-dev ffmpeg espeak-ng avahi-daemon libnss3 libatk-bridge2.0-0 libgbm1
-      libasound2t64 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libpango-1.0-0 libcairo2 libcups2 libdrm2 fonts-dejavu-core gh"
+      libasound2t64 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libpango-1.0-0 libcairo2 libcups2 libdrm2 fonts-dejavu-core fonts-noto-color-emoji fonts-liberation gh"
 command -v node >/dev/null || PKGS="$PKGS nodejs"
 command -v npm >/dev/null || PKGS="$PKGS npm"
 MISSING=""; for p in $PKGS; do dpkg -s "$p" >/dev/null 2>&1 || MISSING="$MISSING $p"; done
@@ -130,6 +130,8 @@ json.dump(d, open(p, "w"), indent=1)
 print("   image services on the laptop:", " -> ".join(d["imagegen_providers"]))
 PY
 
+# fonts the captions need (also on a resumed run: emoji icons, an Arial look-alike)
+for f in fonts-noto-color-emoji fonts-liberation; do dpkg -s "$f" >/dev/null 2>&1 || sudo apt-get install -y -qq "$f" >/dev/null 2>&1 || echo "   ($f did not install)"; done
 say "9/10 helper commands: vs-login (sign in to ChatGPT / Bing once), vs-sync (code + music from the PC now)"
 mkdir -p "$HOME/.local/bin"
 cat > "$HOME/.local/bin/vs-login" <<'EOF'

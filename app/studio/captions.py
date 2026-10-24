@@ -5,6 +5,8 @@ from pathlib import Path
 
 STOP = set("the a an and or but of to in on for with at by from is are was were be been it this that these those as not no so if then than too very just about into over under more most less can could would should will may might do does did have has had you your we our they their he his she her i me my them what which who how why when where there here all any some such only own same other its it's".split())
 EMOJI_FONT = r"C:\Windows\Fonts\seguiemj.ttf"
+# (path, size): Windows' Segoe emoji, else Linux's Noto Color Emoji (a bitmap font: it only opens at size 109)
+EMOJI_FONTS = ((EMOJI_FONT, 120), ("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf", 109), ("NotoColorEmoji.ttf", 109))
 
 def _norm(w): return re.sub(r"[^a-z0-9]", "", w.lower())
 
@@ -92,7 +94,11 @@ def pick_emojis(cfg, caps, log):
 
 def emoji_png(e, out, size=130):
     from PIL import Image, ImageDraw, ImageFont
-    f = ImageFont.truetype(EMOJI_FONT, 120)
+    f = None
+    for path, sz in EMOJI_FONTS:
+        try: f = ImageFont.truetype(path, sz); break
+        except OSError: pass
+    if f is None: return False   # no colour-emoji font on this machine (the Linux laptop without fonts-noto-color-emoji): no emoji
     im = Image.new("RGBA", (300, 300), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
     d.text((60, 60), e, font=f, embedded_color=True)
     bb = im.getbbox()
