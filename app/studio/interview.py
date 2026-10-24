@@ -267,7 +267,21 @@ def _vf(kind, xc=None, zoom=1.0, flip=True):
 
 
 def commons_photo(query, out, log=print):
-    """A freely licensed photo from Wikimedia Commons for the query, with its credit. -> (path, credit) or (None, "")."""
+    """A freely licensed photo from Wikimedia Commons: each suggestion in the query (split at ';'), then shorter forms of it.
+    -> (path, credit) or (None, "")."""
+    tries = []
+    for q in [x.strip() for x in re.split(r"[;|]", str(query)) if x.strip()]:
+        words = [w for w in re.findall(r"[A-Za-z0-9']+", q) if w.lower() not in ("of", "the", "a", "an", "and", "on", "in", "with", "showing")]
+        for t in (q, " ".join(words[:4]), " ".join(words[:2])):
+            if t and t not in tries: tries.append(t)
+    for n, q in enumerate(tries[:8]):
+        if n: time.sleep(1.5)   # Commons rate-limits bursts (429)
+        got = _commons_one(q, out, log)
+        if got[0]: return got
+    return None, ""
+
+
+def _commons_one(query, out, log=print):
     import requests
     UA = {"User-Agent": "VideoStudio/1.0 (interview edit; contact via YouTube channel)"}
     try:
