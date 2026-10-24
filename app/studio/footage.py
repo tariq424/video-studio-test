@@ -355,10 +355,12 @@ def make_check(cfg, c, sheet_path, guard, narration, log):
 #  - a specific subject must be the same LOOK (make/model/livery: the reference-photo check + the make check);
 #  - a recognisable place must be the story's place (no London skyline in a Cyprus story; the closing card shows no place at all);
 #  - mood, stand-in people, overlays, screen captures and cuts as before.
-MAINS = """For each numbered narration line of a news video, name what a matching shot must SHOW.
-"main": the concrete thing on screen, 2-6 words ("beachfront apartment buildings", "a fountain pen", "an electric car", "a cat");
-        "" when the line is abstract (numbers, opinions, a summary) and no particular thing must be shown.
-"kind": the general kind of that thing in 1-3 words ("buildings", "car", "pen", "cat"), "" when main is "".
+MAINS = """For each numbered narration line of a news video, name the physical thing a stock video clip for it must SHOW.
+"main": a filmable, physical thing the line is literally about, 2-6 words, no brand names ("beachfront apartment buildings",
+        "a fountain pen", "an electric car", "a cat", "a container ship"). Write "" when the line is about something stock
+        footage can't film: a company, a brand, an app, a chatbot, a logo, a chart, a report, money, a deal, a policy, numbers,
+        an opinion or a summary.
+"kind": the general kind of that thing in 1-3 words ("buildings", "car", "pen", "cat", "ship"), "" when main is "".
 "place": the country / city / region the line is set in, if the story says so ("Cyprus", "Shanghai"), else "".
 Story so far: {story}
 Lines:
@@ -421,6 +423,7 @@ def place_ok(cfg, seen, story_place, log=print):
     except on the closing card). Cached; asks the script AI only when the names don't already match."""
     if _none(seen): return True
     if not story_place: return True
+    if not re.search(r"\b[A-Z][a-z]", seen): return True   # "suburban neighborhood", "a city": not a place anyone can name
     a, b = _subject_words([seen]), _subject_words([story_place])
     if a & b: return True
     key = (seen.lower(), story_place.lower())
@@ -437,7 +440,15 @@ def place_ok(cfg, seen, story_place, log=print):
 
 _KIND_SYN = {"car": {"car", "sedan", "saloon", "hatchback", "suv", "coupe", "convertible", "electric car", "ev", "estate", "wagon", "crossover", "taxi", "vehicle"},
              "pen": {"pen", "fountain pen"}, "cat": {"cat", "kitten"}, "dog": {"dog", "puppy"},
-             "buildings": {"building", "buildings", "apartment", "apartments", "house", "houses", "villa", "villas", "hotel", "tower", "towers", "property", "homes", "home", "skyline"}}
+             "buildings": {"property", "properties", "building", "buildings", "apartment", "apartments", "house", "houses", "villa", "villas", "hotel", "tower", "towers", "property", "homes", "home", "skyline"}}
+
+
+def kind_match(kind, shown):
+    """The clip shows something of the beat's kind (sedan for car, apartment block for buildings)."""
+    if _none(kind) or _none(shown): return False
+    k = kind.lower().strip(); syn = _KIND_SYN.get(k.rstrip("s") if k.rstrip("s") in _KIND_SYN else k, {k, k.rstrip("s")})
+    words = set(re.findall(r"[a-z]+", shown.lower()))
+    return bool(words & syn or any(w.rstrip("s") in syn for w in words))
 
 
 def kind_clash(kind, shown, main=""):
@@ -468,7 +479,8 @@ def contra_verdict(cfg, j, mainv, narration_place="", neutral=False, log=print):
     seen_place = str(j.get("place_seen") or "none").strip()
     if neutral and not _none(seen_place): return False, f"shows a recognisable place ({seen_place[:40]}); the closing card stays neutral"
     if not place_ok(cfg, seen_place, place, log): return False, f"shows {seen_place[:40]}; the story is set in {place}"
-    if main and str(j.get("main_visible", "unclear")).strip().lower() == "no": return False, f"doesn't show {main}"
+    if main and str(j.get("main_visible", "unclear")).strip().lower() == "no" and not kind_match(kind, str(j.get("kind_shown") or "")):
+        return False, f"doesn't show {main}"
     if kind_clash(kind, str(j.get("kind_shown") or ""), main): return False, f"shows a {str(j.get('kind_shown'))[:30]}, not {main or kind}"
     if yes("mood_clash"): return False, "the mood contradicts the narration"
     if yes("stand_in"): return False, "a stranger would be taken for a real person the narration names"

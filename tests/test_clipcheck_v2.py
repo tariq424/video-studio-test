@@ -53,3 +53,10 @@ def test_hold_previous():
     S.hold_previous(beats, out, {}, tm, {}, lambda m: None)
     assert out["b1"][0]["rung"] == "hold previous" and out["b1"][0]["layers"] == ["a.png"]
     assert out["b2"][0]["rung"] == "headline"   # too long to hold: the card stays
+
+
+def test_main_seen_by_kind_even_if_model_says_no():
+    beach = {"main": "beachfront property", "kind": "property", "place": "Cyprus"}
+    assert v({"main_visible": "no", "kind_shown": "apartment building", "place_seen": "none"}, beach)[0]
+    assert not v({"main_visible": "no", "kind_shown": "none", "place_seen": "none"}, beach)[0]
+    assert F.place_ok({}, "suburban neighborhood", "China")   # not a nameable place
