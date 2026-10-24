@@ -6,7 +6,11 @@ the call is built from the Space's own API description: the image input gets the
 narration, everything else keeps the Space's default. scripts/talking_head_probe.py finds Spaces that work today and
 prints the list to put in settings. Optional: any failure leaves the Short as it was (never fails the job).
 
-Settings: talking_head ("hf" | "off"), talking_head_spaces, talking_head_max_secs (10), talking_head_timeout (600),
+Engines (talking_head): "wangp" = this PC's WanGP (LTX-2 with the narration as the audio guide, the same model the explainer
+presenter uses; local GPU, no quota, started on demand and stopped afterwards), "hf" = Hugging Face Spaces, "off".
+"wangp" falls back to "hf" when WanGP isn't installed (the Linux laptop). It only runs for a Short with "presenter" ticked.
+
+Settings: talking_head ("wangp" | "hf" | "off"), talking_head_spaces, talking_head_max_secs (10), talking_head_timeout (600),
 presenter_image ("" = one presenter photo made once with Hugging Face FLUX and kept next to the jobs folder)."""
 import json
 import re
@@ -23,8 +27,38 @@ PRESENTER_PROMPT = ("Head and shoulders portrait of a friendly news presenter in
 VIDEO_EXT = (".mp4", ".webm", ".mov", ".mkv")
 
 
+def engine(cfg):
+    return str(cfg.get("talking_head", "wangp")).lower()
+
+
 def enabled(cfg):
-    return str(cfg.get("talking_head", "hf")).lower() == "hf"
+    return engine(cfg) in ("hf", "wangp")
+
+
+def wangp_clip(img, audio, out, cfg, log, stop=lambda: False):
+    """This PC's WanGP: presenter photo + narration (audio guide) -> lip-synced clip. Raises on failure."""
+    import math
+    from .wangp import WanGP
+    wg = WanGP(cfg)
+    if not wg.alive(): raise RuntimeError("WanGP is not installed or reachable on this computer")
+    secs = media.dur(audio)
+    frames = int(math.ceil(secs * 24 / 8)) * 8 + 1
+    best, best_s = None, -1.0
+    with wg.hold():
+        for t in range(2):
+            r = wg.gen({"model_type": cfg.get("talking_head_model") or cfg.get("video_model", "ltx2_distilled"),
+                        "prompt": cfg.get("presenter_prompt", ""), "image_prompt_type": "S", "image_start": str(img),
+                        "audio_prompt_type": "A", "audio_scale": 1, "audio_guide": str(audio), "resolution": "832x480",
+                        "video_length": frames, "num_inference_steps": 8, "seed": 7100 + t}, log, "talking head", stop=stop)
+            if not r.get("ok"): continue
+            sc = media.mouth_score(r["file"])
+            if sc > best_s: best, best_s = r["file"], sc
+            if sc >= 10: break
+            log(f"  talking head: mouth barely moves (score {sc:.1f}), re-rendering")
+    if not best: raise RuntimeError(f"WanGP gave no clip ({str(r.get('err', ''))[:150]})")
+    shutil.copy(best, out)
+    log(f"  talking head: WanGP clip {secs:.1f}s, mouth score {best_s:.1f}")
+    return out
 
 
 def _client(space, cfg):
@@ -98,8 +132,17 @@ def call(space, img, audio, out, cfg, log, timeout=None):
 
 
 def make(img, audio, out, cfg, log):
-    """Try the configured Spaces in order. -> (out, space)."""
+    """The configured engine: WanGP (falls back to the Spaces when WanGP isn't there), else the Spaces in order. -> (out, engine)."""
     errs = []
+    if engine(cfg) == "wangp":
+        t0 = time.time()
+        try:
+            wangp_clip(img, audio, out, cfg, log)
+            log(f"  talking head: WanGP OK in {time.time() - t0:.0f}s")
+            return out, "WanGP (this PC)"
+        except Exception as e:
+            msg = " ".join(str(e).split())[:200]; errs.append(f"WanGP: {msg}")
+            log(f"  talking head: WanGP failed ({msg}); trying Hugging Face")
     for space in cfg.get("talking_head_spaces") or SPACES:
         t0 = time.time()
         try:
@@ -109,7 +152,7 @@ def make(img, audio, out, cfg, log):
         except Exception as e:
             msg = " ".join(str(e).split())[:200]
             errs.append(f"{space}: {msg}"); log(f"  talking head: {space} failed after {time.time() - t0:.0f}s ({msg})")
-    raise RuntimeError("no Hugging Face talking-head Space worked: " + " | ".join(errs)[:600])
+    raise RuntimeError("no talking-head engine worked: " + " | ".join(errs)[:600])
 
 
 def presenter_photo(cfg, log):

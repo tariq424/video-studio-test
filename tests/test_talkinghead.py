@@ -57,3 +57,14 @@ def test_overlay_and_failure(monkeypatch):
     monkeypatch.setattr(talkinghead, "make", lambda *a: (_ for _ in ()).throw(RuntimeError("quota")))
     talkinghead.overlay_short(job, {}, {}, mp4, logs.append)
     assert mp4.read_bytes() == before and not json.loads((job / "short" / "talkinghead" / "talkinghead.json").read_text())["ok"]
+
+
+def test_wangp_engine_falls_back_to_spaces(tmp_path, monkeypatch):
+    from studio import talkinghead as T
+    calls = []
+    def bad(*a, **k): calls.append("wangp"); raise RuntimeError("WanGP is not installed or reachable on this computer")
+    def space(sp, img, audio, out, cfg, log, timeout=None): calls.append(sp); Path(out).write_bytes(b"x"); return out
+    monkeypatch.setattr(T, "wangp_clip", bad); monkeypatch.setattr(T, "call", space)
+    out, eng = T.make("p.jpg", "a.wav", tmp_path / "o.mp4", {"talking_head": "wangp", "talking_head_spaces": ["a/b"]}, lambda m: None)
+    assert calls == ["wangp", "a/b"] and eng == "a/b"
+    assert T.enabled({"talking_head": "wangp"}) and T.enabled({}) and not T.enabled({"talking_head": "off"})

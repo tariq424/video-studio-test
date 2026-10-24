@@ -73,7 +73,7 @@ DEFAULTS = {
     "story_subject_guard": True,
     "clip_check_v2": True,           # clip check: reject only for a contradiction (main subject missing, other kind, other place, mood)      # every vehicle/aircraft/product shot must be the story's make (closer look); wrong-side interiors dropped
     "jokes_per_beat": [0.5, 0.3, 0.2],  # Shorts: chance of 1, 2 or 3 jokes in a beat (picked at random per beat; the 3:00 limit wins)
-    "talking_head": "hf",             # Shorts with "presenter" on: a Hugging Face lip-synced presenter over the hook beat ("off" = none)
+    "talking_head": "wangp",          # Shorts with "presenter" ticked: lip-synced presenter over the hook (wangp = this PC's GPU, hf = Spaces, off)
     "talking_head_spaces": [],        # Spaces to try in order ([] = talkinghead.SPACES); scripts/talking_head_probe.py finds working ones
     "talking_head_max_secs": 10,
     "presenter_image": str(ROOT / "assets" / "presenter.jpg"),

@@ -368,7 +368,9 @@ Reply with JSON only: {{"<line id>": {{"main": "...", "kind": "...", "place": ".
 CONTRA = """These are 4 frames, in order, from one short stock video clip.
 First write "seen": one sentence describing what is actually in the frames (things, people, setting, any city, skyline or landmark).
 Then answer from what you see:
-- "main_visible": is {main} clearly visible in the clip (the thing itself, not just its surroundings)? "yes", "no" or "unclear".
+- "main_visible": the narration is about {main}. Is a {kind} itself clearly in the shot? Details such as the exact location, the view
+  or the colour don't matter (a modern apartment block counts for "beachfront property"); only its surroundings without the thing
+  (empty sea, cliffs, sky) do not count. "yes", "no" or "unclear".
 - "kind_shown": the kind of {kind} the clip shows, in 1-3 words (e.g. "pickup truck", "sedan", "dog", "ballpoint pen"); "none" if no {kind} is shown.
 - "place_seen": a recognisable city, skyline, landmark or country you can identify (e.g. "London skyline", "Eiffel Tower"); "none" if you can't name one.
 - "mood_clash": true if the scene's mood plainly contradicts this narration (calm or happy scenes over a disaster, crime or crisis): "{narration}"
