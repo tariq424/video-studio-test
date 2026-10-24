@@ -155,7 +155,7 @@ def _see(cfg, img):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
     from studio import footage
     from studio.llm import parse_json
-    return parse_json(footage._vision(dict(cfg, vet_provider=cfg.get("vet_provider") or "local"), img, SEE))
+    return parse_json(footage._vision(dict(cfg, vet_provider="local"), img, SEE))   # this PC's own vision model (Ollama), no account
 
 
 def _hear(model, p, tmp):
@@ -180,7 +180,11 @@ def catalog(src, out):
     places = json.loads(pf.read_text(encoding="utf-8")).get("places", []) if pf.exists() else []
     where = {f: (pl.get("name") or {}) for pl in places for f in pl["files"]}
     cd = out / "catalog"; cd.mkdir(parents=True, exist_ok=True); tmp = out / "_tmp"; tmp.mkdir(exist_ok=True)
-    done = {json.loads(f.read_text(encoding="utf-8")).get("original_rel") for f in cd.glob("*.json")}
+    done, failed = set(), {}
+    for f in cd.glob("*.json"):
+        r = json.loads(f.read_text(encoding="utf-8"))
+        if "vision failed" in str(r.get("description", "")) or r.get("error"): failed[r.get("original_rel")] = f   # redo these
+        else: done.add(r.get("original_rel"))
     todo = [r for r in sorted(meta, key=lambda r: meta[r].get("time") or "9999") if r not in done]
     log(f"catalog: {len(todo)} file(s) to describe ({len(done)} done)")
     whisper = None
@@ -210,6 +214,8 @@ def catalog(src, out):
             rec["error"] = str(e)[:200]
         t = (m.get("time") or "")[:16].replace(":", "").replace("T", "_") or "undated"
         name = f"{t}_{slug(rec.get('place') or rec.get('area') or 'unplaced')}_{slug(rec.get('subject') or '')}_{p.stem}".replace("__", "_")
+        if rel in failed:   # the earlier failed description is replaced
+            failed[rel].unlink(missing_ok=True); failed[rel].with_suffix(".txt").unlink(missing_ok=True)
         (cd / f"{name}.json").write_text(json.dumps(rec, indent=1, ensure_ascii=False), encoding="utf-8")
         (cd / f"{name}.txt").write_text(
             f"{name}\nOriginal: {p}\nTaken: {rec['taken']}  Length: {rec['seconds']}s\nPlace: {rec['place']} ({rec['address']})\n"
