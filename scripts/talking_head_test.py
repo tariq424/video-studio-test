@@ -41,12 +41,17 @@ def main():
     dst = OUT / (mp4.stem + "_talkinghead.mp4"); shutil.copy2(mp4, dst)
     held = False; t0 = time.time()
     try:
-        if not HOLD.exists(): HOLD.write_text("talking head test", encoding="utf-8"); held = True; log("Newsroom held")
-        for i in range(720):   # up to 6 h
-            try: cur = requests.get("http://127.0.0.1:42021/api/status", timeout=10).json().get("current")
-            except Exception: cur = None
-            if not cur: break
-            if i % 10 == 0: log(f"waiting for job {cur} to finish (not touched)")
+        def current():
+            try: return requests.get("http://127.0.0.1:42021/api/status", timeout=10).json().get("current")
+            except Exception: return None
+        for i in range(1440):   # up to 12 h; the pipeline keeps working while we wait (no hold until Video Studio is idle)
+            cur = current()
+            if not cur:
+                if not HOLD.exists(): HOLD.write_text("talking head test", encoding="utf-8"); held = True; log("Video Studio idle: Newsroom held")
+                time.sleep(5)
+                if not current(): break
+                if held: HOLD.unlink(); held = False   # a job started in the gap: let it run, wait again
+            if i % 20 == 0: log(f"waiting for job {cur} to finish (not touched)")
             time.sleep(30)
         log(f"engine: {talkinghead.engine(cfg)}; Short: {mp4.name}")
         t1 = time.time(); talkinghead.overlay_short(tj, None, cfg, dst, log)
