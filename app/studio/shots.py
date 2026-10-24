@@ -170,7 +170,7 @@ def orient(clip, work, log=print):
     cache = Path(work) / "orient.json"
     try: known = json.loads(cache.read_text(encoding="utf-8"))
     except (OSError, ValueError): known = {}
-    key = Path(clip).name
+    key = Path(clip).name + "|v2"   # v2: the vision model decides when there are no faces
     if key in known: return known[key]
     cv2, np = _cv(); best = ""; score = {}
     if cv2:
