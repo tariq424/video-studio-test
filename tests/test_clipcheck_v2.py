@@ -41,3 +41,15 @@ def test_place_matching_words_needs_no_ai():
     assert F.place_ok({}, "Limassol, Cyprus seafront", "Cyprus")
     assert F.place_ok({}, "none", "Cyprus")
     assert F.place_ok({}, "Eiffel Tower", "")   # no story place: any real place is fine
+
+
+def test_hold_previous():
+    from studio import short as S
+    beats = [{"id": "b0"}, {"id": "b1"}, {"id": "b2"}]
+    out = {"b0": [{"type": "layers", "layers": ["a.png"], "rung": "imagegen"}],
+           "b1": [{"type": "graphic", "g": {"kind": "headline"}, "rung": "headline"}],
+           "b2": [{"type": "graphic", "g": {"kind": "headline"}, "rung": "headline"}]}
+    tm = {"b0": {"dur": 4}, "b1": {"dur": 2.5}, "b2": {"dur": 6}}
+    S.hold_previous(beats, out, {}, tm, {}, lambda m: None)
+    assert out["b1"][0]["rung"] == "hold previous" and out["b1"][0]["layers"] == ["a.png"]
+    assert out["b2"][0]["rung"] == "headline"   # too long to hold: the card stays

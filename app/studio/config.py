@@ -71,6 +71,7 @@ DEFAULTS = {
     "music_generate": True, "music_generate_per_day": 0,   # a new Gemini track when no library track fits the mood (0 = no daily cap)
     "short_fit_3min": False,          # True = drop beats / speed up so a Short stays under 3:00; False = a long Short just runs long
     "story_subject_guard": True,
+    "hold_previous_max_secs": 3.5,    # fallback: a beat this short that only got a text card holds the previous beat's picture (0 = off)
     "clip_check_v2": True,           # clip check: reject only for a contradiction (main subject missing, other kind, other place, mood)      # every vehicle/aircraft/product shot must be the story's make (closer look); wrong-side interiors dropped
     "jokes_per_beat": [0.5, 0.3, 0.2],  # Shorts: chance of 1, 2 or 3 jokes in a beat (picked at random per beat; the 3:00 limit wins)
     "talking_head": "wangp",          # Shorts with "presenter" ticked: lip-synced presenter over the hook (wangp = this PC's GPU, hf = Spaces, off)

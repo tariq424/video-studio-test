@@ -647,7 +647,26 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         if s["id"] in needs: finalize_safe(s, st)
         elif s["id"] not in out: _safe(log, f"{s['id']} stock", lambda: stock_beat(s))
         if dbg: save_out(); dbg.point(info(s))
+    _safe(log, "hold previous shot", lambda: hold_previous(beats, out, chs, tm, cfg, log))
     save_out()
+
+
+def hold_previous(beats, out, chs, tm, cfg, log):
+    """Last rung before a text card (owner, 2026-10-23): a short beat that only got a headline card keeps the previous beat's
+    picture on screen (its still / parallax carries on) instead of flashing a card. Longer beats keep the card."""
+    lim = float(cfg.get("hold_previous_max_secs", 3.5) or 0)
+    if lim <= 0: return
+    prev = None
+    for s in beats:
+        items = out.get(s["id"]) or []
+        if items and all(i.get("rung") == "headline" for i in items) and prev and float((tm.get(s["id"]) or {}).get("dur", 99)) <= lim:
+            keep = dict(prev, rung="hold previous", held_from=prev.get("held_from") or prev_id)
+            out[s["id"]] = [keep]
+            if s["id"] in chs: chs[s["id"]]["uses"] = ["hold previous"]; chs[s["id"]].setdefault("chain", []).append("hold previous shot")
+            log(f"  {s['id']}: nothing fit; the previous beat's picture stays on screen ({float(tm[s['id']]['dur']):.1f}s) instead of a text card")
+        last = (out.get(s["id"]) or [None])[-1]
+        if last and last.get("type") in ("image", "layers"): prev, prev_id = last, s["id"]
+        else: prev = None   # stock / video / card: nothing to hold
 
 def _ladder_safe(ladder, cfg, wg, sd, fd, slots, log, stop, gpu, **kw):
     """Rungs 2-4 (cloud still, WanGP still, checks). If they fail, log it and use whatever they had saved in ladder.json, so every

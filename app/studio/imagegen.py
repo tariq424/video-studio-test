@@ -487,10 +487,35 @@ def _wait_chatgpt(page, before, timeout, step):
     raise RuntimeError(f"no image from ChatGPT after {timeout}s")
 
 
+LOCAL_DESCRIBE = """Describe this image in detail (setting, objects, people's roles but not who they are, light, mood), then write a
+prompt of 40-80 words to recreate it as a new photorealistic image. No brands, no logos, no text, no real or recognisable people.
+The narration it will illustrate: "{vo}"
+Reply with JSON only: {{"description": "...", "prompt": "..."}}"""
+
+
+def describe_local(cfg, image, vo, log):
+    """The source screenshot described by this PC's own vision model (Ollama, no account) -> a recreate prompt, or "".
+    The backup for the Gemini describe step, and how Bing / Hugging Face get a prompt from the screenshot."""
+    if not image or not cfg.get("imagegen_describe_local", True): return ""
+    try:
+        from . import footage
+        from .llm import parse_json
+        c = dict(cfg)
+        if c.get("vet_provider", "local") in ("off", "", None): c["vet_provider"] = "local"
+        j = parse_json(footage._vision(c, image, LOCAL_DESCRIBE.format(vo=str(vo or "")[:300].replace('"', "'"))))
+        pr = re.sub(r"\s+", " ", str(j.get("prompt") or "")).strip()
+        if len(pr.split()) >= 12:
+            log(f"  screenshot described by the local vision model: \"{pr[:120]}...\"")
+            return pr
+    except Exception as e:
+        log(f"  local describe failed ({str(e)[:100]}); the prompt comes from the narration")
+    return ""
+
+
 def _session_bing(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
     from playwright.sync_api import sync_playwright
     from .flow import visual_prompt
-    prompt = re.sub(r"(?i)slow (cinematic )?camera move[^.]*\.?", "", visual_prompt(cfg, sec, log))
+    prompt = re.sub(r"(?i)slow (cinematic )?camera move[^.]*\.?", "", sec.get("described_prompt") or visual_prompt(cfg, sec, log))
     prompt = re.sub(r"\s+", " ", prompt).strip()[:420] + " No text, no logos. No real or recognizable people."
     with sync_playwright() as pw:
         context, page = _launch(pw, cfg, "bing")
@@ -555,7 +580,7 @@ def _session_hf(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
         raise Skip("gradio_client is not installed (pip install gradio_client)")
     from .flow import visual_prompt
     import shutil
-    prompt = re.sub(r"(?i)slow (cinematic )?camera move[^.]*\.?", "", visual_prompt(cfg, sec, log))
+    prompt = re.sub(r"(?i)slow (cinematic )?camera move[^.]*\.?", "", sec.get("described_prompt") or visual_prompt(cfg, sec, log))
     prompt = re.sub(r"\s+", " ", prompt).strip()[:700] + " Photorealistic. No text, no logos. No real or recognizable people."
     w, h = (768, 1344) if aspect == "9:16" else (1344, 768)
     _pause(cfg, log, "this beat's image", "hf")
@@ -651,6 +676,7 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
     image = str(image) if image and Path(image).is_file() else None
     timeout = int(cfg.get("imagegen_timeout", 240))
     vo = str(sec.get("vo") or sec.get("still_prompt") or "")
+    described = None   # the screenshot described once by the local vision model, for the services that take a text prompt
     for site in tries:
         if _job_skip.get(site):
             log(f"  {site} skipped ({_job_skip[site][:140]})"); continue
@@ -672,10 +698,10 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
                 prompt = _session(cfg, image, aspect, vo, out, timeout, log, evidence, extras)
             elif site == "chatgpt":
                 prompt = _session_chatgpt(cfg, image, aspect, vo, out, timeout, log, evidence, extras)
-            elif site == "hf":
-                prompt = _session_hf(cfg, sec, aspect, out, timeout, log, evidence, extras)
-            else:
-                prompt = _session_bing(cfg, sec, aspect, out, timeout, log, evidence, extras)
+            elif site in ("hf", "bing"):
+                if image and described is None: described = describe_local(cfg, image, vo, log)
+                s2 = dict(sec, described_prompt=described) if described else sec
+                prompt = (_session_hf if site == "hf" else _session_bing)(cfg, s2, aspect, out, timeout, log, evidence, extras)
         except Skip as s_:
             cool = int(float(cfg.get("imagegen_cooldown_hours", 6)) * 3600) if s_.cool == -1 else s_.cool
             _job_skip[site] = s_.why
