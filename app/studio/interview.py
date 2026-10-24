@@ -28,7 +28,7 @@ from pathlib import Path
 from . import media
 
 VIDEO_EXT = (".mov", ".mp4", ".m4v", ".mkv")
-CUT_VERSION = "3"   # bump when the way parts are cut changes, so cached parts are made again
+CUT_VERSION = "4"   # bump when the way parts are cut changes, so cached parts are made again
 PLAN = """You edit a documentary from the creator's OWN interview footage. The interview audio is the star: viewers should mostly
 hear the people on camera. Your narration only bridges: a hook, where we are, a line between topics, a closing line.
 
@@ -267,22 +267,23 @@ def _vf(kind, xc=None, zoom=1.0, flip=True):
     return ",".join(f)
 
 
-def commons_photo(query, out, log=print):
+def commons_photo(query, out, log=print, place="Bermuda"):
     """A freely licensed photo from Wikimedia Commons: each suggestion in the query (split at ';'), then shorter forms of it.
     -> (path, credit) or (None, "")."""
     tries = []
     for q in [x.strip() for x in re.split(r"[;|]", str(query)) if x.strip()]:
         words = [w for w in re.findall(r"[A-Za-z0-9']+", q) if w.lower() not in ("of", "the", "a", "an", "and", "on", "in", "with", "showing")]
         for t in (q, " ".join(words[:4]), " ".join(words[:2])):
+            if t and place and place.lower() not in t.lower(): t = f"{t} {place}"   # stay in the story's place (no Dubai for Tucker's Town)
             if t and t not in tries: tries.append(t)
     for n, q in enumerate(tries[:8]):
         if n: time.sleep(1.5)   # Commons rate-limits bursts (429)
-        got = _commons_one(q, out, log)
+        got = _commons_one(q, out, log, need=[w for w in re.findall(r"[A-Za-z]{4,}", q) if w.lower() != "bermuda"], place=place)
         if got[0]: return got
     return None, ""
 
 
-def _commons_one(query, out, log=print):
+def _commons_one(query, out, log=print, need=(), place=""):
     import requests
     UA = {"User-Agent": "VideoStudio/1.0 (interview edit; contact via YouTube channel)"}
     try:
@@ -294,6 +295,9 @@ def _commons_one(query, out, log=print):
         for pg in pages:
             ii = (pg.get("imageinfo") or [{}])[0]
             if ii.get("mime") not in ("image/jpeg", "image/png") or (ii.get("width") or 0) < 800: continue
+            title = pg.get("title", "").lower()
+            if place and place.lower() not in title: continue   # the file itself must be about the place (title names it)
+            if need and not any(w.lower() in title for w in need): continue   # and about the thing asked for
             meta = ii.get("extmetadata") or {}
             lic = re.sub(r"<.*?>", "", (meta.get("LicenseShortName") or {}).get("value", "")).strip()
             if not lic or not re.search(r"CC|Public domain|PD", lic, re.I): continue
@@ -443,6 +447,12 @@ def _caption_lines(words, max_words):
     return out
 
 
+def _writable(p):
+    try:
+        with open(p, "r+b"): return True
+    except OSError: return False
+
+
 def assemble(parts, out, kind, work, cfg, log=print, title=""):
     """parts: [{"file", "words": [(w, start, end)] relative to the part, "style": "Cap"|"Narr"}]."""
     w, h = (1080, 1920) if kind == "short" else (1920, 1080)
@@ -475,6 +485,7 @@ def assemble(parts, out, kind, work, cfg, log=print, title=""):
     joined.unlink(missing_ok=True)
     try:
         from . import music
+        if not _writable(out): raise RuntimeError(f"{Path(out).name} is open in another program (a player?); music not added")
         music.mix(out, dict(cfg, music_bed_db=float(cfg.get("interview_music_db", -8)), music_hook_db=float(cfg.get("interview_music_db", -8))),
                   log, 6.0, seed=title or kind, text=title)   # quieter than a narrated Short: the interview is the star
     except Exception as e:

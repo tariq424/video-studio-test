@@ -19,6 +19,10 @@ def main():
     def log(m):
         line = f"[{time.strftime('%H:%M:%S')}] {m}"; print(line, flush=True); lf.write(line + "\n"); lf.flush()
     cfg = config.load()
+    lock = work / "interview.lock"   # one edit at a time per work folder (two runs once wrote the same file)
+    if lock.exists() and time.time() - lock.stat().st_mtime < 4 * 3600:
+        log(f"another interview edit is running here (lock {lock}); not starting"); return
+    lock.write_text(str(time.time()), encoding="utf-8")
     try:
         outs = interview.build(cfg, a["src"], work, a.get("context", ""), log, tuple(a.get("kinds") or ("short", "documentary")),
                                bool(a.get("flip", True)), a.get("name", "interview"), a.get("version", ""), a.get("notes"))
@@ -26,6 +30,8 @@ def main():
     except Exception as e:
         import traceback
         log(f"FAILED: {e}\n{traceback.format_exc()[-2000:]}")
+    finally:
+        lock.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

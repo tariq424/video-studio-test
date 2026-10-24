@@ -170,7 +170,7 @@ def orient(clip, work, log=print):
     cache = Path(work) / "orient.json"
     try: known = json.loads(cache.read_text(encoding="utf-8"))
     except (OSError, ValueError): known = {}
-    key = Path(clip).name + "|v2"   # v2: the vision model decides when there are no faces
+    key = Path(clip).name + "|v3"   # v2: the vision model decides when there are no faces
     if key in known: return known[key]
     cv2, np = _cv(); best = ""; score = {}
     if cv2:
@@ -199,11 +199,13 @@ def _orient_vision(clip, work):
         from . import config, footage
         cfg = dict(config.load())
         if cfg.get("vet_provider", "local") in ("off", "", None): cfg["vet_provider"] = "local"
-        tmp = Path(work) / "_orient_v.jpg"
-        media.ff("-ss", f"{media.dur(clip) / 2:.2f}", "-i", clip, "-frames:v", 1, "-vf", "scale=640:-2", tmp, timeout=120)
-        a = str(footage._vision(cfg, tmp, "Is this photo upright? Look at the floor, ceiling, doors, people and text. Answer with one word: "
-                                     "upright, clockwise (it must be turned clockwise to be upright) or counterclockwise.")).lower()
-        return "transpose=1" if "counter" not in a and "clockwise" in a else "transpose=2" if "counter" in a else ""
+        tmp = Path(work) / "_orient_v.jpg"; votes = []
+        for k in range(3):   # three frames must agree, or the clip is left as it is (a wrong turn is worse than none)
+            media.ff("-ss", f"{media.dur(clip) * (k + 1) / 4:.2f}", "-i", clip, "-frames:v", 1, "-vf", "scale=640:-2", tmp, timeout=120)
+            a = str(footage._vision(cfg, tmp, "Is this photo upright? Look at the floor, ceiling, doors, people and text. Answer with one word: "
+                                         "upright, clockwise (it must be turned clockwise to be upright) or counterclockwise.")).lower()
+            votes.append("transpose=2" if "counter" in a else "transpose=1" if "clockwise" in a else "")
+        return votes[0] if len(set(votes)) == 1 else ""
     except Exception:
         return ""
 
