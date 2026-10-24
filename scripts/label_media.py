@@ -213,7 +213,7 @@ def catalog(src, out):
         except Exception as e:
             rec["error"] = str(e)[:200]
         t = (m.get("time") or "")[:16].replace(":", "").replace("T", "_") or "undated"
-        name = f"{t}_{slug(rec.get('place') or rec.get('area') or 'unplaced')}_{slug(rec.get('subject') or '')}_{p.stem}".replace("__", "_")
+        name = f"{t}_{slug(rec.get('place') or rec.get('area') or 'unplaced')}_{slug(rec.get('subject') or '')}_{p.stem}_{p.suffix.lstrip('.').lower()}".replace("__", "_")   # extension too: IMG_0247.MOV and IMG_0247.HEIC are different files
         if rel in failed:   # the earlier failed description is replaced
             failed[rel].unlink(missing_ok=True); failed[rel].with_suffix(".txt").unlink(missing_ok=True)
         (cd / f"{name}.json").write_text(json.dumps(rec, indent=1, ensure_ascii=False), encoding="utf-8")
