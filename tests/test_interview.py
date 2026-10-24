@@ -32,3 +32,13 @@ def test_hook(tmp_path, monkeypatch):
 def test_filters():
     assert I._vf("short", 0.3, 1.12).startswith("hflip,crop=")
     assert "hflip" not in I._vf("documentary", None, 1.0, flip=False)
+
+
+def test_fit_trims_long_bites_and_short():
+    segs = [{"i": i, "start": i * 10.0, "end": i * 10.0 + 9.5, "text": "x", "words": []} for i in range(40)]
+    j = {"short": {"items": [{"bite": [0, 0]}, {"bite": [2, 20]}, {"narr": "a b c"}, {"bite": [25, 30]}]},
+         "documentary": {"chapters": [{"items": [{"bite": [5, 30]}]}]}}
+    I.fit(j, segs, 90)
+    assert all(segs[it["bite"][1]]["end"] - segs[it["bite"][0]]["start"] <= 40 for it in j["short"]["items"] if "bite" in it)
+    assert I.total_secs(j["short"]["items"], segs) <= 100
+    b = j["documentary"]["chapters"][0]["items"][0]["bite"]; assert segs[b[1]]["end"] - segs[b[0]]["start"] <= 60

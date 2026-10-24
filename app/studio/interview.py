@@ -114,19 +114,58 @@ def plan(cfg, segs, context, broll, work, log=print, short_secs=90, doc_min=8, d
     lines = "\n".join(f"[{s['i']}] {s['start']:.0f}-{s['end']:.0f}: {s['text']}" for s in segs)
     from .llm import LLM
     n = len(segs)
-    def check(j):
+    def check(j, strict=True):
         for it in _items(j.get("short") or {}) + [x for c in (j.get("documentary") or {}).get("chapters", []) for x in c.get("items", [])]:
             if "bite" in it:
                 a, b = it["bite"]
                 if not (0 <= int(a) <= int(b) < n): raise ValueError(f"bite {it['bite']} is outside 0-{n - 1}")
+                d = segs[int(b)]["end"] - segs[int(a)]["start"]
+                if strict and d > 75: raise ValueError(f"bite {it['bite']} is {d:.0f} s long; soundbites must be 6-60 s (use fewer segments)")
         if not _items(j.get("short") or {}) or not (j.get("documentary") or {}).get("chapters"): raise ValueError("both short and documentary are needed")
+        if strict:
+            st = total_secs(_items(j["short"]), segs)
+            if st > short_secs + 20: raise ValueError(f"the short is {st:.0f} s; it must be {short_secs} s or less")
+            dt = total_secs([x for c in j["documentary"]["chapters"] for x in c.get("items", [])], segs) / 60
+            if not doc_min - 2 <= dt <= doc_max + 3: raise ValueError(f"the documentary is {dt:.1f} min; it must be {doc_min}-{doc_max} min")
     _log(log, f"Interview: picking soundbites from {n} segments (script AI)")
     with LLM(dict(cfg), log, lambda: False) as llm:
-        j = llm.chat_json("You are an award-winning documentary editor. Reply with JSON only.",
+        try: j = llm.chat_json("You are an award-winning documentary editor. Reply with JSON only.",
                           PLAN.format(context=context, segments=lines[:60000], broll=json.dumps(broll), short_secs=short_secs,
                                       notes="\n".join(f"[{i}] {n['fact']}" for i, n in enumerate(notes or [])) or "(none)",
                                       doc_min=doc_min, doc_max=doc_max), max_tokens=6000, check=check)
+        except RuntimeError:   # lengths still off after 3 tries: take a valid plan and trim it to size
+            j = llm.chat_json("You are an award-winning documentary editor. Reply with JSON only.",
+                              PLAN.format(context=context, segments=lines[:60000], broll=json.dumps(broll), short_secs=short_secs,
+                                          notes="\n".join(f"[{i}] {n['fact']}" for i, n in enumerate(notes or [])) or "(none)",
+                                          doc_min=doc_min, doc_max=doc_max), max_tokens=6000, check=lambda x: check(x, False))
+    j = fit(j, segs, short_secs)
     out.write_text(json.dumps(j, indent=1, ensure_ascii=False), encoding="utf-8")
+    return j
+
+
+def total_secs(items, segs):
+    """Rough runtime: soundbites from the transcript, narration at ~2.6 words a second."""
+    t = 0.0
+    for it in items:
+        if "bite" in it: t += segs[int(it["bite"][1])]["end"] - segs[int(it["bite"][0])]["start"] + 0.45
+        else: t += len(str(it.get("narr") or it.get("insert") or "").split()) / 2.6 + 0.35
+    return t
+
+
+def fit(j, segs, short_secs=90, bite_max_short=40, bite_max_doc=60):
+    """Hard limits the script AI sometimes ignores: long soundbites end at a segment boundary within the limit; the Short loses
+    items from the end until it fits (the opening is kept)."""
+    def trim(items, mx):
+        for it in items:
+            if "bite" in it:
+                a, b = int(it["bite"][0]), int(it["bite"][1])
+                while b > a and segs[b]["end"] - segs[a]["start"] > mx: b -= 1
+                it["bite"] = [a, b]
+    trim(_items(j["short"]), bite_max_short)
+    for c in j["documentary"]["chapters"]: trim(c.get("items", []), bite_max_doc)
+    items = _items(j["short"])
+    while len(items) > 2 and total_secs(items, segs) > short_secs + 10: items.pop(-2 if "narr" in items[-1] else -1)
+    j["short"]["items"] = items
     return j
 
 
@@ -360,7 +399,9 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
     src = Path(src); root = Path(work); root.mkdir(parents=True, exist_ok=True)
     segs = transcribe(src, root, log)
     work = root / version if version else root; work.mkdir(parents=True, exist_ok=True)
-    broll = broll_list(src)
+    bf = root / "broll.json"   # probing every clip in the folder is slow on a busy PC: once per folder
+    broll = json.loads(bf.read_text(encoding="utf-8")) if bf.exists() else broll_list(src)
+    bf.write_text(json.dumps(broll, indent=1), encoding="utf-8")
     pl = plan(cfg, segs, context, broll, work, log, notes=notes)
     bdir = src.parent
     outs = {}
@@ -368,6 +409,11 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
         items = _items(pl.get("short") or {}) if kind == "short" else [x for c in pl["documentary"]["chapters"] for x in c.get("items", [])]
         kd = work / kind; kd.mkdir(exist_ok=True)
         parts, rnd = [], random.Random(7)
+        from . import tts
+        batch = [(it["narr"], kd / "narr" / f"n{k}.wav") for k, it in enumerate(items) if it.get("narr")] + \
+                [(it["insert"], kd / "narr" / f"i{k}.wav") for k, it in enumerate(items) if it.get("insert")]
+        if batch:   # all of this video's narration in one Kokoro run (each separate run costs ~2 min of start-up)
+            (kd / "narr").mkdir(exist_ok=True); tts.kokoro_batch(cfg, batch, log, f"interview narration ({kind})")
         hk = hook(cfg, segs, context, kind, work, log) if cfg.get("interview_hook", True) else None
         if hk:   # cold open: the most striking line, with the hook text on screen, before the story starts
             f = cut_bite(src, hk["t0"], hk["t1"], kd / "hook.mp4", kind, 1, flip)
