@@ -155,6 +155,15 @@ def make(img, audio, out, cfg, log):
     raise RuntimeError("no talking-head engine worked: " + " | ".join(errs)[:600])
 
 
+def reason(e):
+    """One plain line for why there is no presenter (shown in the log and the Newsroom)."""
+    t = " ".join(str(e).split())
+    if re.search(r"ZeroGPU quota|exceeded your free|quota", t, re.I): return "Hugging Face's free GPU time for today is used up"
+    if re.search(r"404|Repository Not Found|CONFIG_ERROR|invalid state|RUNTIME_ERROR|sleeping|paused", t, re.I): return "the Hugging Face talking-head apps are down or gone"
+    if re.search(r"timed? ?out|timeout", t, re.I): return "the Hugging Face talking-head app took too long"
+    return "no talking-head engine worked (" + t[:120] + ")"
+
+
 def presenter_photo(cfg, log):
     """The presenter photo: settings presenter_image if it exists, else one FLUX portrait made once on Hugging Face."""
     p = Path(cfg.get("presenter_image") or "")
@@ -182,6 +191,30 @@ def presenter_photo(cfg, log):
     return keep
 
 
+def early(job, cfg, log):
+    """First claim on the free Hugging Face GPU time: the talking head is made right after the narration, BEFORE the image
+    generators use up the day's quota. overlay_short then reuses it. Never raises; a failure is written down (the reason shows
+    in the log and the Newsroom) and the end of the job tries once more."""
+    job = Path(job); td = job / "short" / "talkinghead"; td.mkdir(parents=True, exist_ok=True)
+    head = td / "head.mp4"
+    if head.exists() and media.dur(head) > 0.5: return head
+    try:
+        src = job / "short" / "voice" / "b0.wav"
+        if not src.exists(): raise RuntimeError("the hook's narration isn't there yet")
+        d = min(media.dur(src), float(cfg.get("talking_head_max_secs", 10)))
+        wav = td / "hook_early.wav"
+        media.ff("-t", f"{d:.3f}", "-i", src, "-ac", 1, "-ar", 16000, wav)
+        log("Talking head: made first, before the image generators use the day's Hugging Face GPU time")
+        clip, eng = make(presenter_photo(cfg, log), wav, head, cfg, log)
+        (td / "early.json").write_text(json.dumps({"ok": True, "engine": eng, "secs": round(d, 2)}, indent=1), encoding="utf-8")
+        return head
+    except Exception as e:
+        head.unlink(missing_ok=True)
+        (td / "early.json").write_text(json.dumps({"ok": False, "error": " ".join(str(e).split())[:600]}, indent=1), encoding="utf-8")
+        log(f"  talking head (early) not made ({' '.join(str(e).split())[:200]}); tried again at the end")
+        return None
+
+
 def overlay_short(job, plan, cfg, short_mp4, log):
     """Round talking-head picture-in-picture over the Short's hook beat. -> the Short (changed in place) or unchanged."""
     job, short_mp4 = Path(job), Path(short_mp4)
@@ -192,7 +225,11 @@ def overlay_short(job, plan, cfg, short_mp4, log):
         a, d = float(b0.get("start", 0)), min(float(b0.get("dur", 6)), float(cfg.get("talking_head_max_secs", 10)))
         wav = td / "hook.wav"
         media.ff("-ss", f"{a:.3f}", "-t", f"{d:.3f}", "-i", short_mp4, "-vn", "-ac", 1, "-ar", 16000, wav)
-        clip, space = make(presenter_photo(cfg, log), wav, td / "head.mp4", cfg, log)
+        pre = td / "head.mp4"
+        if pre.exists() and media.dur(pre) > 0.5:
+            clip, space = pre, (json.loads((td / "early.json").read_text(encoding="utf-8")).get("engine", "early") if (td / "early.json").exists() else "early")
+        else:
+            clip, space = make(presenter_photo(cfg, log), wav, td / "head.mp4", cfg, log)
         size, x, y = 380, 40, 260   # top-left, clear of the captions
         flt = (f"[1:v]scale={size}:{size}:force_original_aspect_ratio=increase,crop={size}:{size},format=rgba,"
                f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lte(pow(X-{size / 2},2)+pow(Y-{size / 2},2),pow({size / 2 - 2},2)),255,0)',"
@@ -209,6 +246,7 @@ def overlay_short(job, plan, cfg, short_mp4, log):
             from . import edit; edit.ensure_keyframes(job, log)
         except Exception as e: log(f"  couldn't prepare the talking-head version for editing ({str(e)[:120]})")
     except Exception as e:
-        (td / "talkinghead.json").write_text(json.dumps({"ok": False, "error": str(e)[:600]}, indent=1), encoding="utf-8")
-        log(f"Talking head skipped ({' '.join(str(e).split())[:300]}); the Short is unchanged")
+        why = reason(e)
+        (td / "talkinghead.json").write_text(json.dumps({"ok": False, "error": str(e)[:600], "reason": why}, indent=1), encoding="utf-8")
+        log(f"Talking head skipped: {why}. The Short goes out without a presenter.")
     return short_mp4

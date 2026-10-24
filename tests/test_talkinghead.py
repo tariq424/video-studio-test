@@ -54,6 +54,7 @@ def test_overlay_and_failure(monkeypatch):
     assert px(1)[0] > 150 and px(1)[2] < 100 and px(5)[2] > 150
     assert "audio" in subprocess.run(["ffprobe", "-v", "error", "-show_streams", mp4], capture_output=True, text=True).stdout
     before = mp4.read_bytes()
+    (job / "short" / "talkinghead" / "head.mp4").unlink()   # a head made earlier would be reused; this checks a failure
     monkeypatch.setattr(talkinghead, "make", lambda *a: (_ for _ in ()).throw(RuntimeError("quota")))
     talkinghead.overlay_short(job, {}, {}, mp4, logs.append)
     assert mp4.read_bytes() == before and not json.loads((job / "short" / "talkinghead" / "talkinghead.json").read_text())["ok"]
@@ -68,3 +69,9 @@ def test_wangp_engine_falls_back_to_spaces(tmp_path, monkeypatch):
     out, eng = T.make("p.jpg", "a.wav", tmp_path / "o.mp4", {"talking_head": "wangp", "talking_head_spaces": ["a/b"]}, lambda m: None)
     assert calls == ["wangp", "a/b"] and eng == "a/b"
     assert T.enabled({"talking_head": "wangp"}) and T.enabled({}) and not T.enabled({"talking_head": "off"})
+
+
+def test_reason_lines():
+    from studio import talkinghead as T
+    assert "used up" in T.reason(RuntimeError("You have exceeded your free ZeroGPU quota (90s requested vs. 0s left)"))
+    assert "down or gone" in T.reason(RuntimeError("fffiloni/sonic: 404 Client Error. Repository Not Found"))

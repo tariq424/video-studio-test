@@ -398,6 +398,8 @@ class Studio:
                     else: short.do_stock(j.dir, sp, cfg, log, stop)
                 elif st == "short_voice": _need_tts(wg, cfg); short.do_voice(j.dir, sp, cfg, wg, log, stop)
                 elif st == "short_fallback":
+                    from . import talkinghead
+                    if s.get("presenter") and talkinghead.enabled(cfg): talkinghead.early(j.dir, cfg, log)   # first claim on HF GPU time
                     if not wg.alive(): log("WanGP is not running: fallback beats get map/headline graphics instead of AI stills")
                     short.do_fallback(j.dir, sp, cfg, wg, log, stop, full=s.get("visual_review") == "every", dbg=dbg)
                 else:
@@ -406,7 +408,7 @@ class Studio:
                     from . import music
                     if not s.get("smoke") or cfg.get("music_in_smoke", False): music.mix(out, cfg, log, music.hook_secs_short(j.dir), seed=jid, text=sp.get("title", "") + ": " + " ".join(x["vo"] for x in sp["sections"]))   # hook cue + ducked bed (your tracks)
                     from . import talkinghead
-                    if s.get("presenter") and talkinghead.enabled(cfg):   # talking head over the hook (WanGP or Hugging Face; optional, never fails the job)
+                    if s.get("presenter") and talkinghead.enabled(cfg):   # talking head over the hook (Hugging Face; optional, never fails the job)
                         out = talkinghead.overlay_short(j.dir, sp, cfg, out, log)
                     from . import capcut
                     if capcut.enabled(cfg) and capcut.pending(j.dir):   # ladder v2 rung 7: one CapCut session per video (off by default)
