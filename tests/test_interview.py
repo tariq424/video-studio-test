@@ -46,7 +46,35 @@ def test_fit_trims_long_bites_and_short():
 
 def test_shots_holder_closeup_becomes_cutaway():
     from studio import shots
-    an = {"secs": [{"t": t, "faces": ([[0.5, 0.4, 0.3, 0.3]] if t < 3 else [[0.3, 0.4, 0.05, 0.08]]), "tilt": 0} for t in range(6)]}
+    an = {"secs": [{"t": t, "faces": ([[0.5, 0.4, 0.3, 0.3]] if t < 3 else [[0.3, 0.4, 0.1, 0.12]]), "tilt": 0} for t in range(6)]}
     sh = shots.plan_shots(an, 0, 6)
     assert [x[2] for x in sh] == ["self", "guest"] and sh[1][3][0] == 0.3
     assert "rotate=" in shots.vf_frame("documentary", None, 6.0) and "rotate=" not in shots.vf_frame("documentary", None, 1.0)
+
+
+def test_shots_two_shot_selfie_and_edge_holder():
+    from studio import shots
+    # close selfie: two big faces -> the bigger one is the holder, the other the guest
+    assert shots.kind_of({"faces": [[0.3, 0.5, 0.22, 0.3], [0.7, 0.4, 0.36, 0.5]]}) == "guest"
+    # the holder half out of shot at the right edge, alone -> cutaway
+    assert shots.kind_of({"faces": [[0.97, 0.5, 0.06, 0.7]]}) == "self"
+    # a tiny face (a mirror) is nobody
+    assert shots.kind_of({"faces": [[0.5, 0.5, 0.03, 0.05]]}) == "none"
+    # car ceiling: flat top, the guest's head poking up at the bottom -> cutaway
+    assert shots.kind_of({"faces": [[0.8, 0.85, 0.1, 0.2]], "top": 0.84}) == "empty"
+    assert shots.kind_of({"faces": [], "top": 0.8}) == "empty"
+
+
+def test_shots_crop_leaves_holder_out():
+    from studio import shots
+    vf = shots.vf_frame("documentary", [0.3, 0.5, 0.15, 0.2, [0.8, 0.45, 0.3, 0.5]], 0, False)
+    import re
+    z = float(re.search(r"ih/([0-9.]+)", vf).group(1)); x0 = float(re.search(r"iw\*([0-9.]+)", vf).group(1))
+    cwf = 16 / 9 * 1080 / 1920 / z
+    assert x0 + cwf <= 0.65 + 1e-3 and x0 <= 0.3 - 0.075
+
+
+def test_short_ends_on_soundbite():
+    from studio import interview
+    its = interview.end_on_bite([{"bite": [0, 1]}, {"narr": "x"}, {"bite": [3, 4]}, {"narr": "closing"}, {"insert": "y"}])
+    assert its[-1] == {"bite": [3, 4]} and len(its) == 3

@@ -28,7 +28,7 @@ from pathlib import Path
 from . import media
 
 VIDEO_EXT = (".mov", ".mp4", ".m4v", ".mkv")
-CUT_VERSION = "4"   # bump when the way parts are cut changes, so cached parts are made again
+CUT_VERSION = "5"   # bump when the way parts are cut changes, so cached parts are made again
 PLAN = """You edit a documentary from the creator's OWN interview footage. The interview audio is the star: viewers should mostly
 hear the people on camera. Your narration only bridges: a hook, where we are, a line between topics, a closing line.
 
@@ -164,7 +164,8 @@ def short_plan(cfg, segs, pl, context, notes, work, log=print, short_secs=90):
     """The Short, cut from the documentary's chosen material (a separate pass: one plan for both came out weak). Cached."""
     import hashlib
     out = Path(work) / f"short_plan_{hashlib.md5(SHORT.encode()).hexdigest()[:6]}.json"   # a changed brief makes a new plan
-    if out.exists(): return json.loads(out.read_text(encoding="utf-8"))
+    if out.exists():
+        j = json.loads(out.read_text(encoding="utf-8")); j["items"] = end_on_bite(_items(j)); return j
     from .llm import LLM
     bites = sorted({tuple(it["bite"]) for c in pl["documentary"]["chapters"] for it in c.get("items", []) if "bite" in it})
     mat = "\n".join(f"[{a}-{b}] " + " ".join(segs[i]["text"] for i in range(a, b + 1))[:600] for a, b in bites)
@@ -189,6 +190,7 @@ def short_plan(cfg, segs, pl, context, notes, work, log=print, short_secs=90):
                                   SHORT.format(short_secs=short_secs, context=context, material=mat[:40000]), max_tokens=1500,
                                   check=lambda x: check(x, False))
         j = fit({"short": j, "documentary": {"chapters": []}}, segs, short_secs, bite_max_short=22)["short"]
+        j["items"] = end_on_bite(_items(j))
     except Exception as e:
         _log(log, f"  short plan: kept the combined plan's Short ({str(e)[:100]})"); return None
     out.write_text(json.dumps(j, indent=1, ensure_ascii=False), encoding="utf-8")
@@ -223,6 +225,13 @@ def fit(j, segs, short_secs=90, bite_max_short=40, bite_max_doc=60):
 
 def _items(p):
     return list(p.get("items") or [])
+
+
+def end_on_bite(items):
+    """The Short ends on the guest's own words: trailing narration / context lines are dropped (the AI sometimes adds one)."""
+    items = list(items)
+    while len(items) > 1 and "bite" not in items[-1]: items.pop()
+    return items
 
 
 # ------------------------------------------------------------------ 4 cut
@@ -267,7 +276,30 @@ def _vf(kind, xc=None, zoom=1.0, flip=True):
     return ",".join(f)
 
 
-def commons_photo(query, out, log=print, place="Bermuda"):
+GENERIC = {"town", "city", "old", "aerial", "view", "island", "history", "historic", "photo", "image", "street", "people", "building",
+           "buildings", "area", "land", "house", "houses", "black", "white", "early", "modern", "today", "parish", "local"}
+FITS = """A documentary narrator says: "{line}"
+Wikimedia Commons offers a photo titled: "{title}"
+Would that photo be a fitting, honest illustration of what the narrator says (same place AND the same kind of subject or era)?
+A group portrait of soldiers, a sports team, a ship or a map that is not what the line is about = no.
+JSON: {{"fits": true|false, "why": "a few words"}}"""
+
+
+def _fits(cfg, line, title, log=print):
+    if not cfg or not line: return True
+    try:
+        from .llm import LLM
+        with LLM(dict(cfg), log, lambda: False) as llm:
+            j = llm.chat_json("You check picture choices for a documentary. Reply with JSON only.",
+                              FITS.format(line=line[:400], title=title[:200]), max_tokens=120)
+        ok = bool(j.get("fits"))
+        if not ok: _log(log, f"    Commons photo '{title[:60]}' skipped: {str(j.get('why', ''))[:60]}")
+        return ok
+    except Exception:
+        return True   # the checker being down doesn't block the edit
+
+
+def commons_photo(query, out, log=print, place="Bermuda", cfg=None, line=""):
     """A freely licensed photo from Wikimedia Commons: each suggestion in the query (split at ';'), then shorter forms of it.
     -> (path, credit) or (None, "")."""
     tries = []
@@ -278,12 +310,13 @@ def commons_photo(query, out, log=print, place="Bermuda"):
             if t and t not in tries: tries.append(t)
     for n, q in enumerate(tries[:8]):
         if n: time.sleep(1.5)   # Commons rate-limits bursts (429)
-        got = _commons_one(q, out, log, need=[w for w in re.findall(r"[A-Za-z]{4,}", q) if w.lower() != "bermuda"], place=place)
+        got = _commons_one(q, out, log, need=[w for w in re.findall(r"[A-Za-z]{4,}", q) if w.lower() != place.lower()], place=place,
+                           judge=(lambda t: _fits(cfg, line, t, log)) if cfg and line else None)
         if got[0]: return got
     return None, ""
 
 
-def _commons_one(query, out, log=print, need=(), place=""):
+def _commons_one(query, out, log=print, need=(), place="", judge=None):
     import requests
     UA = {"User-Agent": "VideoStudio/1.0 (interview edit; contact via YouTube channel)"}
     try:
@@ -297,7 +330,10 @@ def _commons_one(query, out, log=print, need=(), place=""):
             if ii.get("mime") not in ("image/jpeg", "image/png") or (ii.get("width") or 0) < 800: continue
             title = pg.get("title", "").lower()
             if place and place.lower() not in title: continue   # the file itself must be about the place (title names it)
-            if need and not any(w.lower() in title for w in need): continue   # and about the thing asked for
+            key = [w for w in need if w.lower() not in GENERIC]
+            if key and not all(w.lower() in title for w in key): continue   # and about the thing asked for (every distinctive word)
+            if need and not key and not any(w.lower() in title for w in need): continue
+            if judge and not judge(pg.get("title", "")): continue   # and it actually shows what the line is about
             meta = ii.get("extmetadata") or {}
             lic = re.sub(r"<.*?>", "", (meta.get("LicenseShortName") or {}).get("value", "")).strip()
             if not lic or not re.search(r"CC|Public domain|PD", lic, re.I): continue
@@ -352,7 +388,7 @@ class Cutaways:
         for r in self.runs:
             if r[1] - r[0] >= secs:
                 a = r[0]; r[0] += secs + 1
-                gs = [f for s in self.an["secs"] if a <= s["t"] < a + secs for f in s["faces"] if f[2] * f[3] < shots.SELF_AREA]
+                gs = [f for s in self.an["secs"] if a <= s["t"] < a + secs for f in shots.split(s["faces"])[0]]
                 g = [sum(x[n] for x in gs) / len(gs) for n in range(4)] if gs else None
                 return self.src, float(a), self.flip, g, ""
         if self.broll:
@@ -614,7 +650,7 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                 except Exception: had = None
                 if media.ok(f, 0.5) and had == "": f.unlink(missing_ok=True)   # made without a photo last time: try Commons again
                 if not media.ok(f, 0.5):
-                    img, credit = commons_photo(str(it.get("visual") or it["insert"])[:80], kd / f"{k:02}_photo.jpg", log)
+                    img, credit = commons_photo(str(it.get("visual") or it["insert"])[:80], kd / f"{k:02}_photo.jpg", log, cfg=cfg, line=it["insert"])
                     if img: still_part(img, wav, f, kind)
                     else:
                         nxt = next((x for x in items[k + 1:] if "bite" in x), None)
