@@ -1,0 +1,295 @@
+"""Interview edit: your own footage where the ORIGINAL AUDIO leads and narration only bridges (owner, 2026-10-24).
+
+Made for footage you shot yourself (no third-party copyright), e.g. a walk-and-talk interview filmed on the phone's front camera.
+Nothing here strips the clip's sound (the rest of Video Studio does, by design, for third-party sources).
+
+Steps (each cached in the work folder, so a re-run continues):
+  1. prep        the interview's audio (16 kHz mono) for transcription
+  2. transcribe  faster-whisper with word times (GPU large-v3-turbo, else CPU small.en) -> transcript.json
+  3. plan        the script AI reads the numbered, timed transcript and picks the strongest moments (soundbites) and writes
+                 short narration bridges (hook, place names, a line between topics, outro). One plan for a Short (<= ~90 s)
+                 and one for a mini-documentary (8-12 min, chapters). Narration is at most ~15% of the runtime.
+  4. cut         each soundbite cut WITH its audio: front-camera mirror removed (hflip), Short = 9:16 crop centred on the
+                 faces found in it (OpenCV; centre if none), alternating gentle punch-ins; documentary = 16:9 as filmed.
+                 Each bridge = narration (Kokoro) over your other clips from the same folder (B-roll, muted), or over the
+                 next soundbite's picture when no B-roll fits.
+  5. assemble    parts joined, captions burned in (soundbites: whisper's words; bridges: the narration text), music bed
+                 ducked under every voice (music.mix).
+Outputs: <work>/<name>_short.mp4, <work>/<name>_documentary.mp4, plus plan.json / transcript.json for review.
+Visual work is ffmpeg on the CPU (no GPU effects); only transcription and Kokoro may use the GPU."""
+import json
+import math
+import random
+import re
+import shutil
+import time
+from pathlib import Path
+
+from . import media
+
+VIDEO_EXT = (".mov", ".mp4", ".m4v", ".mkv")
+PLAN = """You edit a documentary from the creator's OWN interview footage. The interview audio is the star: viewers should mostly
+hear the people on camera. Your narration only bridges: a hook, where we are, a line between topics, a closing line.
+
+About the footage (from the creator): {context}
+
+Transcript, numbered segments with times (seconds from the start of the footage):
+{segments}
+
+Other clips in the same folder you may use as B-roll under narration (name: seconds): {broll}
+
+Write JSON only:
+{{
+ "title": "a YouTube title, under 70 characters, honest, no clickbait",
+ "short": {{"items": [ ... ]}},
+ "documentary": {{"chapters": [{{"title": "chapter title", "items": [ ... ]}}, ...]}}
+}}
+Each item is either {{"bite": [first_segment, last_segment]}} (consecutive segments played with their own audio) or
+{{"narr": "one or two short sentences", "broll": "a clip name from the list, or empty"}}.
+Rules:
+- short: {short_secs} seconds or less in total; open with the single most striking soundbite or a one-line hook, 3-6 soundbites.
+- documentary: {doc_min}-{doc_max} minutes in total, 3-6 chapters in a sensible order (you may rearrange the footage's order).
+- Soundbites: complete thoughts (start and end at sentence boundaries), each 6-60 seconds; skip small talk, dead air,
+  directions, repeated points and anything the speaker would not want aired (private details, addresses, phone numbers).
+- Narration: at most 15% of the runtime, first person plural is fine ("we"), never invent facts that are not in the transcript
+  or the creator's note, respectful and warm toward the people and their faith; light humour only at our own expense.
+- Never put words in anyone's mouth; a soundbite is exactly what was said."""
+
+
+def _log(log, m):
+    (log or print)(m)
+
+
+# ------------------------------------------------------------------ 1-2 transcript
+def transcribe(src, work, log=print):
+    out = Path(work) / "transcript.json"
+    if out.exists(): return json.loads(out.read_text(encoding="utf-8"))
+    wav = Path(work) / "audio16k.wav"
+    if not media.ok(wav, 1):
+        _log(log, "Interview: extracting the audio for transcription")
+        media.ff("-i", src, "-map", "0:a:0", "-ac", 1, "-ar", 16000, wav, timeout=1800)
+    from faster_whisper import WhisperModel
+    def run(m, label):
+        _log(log, f"Interview: transcribing {media.dur(wav) / 60:.0f} min ({label})")
+        segs, _ = m.transcribe(str(wav), language="en", vad_filter=True, word_timestamps=True, beam_size=5)
+        res, t0 = [], time.time()
+        for s in segs:
+            res.append({"i": len(res), "start": round(s.start, 2), "end": round(s.end, 2), "text": s.text.strip(),
+                        "words": [[w.word.strip(), round(w.start, 2), round(w.end, 2)] for w in (s.words or []) if w.word.strip()]})
+            if time.time() - t0 > 60: _log(log, f"  transcribed to {int(s.end // 60)} min"); t0 = time.time()
+        return res
+    try: segs = run(WhisperModel("large-v3-turbo", device="cuda", compute_type="float16"), "GPU")
+    except Exception as e:
+        _log(log, f"  GPU transcription unavailable ({str(e)[:80]}); CPU")
+        segs = run(WhisperModel("small.en", device="cpu", compute_type="int8"), "CPU")
+    out.write_text(json.dumps(segs, indent=1, ensure_ascii=False), encoding="utf-8")
+    return segs
+
+
+# ------------------------------------------------------------------ 3 plan
+def broll_list(src):
+    """Your other clips in the interview's folder (name -> seconds), for narration bridges."""
+    out = {}
+    for f in sorted(Path(src).parent.iterdir()):
+        if f.suffix.lower() in VIDEO_EXT and f.resolve() != Path(src).resolve():
+            try: d = media.dur(f)
+            except Exception: continue
+            if d >= 3: out[f.stem] = round(d, 1)
+    return out
+
+
+def plan(cfg, segs, context, broll, work, log=print, short_secs=90, doc_min=8, doc_max=12):
+    out = Path(work) / "plan.json"
+    if out.exists(): return json.loads(out.read_text(encoding="utf-8"))
+    lines = "\n".join(f"[{s['i']}] {s['start']:.0f}-{s['end']:.0f}: {s['text']}" for s in segs)
+    from .llm import LLM
+    n = len(segs)
+    def check(j):
+        for it in _items(j.get("short") or {}) + [x for c in (j.get("documentary") or {}).get("chapters", []) for x in c.get("items", [])]:
+            if "bite" in it:
+                a, b = it["bite"]
+                if not (0 <= int(a) <= int(b) < n): raise ValueError(f"bite {it['bite']} is outside 0-{n - 1}")
+        if not _items(j.get("short") or {}) or not (j.get("documentary") or {}).get("chapters"): raise ValueError("both short and documentary are needed")
+    _log(log, f"Interview: picking soundbites from {n} segments (script AI)")
+    with LLM(dict(cfg), log, lambda: False) as llm:
+        j = llm.chat_json("You are an award-winning documentary editor. Reply with JSON only.",
+                          PLAN.format(context=context, segments=lines[:60000], broll=json.dumps(broll), short_secs=short_secs,
+                                      doc_min=doc_min, doc_max=doc_max), max_tokens=6000, check=check)
+    out.write_text(json.dumps(j, indent=1, ensure_ascii=False), encoding="utf-8")
+    return j
+
+
+def _items(p):
+    return list(p.get("items") or [])
+
+
+# ------------------------------------------------------------------ 4 cut
+def _faces_x(src, t0, t1, flip=True):
+    """Average horizontal centre (0..1) of faces in 3 frames of the range, or None (OpenCV; None when it isn't installed)."""
+    try:
+        import cv2
+        import numpy as np  # noqa: F401
+    except ImportError:
+        return None
+    casc = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    xs = []
+    tmp = Path(media.__file__).parent / "_facegrab.jpg"
+    for k in range(3):
+        t = t0 + (t1 - t0) * (k + 1) / 4
+        try:
+            media.ff("-ss", f"{t:.2f}", "-i", src, "-frames:v", 1, "-vf", ("hflip," if flip else "") + "scale=640:-2", tmp, timeout=120)
+            im = cv2.imread(str(tmp)); g = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+            for (x, y, w, h) in casc.detectMultiScale(g, 1.15, 5, minSize=(40, 40)):
+                xs.append(((x + w / 2) / im.shape[1], w * h))
+        except Exception:
+            continue
+    try: tmp.unlink()
+    except OSError: pass
+    if not xs: return None
+    tot = sum(a for _, a in xs)
+    return sum(x * a for x, a in xs) / tot
+
+
+def _vf(kind, xc=None, zoom=1.0, flip=True):
+    """Video filter: mirror removed, then Short = 9:16 crop around xc (0..1) / documentary = 16:9; gentle zoom."""
+    f = ["hflip"] if flip else []
+    if kind == "short":
+        xc = 0.5 if xc is None else min(max(xc, 0.0), 1.0)
+        cw = f"ih*9/16/{zoom}"; ch = f"ih/{zoom}"
+        f.append(f"crop={cw}:{ch}:max(0\\,min(iw-{cw}\\,iw*{xc:.3f}-{cw}/2)):(ih-{ch})/2")
+        f.append("scale=1080:1920:flags=lanczos")
+    else:
+        if zoom > 1.0: f.append(f"crop=iw/{zoom}:ih/{zoom}")
+        f.append("scale=1920:1080:force_original_aspect_ratio=decrease:flags=lanczos,pad=1920:1080:(ow-iw)/2:(oh-ih)/2")
+    f.append("fps=30,format=yuv420p,setsar=1")
+    return ",".join(f)
+
+
+ENC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"]
+
+
+def cut_bite(src, t0, t1, out, kind, k, flip=True):
+    if media.ok(out, 0.5): return out
+    xc = _faces_x(src, t0, t1, flip) if kind == "short" else None
+    zoom = 1.0 if k % 2 == 0 else 1.12   # every other soundbite a little closer: a cut, not a jump
+    media.ff("-ss", f"{t0:.2f}", "-i", src, "-t", f"{t1 - t0:.2f}", "-map", "0:v:0", "-map", "0:a:0",
+             "-vf", _vf(kind, xc, zoom, flip), "-af", "loudnorm=I=-16:TP=-1.5:LRA=11", *ENC, out, timeout=1800)
+    return out
+
+
+def cut_bridge(cfg, text, picture, out, kind, work, k, log=print):
+    """Narration (Kokoro) over a muted picture: (file, start, flip) for B-roll or the next soundbite's footage."""
+    if media.ok(out, 0.5): return out
+    from . import tts
+    wav = Path(work) / "narr" / f"n{k}.wav"; wav.parent.mkdir(exist_ok=True)
+    tts.kokoro_batch(cfg, [(text, wav)], log, "interview narration")
+    d = media.dur(wav) + 0.35
+    f, start, flip = picture
+    media.ff("-ss", f"{start:.2f}", "-i", f, "-i", wav, "-t", f"{d:.2f}", "-map", "0:v:0", "-map", "1:a:0",
+             "-vf", _vf(kind, None, 1.0, flip), "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,apad", *ENC, "-shortest", out, timeout=900)
+    return out
+
+
+# ------------------------------------------------------------------ 5 captions + assemble
+ASS = """[Script Info]
+ScriptType: v4.00+
+PlayResX: {w}
+PlayResY: {h}
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Cap,Arial,{fs},&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,1,0,0,0,100,100,0,0,1,5,2,2,{ml},{ml},{mv},1
+Style: Narr,Arial,{fs},&H0066E0FF,&H0066E0FF,&H00000000,&H96000000,1,1,0,0,100,100,0,0,1,5,2,2,{ml},{ml},{mv},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+
+def _t(t):
+    t = max(0.0, t); return f"{int(t // 3600)}:{int(t % 3600 // 60):02}:{t % 60:05.2f}"
+
+
+def _caption_lines(words, max_words):
+    """[(text, start, end)] chunks of up to max_words, breaking after sentence ends."""
+    out, cur = [], []
+    for w, a, b in words:
+        cur.append((w, a, b))
+        if len(cur) >= max_words or re.search(r"[.!?]$", w):
+            out.append((" ".join(x[0] for x in cur), cur[0][1], cur[-1][2])); cur = []
+    if cur: out.append((" ".join(x[0] for x in cur), cur[0][1], cur[-1][2]))
+    return out
+
+
+def assemble(parts, out, kind, work, cfg, log=print, title=""):
+    """parts: [{"file", "words": [(w, start, end)] relative to the part, "style": "Cap"|"Narr"}]."""
+    w, h = (1080, 1920) if kind == "short" else (1920, 1080)
+    fs, ml, mv, maxw = (70, 90, 430, 5) if kind == "short" else (54, 160, 60, 9)
+    ev, t = [], 0.0
+    lst = Path(work) / f"{kind}_concat.txt"
+    with open(lst, "w", encoding="utf-8") as fh:
+        for p in parts:
+            fh.write(f"file '{Path(p['file']).as_posix()}'\n")
+            d = media.dur(p["file"])
+            for txt, a, b in _caption_lines(p.get("words") or [], maxw):
+                if a >= d: break
+                ev.append(f"Dialogue: 0,{_t(t + a)},{_t(t + min(b + 0.15, d))},{p.get('style', 'Cap')},,0,0,0,,{{\\fad(80,60)}}{txt}\n")
+            t += d
+    ass = Path(work) / f"{kind}.ass"
+    ass.write_text(ASS.format(w=w, h=h, fs=fs, ml=ml, mv=mv) + "".join(ev), encoding="utf-8")
+    joined = Path(work) / f"_{kind}_joined.mp4"
+    media.ff("-f", "concat", "-safe", 0, "-i", lst, "-c", "copy", joined, timeout=1800)
+    sub = ass.as_posix().replace(":", "\\:")
+    media.ff("-i", joined, "-vf", f"subtitles='{sub}'", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-c:a", "copy",
+             "-movflags", "+faststart", out, timeout=7200)
+    joined.unlink(missing_ok=True)
+    try:
+        from . import music
+        music.mix(out, dict(cfg, music_bed_db=float(cfg.get("interview_music_db", -12)), music_hook_db=float(cfg.get("interview_music_db", -12))),
+                  log, 6.0, seed=title or kind, text=title)   # quieter than a narrated Short: the interview is the star
+    except Exception as e:
+        _log(log, f"  music skipped ({str(e)[:120]})")
+    _log(log, f"Interview {kind}: {out} ({media.dur(out) / 60:.1f} min)")
+    return out
+
+
+# ------------------------------------------------------------------ the whole edit
+def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), flip=True, name="interview"):
+    src = Path(src); work = Path(work); work.mkdir(parents=True, exist_ok=True)
+    segs = transcribe(src, work, log)
+    broll = broll_list(src)
+    pl = plan(cfg, segs, context, broll, work, log)
+    bdir = src.parent
+    outs = {}
+    for kind in kinds:
+        items = _items(pl.get("short") or {}) if kind == "short" else [x for c in pl["documentary"]["chapters"] for x in c.get("items", [])]
+        kd = work / kind; kd.mkdir(exist_ok=True)
+        parts, rnd = [], random.Random(7)
+        for k, it in enumerate(items):
+            if "bite" in it:
+                a, b = int(it["bite"][0]), int(it["bite"][1])
+                t0 = max(0.0, segs[a]["start"] - 0.15); t1 = segs[b]["end"] + 0.3
+                f = cut_bite(src, t0, t1, kd / f"{k:02}_bite.mp4", kind, k, flip)
+                words = [(wd, s - t0, e - t0) for x in segs[a:b + 1] for wd, s, e in x["words"]]
+                parts.append({"file": f, "words": words, "style": "Cap"})
+                _log(log, f"  {kind} {k:02}: soundbite {t0:.0f}-{t1:.0f}s \"{segs[a]['text'][:60]}\"")
+            elif it.get("narr"):
+                br = str(it.get("broll") or "")
+                if br in broll:
+                    bf = next((x for x in bdir.iterdir() if x.stem == br and x.suffix.lower() in VIDEO_EXT), None)
+                    pic = (bf, rnd.uniform(0, max(0.0, broll[br] - 8)), False)   # B-roll from the back camera: not mirrored
+                else:   # the next soundbite's picture, muted
+                    nxt = next((x for x in items[k + 1:] if "bite" in x), None)
+                    st = segs[int(nxt["bite"][0])]["start"] if nxt else segs[-1]["start"]
+                    pic = (src, st, flip)
+                f = cut_bridge(cfg, it["narr"], pic, kd / f"{k:02}_narr.mp4", kind, kd, k, log)
+                from . import captions
+                try: words = captions.word_times(kd / "narr" / f"n{k}.wav", it["narr"])
+                except Exception: words = []
+                parts.append({"file": f, "words": words, "style": "Narr"})
+                _log(log, f"  {kind} {k:02}: narration \"{it['narr'][:60]}\"" + (f" over {br}" if br in broll else ""))
+        outs[kind] = assemble(parts, work / f"{name}_{kind}.mp4", kind, kd, cfg, log, pl.get("title", name))
+    (work / "result.json").write_text(json.dumps({k: str(v) for k, v in outs.items()} | {"title": pl.get("title", "")}, indent=1), encoding="utf-8")
+    return outs
