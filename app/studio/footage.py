@@ -443,10 +443,18 @@ _KIND_SYN = {"car": {"car", "sedan", "saloon", "hatchback", "suv", "coupe", "con
              "buildings": {"property", "properties", "building", "buildings", "apartment", "apartments", "house", "houses", "villa", "villas", "hotel", "tower", "towers", "property", "homes", "home", "skyline"}}
 
 
+def _syn(k):
+    """The words that count as the same kind as k (its own group in _KIND_SYN, found by key or member)."""
+    k = k.lower().strip(); base = k.rstrip("s")
+    for key, group in _KIND_SYN.items():
+        if k == key or base == key or k in group or base in group: return group | {k, base}
+    return {k, base}
+
+
 def kind_match(kind, shown):
     """The clip shows something of the beat's kind (sedan for car, apartment block for buildings)."""
     if _none(kind) or _none(shown): return False
-    k = kind.lower().strip(); syn = _KIND_SYN.get(k.rstrip("s") if k.rstrip("s") in _KIND_SYN else k, {k, k.rstrip("s")})
+    k = kind.lower().strip(); syn = _syn(k)
     words = set(re.findall(r"[a-z]+", shown.lower()))
     return bool(words & syn or any(w.rstrip("s") in syn for w in words))
 
@@ -460,7 +468,7 @@ def kind_clash(kind, shown, main=""):
     if re.search(r"\b(pickup|pick-up|truck|lorry|van|bus|tractor|motorbike|motorcycle|scooter|bicycle)\b", sh) and k in ("car", "cars", "electric car", "vehicle") \
             and not re.search(r"\b(truck|pickup|van|bus|motorbike|motorcycle)\b", m):
         return True
-    syn = _KIND_SYN.get(k.rstrip("s") if k.rstrip("s") in _KIND_SYN else k, {k, k.rstrip("s")})
+    syn = _syn(k)
     words = set(re.findall(r"[a-z]+", sh)) | {sh}
     if words & syn or any(w.rstrip("s") in syn for w in words): return False
     animals = {"cat", "dog", "horse", "bird", "cow", "sheep", "goat", "fish", "rabbit", "mouse"}
