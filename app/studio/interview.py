@@ -151,14 +151,18 @@ Rules: tell ONE story with a beginning, middle and end (pick the strongest threa
 that went from the Nation of Islam to its own mosque). Open with the most gripping soundbite of that thread (under 20 seconds);
 then 2-4 more soundbites from the SAME thread (each 5-20 seconds; a sub-range of a soundbite's segments is fine), joined by up to
 three one-sentence narration lines that carry the story forward; up to TWO context inserts from the notes that explain the
-history behind it (only what the note says); end on a line that lands the story. No small talk, no logistics, nothing off-thread.
+history behind it (only what the note says); END ON A SOUNDBITE that lands the story. No small talk, no logistics, nothing off-thread.
+Narration only connects: it never states anything that is not in the transcript or the notes, never links two facts that the
+sources don't link (e.g. do not claim the mosque stands on land that was taken), and attributes the speaker's claims to him
+("Mr. Clinton says ...", "as he tells it ...") instead of stating them as fact.
 Also write "hook": an on-screen line for the opening soundbite, under 45 characters, true to the story.
 Reply with JSON only: {{"hook": "...", "items": [{{"bite": [first, last]}} | {{"narr": "...", "broll": ""}} | {{"insert": "...", "note": n, "visual": "...", "card": "..."}}]}}"""
 
 
 def short_plan(cfg, segs, pl, context, notes, work, log=print, short_secs=90):
     """The Short, cut from the documentary's chosen material (a separate pass: one plan for both came out weak). Cached."""
-    out = Path(work) / "short_plan.json"
+    import hashlib
+    out = Path(work) / f"short_plan_{hashlib.md5(SHORT.encode()).hexdigest()[:6]}.json"   # a changed brief makes a new plan
     if out.exists(): return json.loads(out.read_text(encoding="utf-8"))
     from .llm import LLM
     bites = sorted({tuple(it["bite"]) for c in pl["documentary"]["chapters"] for it in c.get("items", []) if "bite" in it})
@@ -168,6 +172,7 @@ def short_plan(cfg, segs, pl, context, notes, work, log=print, short_secs=90):
     def check(j, strict=True):
         its = j.get("items") or []
         if not its or not any("bite" in it for it in its): raise ValueError("the Short needs soundbites")
+        if strict and "bite" not in its[-1]: raise ValueError("the Short must END on a soundbite, not narration")
         for it in its:
             if "bite" in it:
                 a, b = int(it["bite"][0]), int(it["bite"][1])
