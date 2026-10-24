@@ -84,3 +84,32 @@ def test_shots_head_at_bottom_edge_is_cut_away():
     from studio import shots
     assert shots.kind_of({"faces": [[0.5, 0.9, 0.12, 0.2]]}) == "empty"
     assert shots.kind_of({"faces": [[0.5, 0.45, 0.12, 0.2]]}) == "guest"
+
+
+def _segs(n, sec=10.0):
+    return [{"i": i, "start": i * sec, "end": i * sec + sec - 1.0, "text": f"Sentence {i}.", "words": []} for i in range(n)]
+
+
+def test_augment_keeps_order_drops_and_pauses_for_facts():
+    from studio import interview
+    segs = _segs(12)
+    tri = {"drop": [[3, 4, "small talk"]], "facts": [{"after": 6, "note": 0, "text": "A fact.", "visual": "harbour"}],
+           "jokes": [{"after": 7, "text": "A joke."}], "chapters": [{"at": 0, "title": "Start"}, {"at": 9, "title": "Later"}],
+           "pictures": [{"from": 0, "to": 11, "visual": "Bermuda road"}]}
+    its = interview.augment_items(tri, segs)
+    bites = [tuple(x["bite"]) for x in its if "bite" in x]
+    kept = [i for a, b in bites for i in range(a, b + 1)]
+    assert kept == [0, 1, 2, 5, 6, 7, 8, 9, 10, 11]   # in order, the dropped stretch gone
+    k = next(i for i, x in enumerate(its) if "insert" in x)
+    assert its[k - 1]["bite"][1] == 6 and its[k + 1]["bite"][0] == 7   # paused after 6, picks up at 7
+    assert not any("narr" in its[i] and "insert" in its[i - 1] for i in range(1, len(its)))   # never two in a row
+    assert next(x for x in its if "bite" in x and x["bite"][0] == 9)["chapter"] == "Later"
+    assert all(x.get("visual") == "Bermuda road" for x in its if "bite" in x)
+
+
+def test_cut_points_join_without_repeats():
+    from studio import interview
+    segs = _segs(5)
+    _, a1 = interview._cut_points(segs, 0, 1)
+    b0, _ = interview._cut_points(segs, 2, 3)
+    assert a1 <= b0 and a1 > segs[1]["end"] and b0 < segs[2]["start"]

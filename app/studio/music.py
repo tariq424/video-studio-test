@@ -128,7 +128,7 @@ def mix(mp4, cfg, log, hook_secs=6.0, seed=None, text=""):
         music = "".join(tracks) + (f"amix=inputs={len(tracks)}:normalize=0:duration=longest" if len(tracks) > 1 else "anull") + ",aformat=channel_layouts=stereo[m];"
         # duck the music under the voice (sidechain), then put the two together; the voice level is untouched
         flt = ";".join(parts) + ";" + music + \
-              "[0:a]asplit=2[v][key];[m][key]sidechaincompress=threshold=0.05:ratio=6:attack=40:release=500[md];" \
+              f"[0:a]asplit=2[v][key];[m][key]sidechaincompress=threshold={float(cfg.get('music_duck_threshold', 0.05))}:ratio={float(cfg.get('music_duck_ratio', 6))}:attack=40:release=500[md];" \
               "[v][md]amix=inputs=2:normalize=0:duration=first[a]"
         tmp = mp4.with_name("_music_" + mp4.name)
         media.ff(*ins, "-filter_complex", flt, "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
