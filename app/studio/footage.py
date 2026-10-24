@@ -478,7 +478,32 @@ def kind_clash(kind, shown, main=""):
     return False   # different wording, not a proven contradiction
 
 
-def contra_verdict(cfg, j, mainv, narration_place="", neutral=False, log=print):
+RELATE = """A news video's narration line and a description of a stock clip that would play over it.
+Narration: "{narration}"
+Clip shows: "{seen}"
+Is the clip clearly UNRELATED to what the line is about (a washing machine, a spinning coin or wax seals over a line about an AI
+company's funding)? Loosely related scenes are fine (offices, screens, money, documents, a city skyline for a business story;
+people at work for a company story). Reply with JSON only: {{"unrelated": true or false, "why": "a few words"}}"""
+_RELATE_CACHE = {}
+
+
+def text_unrelated(cfg, narration, seen, log=print):
+    """The script AI (stronger at meaning than the small vision model) judges the vision model's description against the
+    narration. -> reason string when clearly unrelated, else "". Can't tell -> "" (not a proven contradiction)."""
+    if not cfg.get("clip_relate_check", True) or not seen or not narration: return ""
+    key = (narration[:200], seen[:200])
+    if key not in _RELATE_CACHE:
+        try:
+            with LLM(cfg, log, lambda: False) as llm:
+                j = llm.chat_json("You are a precise video editor. Reply with JSON only.",
+                                  RELATE.format(narration=narration[:400].replace('"', "'"), seen=seen[:300].replace('"', "'")), max_tokens=80)
+            _RELATE_CACHE[key] = (str(j.get("why") or "unrelated")[:60]) if str(j.get("unrelated")).strip().lower() in ("true", "yes", "1") else ""
+        except Exception:
+            _RELATE_CACHE[key] = ""
+    return _RELATE_CACHE[key]
+
+
+def contra_verdict(cfg, j, mainv, narration_place="", neutral=False, log=print, narration=""):
     """-> (ok, reason) from the CONTRA answers."""
     yes = lambda k, d=False: str(j.get(k, d)).strip().lower() in ("true", "yes", "1")
     if yes("platform"): return False, "copyright: screen capture / thumbnail / channel watermark"
@@ -495,6 +520,9 @@ def contra_verdict(cfg, j, mainv, narration_place="", neutral=False, log=print):
     if yes("mood_clash"): return False, "the mood contradicts the narration"
     if yes("unrelated"): return False, "nothing to do with what the narration says"
     if yes("stand_in"): return False, "a stranger would be taken for a real person the narration names"
+    if not neutral:
+        why = text_unrelated(cfg, narration, str(j.get("seen") or ""), log)
+        if why: return False, f"unrelated to the narration ({why})"
     return True, ""
 
 
@@ -524,7 +552,7 @@ def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None, narratio
     yes = lambda k, d: str(j.get(k, d)).strip().lower() in ("true", "yes", "1")
     seen = str(j.get("seen") or c["desc"])[:160]
     if v2:
-        ok, why = contra_verdict(cfg, j, mv, place, neutral, log)
+        ok, why = contra_verdict(cfg, j, mv, place, neutral, log, narration=narration or c.get("query", ""))
         if not ok: return False, why, seen
         story_brands = [b for v in ((guard or {}).get("kinds") or {}).values() for b in v]
         other = [b for b in _brands(j) if not any(_norm_brand(sb) and (_norm_brand(sb) in _norm_brand(b) or _norm_brand(b) in _norm_brand(sb)) for sb in story_brands)]
