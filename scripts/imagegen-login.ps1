@@ -2,14 +2,15 @@
 #   gemini | flow : Chrome, F:\videos_test\flow_profile (the Google profile the Gemini image rung and Flow share)
 #   chatgpt       : Chrome, F:\videos_test\chatgpt_profile
 #   bing          : Microsoft Edge, F:\videos_test\bing_profile (separate from your everyday Edge profile)
+#   marble        : Chrome, F:\videos_test\marble_profile (World Labs Marble: recreated scenes, the ladder's last rung, on demand)
 # Then close the window: a profile can't be used by two browsers at once, so close it before a job runs.
 #   powershell -ExecutionPolicy Bypass -File scripts\imagegen-login.ps1 -Site chatgpt
-param([ValidateSet('gemini', 'flow', 'chatgpt', 'bing')][string]$Site = 'gemini')
+param([ValidateSet('gemini', 'flow', 'chatgpt', 'bing', 'marble')][string]$Site = 'gemini')
 $ErrorActionPreference = 'Stop'
 $Urls = @{ gemini = 'https://gemini.google.com/app'; flow = 'https://labs.google/fx/tools/flow'
-           chatgpt = 'https://chatgpt.com/auth/login'; bing = 'https://www.bing.com/images/create' }
+           chatgpt = 'https://chatgpt.com/auth/login'; bing = 'https://www.bing.com/images/create'; marble = 'https://marble.worldlabs.ai/' }
 $Profiles = @{ gemini = 'F:\videos_test\flow_profile'; flow = 'F:\videos_test\flow_profile'
-               chatgpt = 'F:\videos_test\chatgpt_profile'; bing = 'F:\videos_test\bing_profile' }
+               chatgpt = 'F:\videos_test\chatgpt_profile'; bing = 'F:\videos_test\bing_profile'; marble = 'F:\videos_test\marble_profile' }
 $Profile = $Profiles[$Site]
 New-Item -ItemType Directory -Force $Profile | Out-Null
 if ($Site -eq 'bing') {
