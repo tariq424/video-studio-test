@@ -28,7 +28,7 @@ from pathlib import Path
 from . import media
 
 VIDEO_EXT = (".mov", ".mp4", ".m4v", ".mkv")
-CUT_VERSION = "13"   # bump when the way parts are cut changes, so cached parts are made again
+CUT_VERSION = "14"   # bump when the way parts are cut changes, so cached parts are made again
 PLAN = """You edit a documentary from the creator's OWN interview footage. The interview audio is the star: viewers should mostly
 hear the people on camera. Your narration only bridges: a hook, where we are, a line between topics, a closing line.
 
@@ -274,11 +274,22 @@ def augment_items(tri, segs, max_bite=45.0):
     """Triage -> items in the guest's order: his talk (bites, split at facts / jokes / chapters and every ~max_bite s so each
     gets its own picture), the facts and jokes at their pauses, dropped stretches gone."""
     n = len(segs)
+    ends = lambda i: 0 <= i < n and segs[i]["text"].rstrip()[-1:] in ".?!"
     drop = set()
-    for d in tri.get("drop") or []: drop.update(range(int(d[0]), int(d[1]) + 1))
+    for d in tri.get("drop") or []:   # never cut him off mid-sentence: a drop starts after a finished sentence and ends at one
+        a, b = int(d[0]), int(d[1])
+        for _ in range(3):
+            if a <= b and a > 0 and not ends(a - 1): a += 1
+        for _ in range(3):
+            if b >= a and not ends(b): b -= 1
+        if a <= b: drop.update(range(a, b + 1))
+    def at_end(i):   # a fact / joke waits for the end of his sentence
+        for j in range(i, min(n, i + 4)):
+            if ends(j): return j
+        return i
     after = {}
-    for f in tri.get("facts") or []: after.setdefault(int(f["after"]), []).append(dict(insert=f["text"], note=f.get("note"), visual=f.get("visual", ""), card=f.get("card", "")))
-    for f in tri.get("jokes") or []: after.setdefault(int(f["after"]), []).append(dict(narr=f["text"], broll="", joke=True))
+    for f in tri.get("facts") or []: after.setdefault(at_end(int(f["after"])), []).append(dict(insert=f["text"], note=f.get("note"), visual=f.get("visual", ""), card=f.get("card", "")))
+    for f in tri.get("jokes") or []: after.setdefault(at_end(int(f["after"])), []).append(dict(narr=f["text"], broll="", joke=True))
     chap = {int(c["at"]): str(c.get("title") or "")[:40] for c in tri.get("chapters") or [] if 0 <= int(c.get("at", -1)) < n}
     pics = [(int(p.get("from", 0)), int(p.get("to", 0)), str(p.get("visual") or "")) for p in tri.get("pictures") or []]
     def visual(a, b): return next((v for f, t, v in pics if v and f <= b and t >= a), "")
@@ -524,8 +535,9 @@ class TripFootage:
                "what who where when how very just like yeah okay oh so but not no yes there here have has had be been do does did will "
                "would can could about over into up down out all some many more most also bermuda".split())
 
-    def __init__(self, catalog_dir, exclude=(), root=None, log=print):
+    def __init__(self, catalog_dir, exclude=(), root=None, log=print, near=None, radius_km=2.0):
         self.log, self.root, self.recs, self.pos = log, root, [], {}
+        self.near, self.radius = near, radius_km
         ex = {str(Path(x)).lower() for x in exclude}
         lens = {round(float(x[1]), 1) for x in exclude if isinstance(x, tuple)}
         for f in sorted(Path(catalog_dir).glob("*.json")) if catalog_dir and Path(catalog_dir).is_dir() else []:
@@ -542,6 +554,11 @@ class TripFootage:
             if hm and not 6 <= int(hm.group(1)) < 20: continue   # night clips (a hotel TV passed for "aerial view") don't fit a daytime story
             r["_vid"], r["_words"] = vid, set(re.findall(r"[a-z]{3,}", words)) - self.STOP
             r["_where"] = " ".join(str(r.get(k, "")) for k in ("place", "area", "address")).lower()
+            r["_near"] = True
+            if near and r.get("lat") is not None:   # filmed in the area of the conversation (Hamilton), not Dockyard / a hotel lawn
+                km = 6371 * math.hypot(math.radians(float(r["lat"]) - near[0]), math.radians(float(r["lon"]) - near[1]) * math.cos(math.radians(near[0])))
+                r["_near"] = km <= radius_km
+            elif near: r["_near"] = False   # no GPS: can't tell where it was filmed
             self.recs.append(r)
         _log(log, f"  trip footage: {len(self.recs)} usable clip(s) / photo(s) from the catalogue")
 
@@ -565,9 +582,11 @@ class TripFootage:
                 if not places or not any(pl in r["_where"].replace("'", "").replace(".", "") for pl in places): continue
                 sc = 3 + len(want & r["_words"])
             elif mode == "subject":
+                if not r["_near"]: continue   # owner: "Dockyard is nowhere near Hamilton" - only footage from where he is talking
                 sc = len(want & r["_words"])
-                if sc < 2: continue
+                if sc < 2 or str(r.get("people", "")) not in ("none", ""): continue
             else:
+                if not r["_near"] or str(r.get("people", "")) not in ("none", ""): continue   # scenery: from the area, nobody in it
                 sc = len(r["_words"] & self.SCENIC)
                 if sc < 2 or places: continue   # a named place he talks about never gets anonymous scenery as if it were it
             sc += 0.5 if r["_vid"] else 0
@@ -746,6 +765,17 @@ class Ladder:
         return out, "blur", ""
 
 
+def gps_of(path):
+    """(lat, lon) from an iPhone video's location tag, or None."""
+    import subprocess
+    try:
+        j = json.loads(subprocess.run(["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", str(path)], capture_output=True, text=True, timeout=30).stdout or "{}")
+        m = re.match(r"([+-]\d+\.\d+)([+-]\d+\.\d+)", j.get("format", {}).get("tags", {}).get("com.apple.quicktime.location.ISO6709", ""))
+        return (float(m[1]), float(m[2])) if m else None
+    except Exception:
+        return None
+
+
 def own_clips(src, root, log=print, radius=150.0):
     """Your other clips filmed near the interview (GPS in the files: iPhone ISO6709), with no face in them (the prayer hall,
     hallways): [(file, seconds, rotation)]. Copies with the same length count once. Cached in own_clips.json."""
@@ -799,32 +829,78 @@ def still_clip(img, d, out, kind):
     return out
 
 
-def cut_bite_framed(src, t0, t1, out, kind, flip, an, cuts, log=print, ladder=None, visual="", text="", credits=None):
-    """A soundbite with its own audio and a framed picture: on the guest, level, and covered by a cutaway where only the
-    holder's face would show."""
+XFADE = 0.5   # seconds: picture changes inside his talk dissolve instead of cutting (owner, 2026-10-24: "transitions too fast")
+
+
+def _snap(bounds, words, t0, t1, reach=1.2):
+    """Move each picture change to the nearest pause between his words (within reach seconds), so the picture never
+    changes in the middle of a word or phrase."""
+    gaps = [(w1[2] + w2[1]) / 2 for w1, w2 in zip(words, words[1:]) if w2[1] - w1[2] >= 0.12]
+    out, last = [], t0
+    for b in bounds:
+        near = [g for g in gaps if abs(g - b) <= reach and g - last >= 1.5 and t1 - g >= 1.5]
+        nb = min(near, key=lambda g: abs(g - b)) if near else b
+        if nb - last < 1.5 or t1 - nb < 1.5: continue   # too close to the previous change / the end: merge
+        out.append(nb); last = nb
+    return out
+
+
+def cut_bite_framed(src, t0, t1, out, kind, flip, an, cuts, log=print, ladder=None, visual="", text="", credits=None, words=None,
+                    soft_in=True, soft_out=True):
+    """A soundbite with its own audio and a framed picture: on the guest, level, covered where the picture is bad (the
+    holder, a ceiling, a shirt close-up, the phone on its side). Picture changes sit in pauses and dissolve."""
     if media.ok(out, 0.5): return out
     from . import shots
     tmpd = Path(out).with_suffix(""); tmpd.mkdir(exist_ok=True)
-    segs, lst = [], tmpd / "v.txt"
-    for n, (a, b, k, g, tilt) in enumerate(shots.plan_shots(an, t0, t1)):
+    plan = shots.plan_shots(an, t0, t1, min_len=3.0)
+    if len(plan) > 1 and words:   # snap the changes to pauses
+        nb = _snap([p[0] for p in plan[1:]], words, t0, t1)
+        old = plan; plan = []
+        edges = [t0] + nb + [t1]
+        for a, b in zip(edges, edges[1:]):   # each new piece takes the kind of the old shot covering most of it
+            best = max(old, key=lambda p: min(b, p[1]) - max(a, p[0]))
+            plan.append((a, b, best[2], best[3], best[4]))
+        merged = []
+        for p in plan:   # neighbours of the same kind join
+            if merged and merged[-1][2] == p[2] and merged[-1][3] == p[3]: merged[-1] = (merged[-1][0], p[1], p[2], p[3], p[4])
+            else: merged.append(p)
+        plan = merged
+    segs, durs = [], []
+    for n, (a, b, k, g, tilt) in enumerate(plan):
         v = tmpd / f"s{n:02}.mp4"; d = b - a
+        ext = XFADE if n < len(plan) - 1 else 0.0   # each piece runs on under the dissolve into the next
         if k == "guest" and not shots.holder_out(kind, g): k = "self"   # owner: "cut me out completely" - no crop can, so cut away
         if k in ("self", "empty") and ladder is not None:   # his voice goes on; the picture comes from the ladder
-            _, how, credit = ladder.picture(a, b, v, visual, text, why=k)
+            _, how, credit = ladder.picture(a, b + ext, v, visual, text, why=k)
             if credits is not None: credits.append((a - t0, b - t0, how, credit))
-            _log(log, f"    {a:.0f}-{b:.0f}s: {'holder in shot' if k == 'self' else 'ceiling / blank'} -> {how}" + (f" ({credit})" if credit else "")
+            _log(log, f"    {a:.0f}-{b:.0f}s: {'holder in shot' if k == 'self' else 'ceiling / blank / unusable'} -> {how}" + (f" ({credit})" if credit else "")
                  + (f" [{Path(ladder.trip.last).name}]" if how.startswith("trip") and ladder.trip and getattr(ladder.trip, "last", None) else ""))
         elif k in ("self", "empty"):   # cutaway: the sound goes on, the picture shows the guest elsewhere / B-roll
-            f, st, fl, gb, rot = cuts.take(d)
+            f, st, fl, gb, rot = cuts.take(d + ext)
             vf = (rot + "," if rot else "") + shots.vf_frame(kind, gb, 0.0, fl)
-            media.ff("-ss", f"{st:.2f}", "-i", f, "-t", f"{d:.2f}", "-an", "-vf", vf, *ENC[:6], v, timeout=900)
+            media.ff("-ss", f"{st:.2f}", "-i", f, "-t", f"{d + ext:.2f}", "-an", "-vf", vf, *ENC[:6], v, timeout=900)
         else:
-            media.ff("-ss", f"{a:.2f}", "-i", src, "-t", f"{d:.2f}", "-an", "-vf", shots.vf_frame(kind, g, tilt, flip), *ENC[:6], v, timeout=900)
-        segs.append(v)
-    lst.write_text("".join(f"file '{x.as_posix()}'\n" for x in segs), encoding="utf-8")
-    media.ff("-f", "concat", "-safe", 0, "-i", lst, "-ss", f"{t0:.2f}", "-i", src, "-t", f"{t1 - t0:.2f}", "-map", "0:v:0", "-map", "1:a:0",
-             "-c:v", "copy", "-af", f"loudnorm=I=-16:TP=-1.5:LRA=11,afade=t=in:st=0:d=0.06,afade=t=out:st={max(0.0, t1 - t0 - 0.08):.2f}:d=0.08",
-             *ENC[6:], "-shortest", out, timeout=1800)
+            media.ff("-ss", f"{a:.2f}", "-i", src, "-t", f"{d + ext:.2f}", "-an", "-vf", shots.vf_frame(kind, g, tilt, flip), *ENC[:6], v, timeout=900)
+        segs.append(v); durs.append(d)
+    T = t1 - t0
+    edge = ",".join(([f"fade=t=in:st=0:d=0.3"] if soft_in else []) + ([f"fade=t=out:st={max(0.0, T - 0.3):.2f}:d=0.3"] if soft_out else [])) or "null"
+    # (a soft start / end only where his talk meets a fact or a jump in time; two pieces of one continuous stretch join straight)
+    if len(segs) == 1:
+        vin = ["-i", segs[0]]; flt = ["-filter_complex", f"[0:v]{edge}[vo]"]; vmap = "[vo]"
+    else:
+        vin = [x for sg in segs for x in ("-i", sg)]
+        chain, prev, off = [], "[0:v]", 0.0
+        for i in range(1, len(segs)):
+            off += durs[i - 1]
+            lab = f"[x{i}]"
+            chain.append(f"{prev}[{i}:v]xfade=transition=fade:duration={XFADE}:offset={off:.3f}{lab}")
+            prev = lab
+        chain.append(f"{prev}{edge}[vo]")
+        flt = ["-filter_complex", ";".join(chain)]; vmap = "[vo]"
+    n_in = len(segs)
+    media.ff(*vin, "-ss", f"{t0:.2f}", "-i", src, *flt, "-t", f"{t1 - t0:.2f}", "-map", vmap, "-map", f"{n_in}:a:0",
+             "-af", f"loudnorm=I=-16:TP=-1.5:LRA=11,afade=t=in:st=0:d=0.06,afade=t=out:st={max(0.0, t1 - t0 - 0.08):.2f}:d=0.08",
+             *ENC, out, timeout=1800)
     return out
 
 
@@ -1000,6 +1076,7 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
     bdir = src.parent
     from . import shots
     an = shots.analyze(src, root, flip, log)
+    if cfg.get("interview_vision_check", True): an = shots.vision_check(an, root, cfg, log)
     bfiles = [x for x in sorted(bdir.iterdir()) if x.stem in broll and x.suffix.lower() in VIDEO_EXT]
     nice = next((x for x in bfiles if "bay" in x.stem.lower() or "wave" in x.stem.lower()), bfiles[0] if bfiles else None)
     card_bg = (nice, 2.0, False, shots.orient(nice, root, log)) if nice else (src, 30.0, flip, "")
@@ -1022,7 +1099,8 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
         cuts = Cutaways(src, an, used, bfiles, root, flip, log)
         oc = own_clips(src, root, log)
         if trip is None:
-            trip = TripFootage(Path(src).parent / "labeled" / "catalog", [src] + [f for f, _, _ in oc], root, log) if cfg.get("interview_trip_footage", True) else False
+            trip = TripFootage(Path(src).parent / "labeled" / "catalog", [src] + [f for f, _, _ in oc], root, log, near=gps_of(src),
+                               radius_km=float(cfg.get("interview_trip_radius_km", 2.0))) if cfg.get("interview_trip_footage", True) else False
         ladder = Ladder(cfg, src, flip, kd, kind, log, own=oc, scenic=card_bg, trip=trip or None)
         hk = hook(cfg, segs, context, kind, work, log) if cfg.get("interview_hook", True) and not (kind == "short" and sp) else None
         if kind == "short" and sp and items and "bite" in items[0]:   # the Short's own opener is its cold open: hook text from its thread
@@ -1043,7 +1121,10 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                 cj = kd / f"{k:02}_bite.json"
                 if media.ok(kd / f"{k:02}_bite.mp4", 0.5) and cj.exists(): credits = json.loads(cj.read_text(encoding="utf-8"))
                 f = cut_bite_framed(src, t0, t1, kd / f"{k:02}_bite.mp4", kind, flip, an, cuts, log, ladder=ladder,
-                                    visual=str(it.get("visual") or ""), text=said, credits=credits)
+                                    visual=str(it.get("visual") or ""), text=said, credits=credits,
+                                    words=[w for x in segs[max(0, a - 1):b + 2] for w in x["words"]],
+                                    soft_in=not (k > 0 and "bite" in items[k - 1] and int(items[k - 1]["bite"][1]) == a - 1),
+                                    soft_out=not (k + 1 < len(items) and "bite" in items[k + 1] and int(items[k + 1]["bite"][0]) == b + 1))
                 cj.write_text(json.dumps(credits), encoding="utf-8")
                 words = [(wd, s - t0, e - t0) for x in segs[a:b + 1] for wd, s, e in x["words"]]
                 parts.append({"file": f, "words": words, "style": "Cap", "hook": it.get("hook_text", ""), "chapter": it.get("chapter", ""),

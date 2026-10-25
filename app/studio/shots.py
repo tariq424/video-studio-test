@@ -155,8 +155,46 @@ def analyze(src, work, flip=True, log=print):
     return res
 
 
+SHOT_CHECK = """This is one frame from a phone video of a conversation filmed while walking and driving. Is it a usable shot for a
+documentary? Reply with JSON only: {"shot": "scenery|street|building|interior|person|clothing_closeup|hand_or_finger|ceiling|floor|blurry|other",
+"sideways": true|false, "usable": true|false}. Not usable: a close-up of clothing or a shirt filling the frame, a hand or finger over the
+lens, a ceiling, a floor, a blurry smear, or a picture lying on its side or upside down."""
+
+
+def vision_check(an, work, cfg, log=print, every=2):
+    """The local vision model looks at the seconds where no face was found (every 2nd second, applied to both): shirt
+    close-ups, a finger over the lens, floors, and stretches filmed with the phone on its side are marked bad and get
+    covered like a ceiling (owner, 2026-10-24 review of v15). Cached in faces.json ("vis")."""
+    secs = an.get("secs") or []
+    if not secs or an.get("vis") == 1 or not cfg: return an
+    fd = Path(work) / "frames1s"
+    try:
+        from . import footage
+        from .llm import parse_json
+    except Exception:
+        return an
+    todo = [x for x in secs if kind_of(x) == "none" and "bad" not in x]
+    log(f"  framing: the vision model checks {len(todo[::every])} faceless frames (shirt close-ups, fingers, sideways)")
+    by = {x["t"]: x for x in secs}
+    n_bad = 0
+    for x in todo[::every]:
+        img = fd / f"{x['t'] + 1:05d}.jpg"
+        if not img.exists(): continue
+        try: j = parse_json(footage._vision(dict(cfg, vet_provider="local"), img, SHOT_CHECK))
+        except Exception: continue
+        bad = (not bool(j.get("usable", True))) or bool(j.get("sideways")) or str(j.get("shot", "")) in ("clothing_closeup", "hand_or_finger", "ceiling", "floor", "blurry")
+        for t in range(x["t"], x["t"] + every):
+            if t in by and kind_of(by[t]) == "none": by[t]["bad"] = bool(bad)
+        n_bad += bool(bad)
+    an["vis"] = 1
+    (Path(work) / "faces.json").write_text(json.dumps(an), encoding="utf-8")
+    log(f"  framing: {n_bad} faceless frame(s) marked unusable")
+    return an
+
+
 def kind_of(s):
     small, big = split(s["faces"])
+    if s.get("bad") and not small: return "empty"   # the vision check: shirt close-up / finger / sideways / floor
     ceiling = s.get("top", 0) > CEILING_TOP
     if small and min(f[1] for f in small) > GUEST_LOW: return "empty"   # only the top of his head at the bottom: cut away to him elsewhere
     if small and not (ceiling and max(f[1] for f in small) > 0.7): return "guest"   # (the guest's head poking up under a ceiling: no)
