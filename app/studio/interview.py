@@ -906,6 +906,7 @@ def cut_bite_framed(src, t0, t1, out, kind, flip, an, cuts, log=print, ladder=No
     for n, (a, b, k, g, tilt) in enumerate(plan):
         v = tmpd / f"s{n:02}.mp4"; d = b - a
         ext = XFADE if n < len(plan) - 1 else 0.0   # each piece runs on under the dissolve into the next
+        if keep and place and k == "none": k = "blur"   # a clip filmed mostly on the holder's neck (third floor): only shots of the guest stay
         if keep and k == "blur":   # the holder's close-up / a finger: the nearest clean moment of the SAME clip, else blurred
             cs = clean_start(an, a, b, d + ext, media.dur(src))
             if cs is not None:
