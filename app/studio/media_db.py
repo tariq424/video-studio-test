@@ -31,10 +31,24 @@ def connect(cfg):
     return db
 
 
+def canon(url):
+    """One URL per item: a Google Photos link seen inside a search or an album -> https://photos.google.com/photo/<id>."""
+    if "photos.google.com" in url and "/photo/" in url: return "https://photos.google.com/photo/" + url.split("/photo/", 1)[1].split("?")[0].strip("/")
+    return url
+
+
+def dedupe(db):
+    """Merge rows whose URLs are the same item (made before canon())."""
+    rows = [dict(zip(COLS, r)) for r in db.execute("SELECT * FROM items").fetchall()]
+    db.execute("DELETE FROM items"); db.commit()
+    for r in rows: upsert(db, r)
+
+
 def upsert(db, row):
     """Merge: a field already filled is only replaced by a non-empty new value; found_by collects every search."""
     row = {k: v for k, v in row.items() if k in COLS}
     if not row.get("url"): return
+    row["url"] = canon(row["url"])
     cur = db.execute("SELECT * FROM items WHERE url=?", (row["url"],)).fetchone()
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
     if cur:
