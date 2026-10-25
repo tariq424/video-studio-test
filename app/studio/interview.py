@@ -184,6 +184,8 @@ def short_plan(cfg, segs, pl, context, notes, work, log=print, short_secs=90, tr
     import hashlib
     topics = ", ".join(cfg.get("interview_short_topics") or []) or "(the strongest thread)"
     out = Path(work) / f"short_plan_{hashlib.md5((SHORT + topics + str(short_secs) + str(bool(tri))).encode()).hexdigest()[:6]}.json"   # a changed brief makes a new plan
+    if cfg.get("interview_short_file") and Path(cfg["interview_short_file"]).exists():   # a Short plan written by hand
+        return json.loads(Path(cfg["interview_short_file"]).read_text(encoding="utf-8"))
     if out.exists():
         j = json.loads(out.read_text(encoding="utf-8")); j["items"] = end_on_bite(_items(j)); return j
     from .llm import LLM
@@ -261,6 +263,8 @@ def triage(cfg, segs, context, notes, work, log=print):
     """The augment plan for the documentary (owner, 2026-10-24): keep the guest's narrative in order, drop only boring or repeated
     stretches, pause him for facts at natural breaks, a few light jokes in relaxed moments. Cached in triage.json."""
     out = Path(work) / "triage.json"
+    if cfg.get("interview_triage_file") and Path(cfg["interview_triage_file"]).exists():   # an edit plan written by hand
+        return json.loads(Path(cfg["interview_triage_file"]).read_text(encoding="utf-8"))
     if out.exists(): return json.loads(out.read_text(encoding="utf-8"))
     n = len(segs)
     lines = "\n".join((f"--- next clip of the same afternoon (clip {x['src']}) ---\n" if k and x.get("src", 0) != segs[k - 1].get("src", 0) else "")
