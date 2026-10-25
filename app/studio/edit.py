@@ -241,6 +241,7 @@ def _tall(sd):
 # ---------------------------------------------------------------- job kinds and timelines
 def outputs(job):
     """Finished outputs the editor can open: ["short", "long"] (either or both)."""
+    if _iv(job): return _ie().outputs(job)
     from .pipeline import Job
     s = Job(job).state; out = []
     if s.get("short_output") and (Path(job) / "short" / "public" / "teaser.json").exists(): out.append("short")
@@ -261,6 +262,7 @@ def _long_kind(job):
 
 def kind(job):
     """short | explainer | long | None. A job with both outputs edits the one in state 'edit_target' (default: the Short)."""
+    if _iv(job): return _ie().kind(job)
     from .pipeline import Job
     s = Job(job).state; outs = outputs(job)
     if "short" in outs and (s.get("edit_target") != "long" or "long" not in outs or not v2()): return "short"
@@ -268,6 +270,7 @@ def kind(job):
     return None
 
 def set_target(job, target):
+    if _iv(job): return _ie().set_target(job, target)
     from .pipeline import Job
     if not v2(): raise ValueError("switching between the Short and the explainer is off (setting post_edit_v2)")
     if target not in ("short", "long"): raise ValueError("target must be short or long")
@@ -356,6 +359,7 @@ def _is_own(bg):
 
 def beats(job):
     """The timeline for the job page: {kind, beats: [{id, start, dur, label, editable}]}."""
+    if _iv(job): return _ie().beats(job)
     k = kind(job)
     if k == "short":
         tz = _teaser(job)
@@ -383,6 +387,7 @@ def workspace(job, k=None):
 
 def open_beat(job, bid, cfg, log):
     """Make sure the beat has a review entry with its current visual among the candidates, and thumbnails. -> rv"""
+    if _iv(job): return _ie().open_beat(job, bid, cfg, log)
     from . import review
     job = Path(job); k = kind(job); ws = workspace(job, k); sd, rd = review._p(ws); rd.mkdir(parents=True, exist_ok=True)
     with review._lock(ws):
@@ -493,6 +498,19 @@ def _long_workspace(job, cfg):
 # ---------------------------------------------------------------- preview and apply
 _busy, _lk = {}, threading.Lock()
 
+
+def _iv(job):
+    """An interview job (interview_edit.py) - its own pieces, candidates and re-assembly."""
+    try:
+        from .interview_edit import is_interview
+        return is_interview(job)
+    except Exception: return False
+
+
+def _ie():
+    from . import interview_edit
+    return interview_edit
+
 def _plan_beat(job, bid, cids, fit, cfg):
     """Items for the chosen candidates, fitted to the beat. -> (k, ws, sd, rv, beat-info, fitted list, mode, why)"""
     from . import review
@@ -515,6 +533,7 @@ def _story(job):
 
 def preview(job, bid, cids, fit, cfg, log):
     """Half-resolution preview of the beat as it will look in the video (narration included). -> {video, fit, why}"""
+    if _iv(job): return _ie().preview(job, bid, cids, fit, cfg, log)
     from . import review
     k, ws, sd, rv, d, lay, mode, why = _plan_beat(job, bid, cids, fit, cfg)
     pd = Path(job) / "edit" / "previews"; pd.mkdir(parents=True, exist_ok=True)
@@ -722,6 +741,7 @@ def _hroot(job): return Path(job) / "edit" / "history"
 
 def history(job):
     """Applied edits that can be undone, oldest first: [{n, beat, kind, t, label}]."""
+    if _iv(job): return []
     r = _hroot(job); out = []
     for d in sorted(r.glob("[0-9][0-9][0-9]")) if r.exists() else []:
         try: m = json.loads((d / "meta.json").read_text(encoding="utf-8")); out.append({"n": int(d.name), **{x: m.get(x) for x in ("beat", "kind", "t", "label")}})
@@ -733,11 +753,12 @@ def _hnew(job):
     n = max([int(d.name) for d in r.glob("[0-9][0-9][0-9]")] or [0]) + 1
     d = r / f"{n:03d}"; d.mkdir(); return d
 
-def can_undo(job): return bool(history(job)) or any(Path(job).glob("output/*.prev"))
+def can_undo(job): return _ie().can_undo(job) if _iv(job) else (bool(history(job)) or any(Path(job).glob("output/*.prev")))
 
 def status(job): return _busy.get(str(Path(job)), "")
 
 def start_apply(job, bid, cids, fit, cfg, log):
+    if _iv(job): return _ie().start_apply(job, bid, cids, fit, cfg, log)
     key = str(Path(job))
     with _lk:
         if _busy.get(key): return "Already applying an edit to this video."
@@ -924,6 +945,7 @@ def _rejoin_long(job, plan, outp):
 
 def undo(job, log):
     """Undo the newest edit still on the stack (repeat to go further back); older jobs fall back to their single .prev copy."""
+    if _iv(job): return _ie().undo(job, log)
     job = Path(job)
     from .pipeline import Job
     from . import review

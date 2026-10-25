@@ -150,6 +150,12 @@ def smoke():
     return jsonify(error="Deprecated: start a smoke test with Make = 'Smoke test' (POST /api/jobs, mode=smoke)."), 410
 
 # ---- visual review (Shorts)
+def _interview(jid):
+    """A job made from an interview edit (studio/interview_edit.py)."""
+    from studio import interview_edit
+    try: return interview_edit.is_interview(studio.job(jid).dir)
+    except Exception: return False
+
 def _ws(jid):
     """The review workspace: the job (Shorts) or job/longedit (long-video editing, ?space=long)."""
     d = studio.job(jid).dir
@@ -175,7 +181,10 @@ def review_beat(jid, bid):
             from studio import debug as _dbg
             _dbg.trace(j.dir, {"ev": "decision", "beat": int(bid[1:]) + 1 if bid[1:].isdigit() else bid, "action": a,
                                "rungs": ", ".join(review.load(ws)["cands"][c]["rung"] for c in (b.get("cands") or []) if c in review.load(ws)["cands"]) if a == "choose" else ""})
+        elif a == "supply" and _interview(jid):
+            from studio import interview_edit; interview_edit.supply(j.dir, bid, b.get("src", "")); j.log(f"Edit {bid}: your file added")
         elif a == "supply": review.supply(ws, bid, b.get("src", ""), b.get("tag", ""), cfg, j.log); j.log(f"Visual review {bid}: your file added")
+        elif _interview(jid): return jsonify(error="For an interview piece: pick a picture, supply a file, or ask in the chat."), 400
         elif a in ("expand", "refine", "animate"):
             err = review.start(studio, jid, bid, a, {"text": b.get("text", ""), "tag": b.get("tag", "")}, ws=ws)
             if err: return jsonify(error=err), 409
@@ -198,6 +207,10 @@ def review_all(jid, action):
 def review_preview(jid, cid):
     from studio import review
     j = studio.job(jid)
+    if _interview(jid):
+        from studio import interview_edit
+        try: return jsonify(interview_edit.preview_cand(j.dir, cid, request.args.get("space")))
+        except Exception as e: return jsonify(error=str(e)[:300]), 400
     try: return jsonify(review.preview(_ws(jid), cid, config.load(), j.log))
     except Exception as e: return jsonify(error=str(e)[:300]), 400
 
@@ -237,6 +250,10 @@ def edit_chat(jid):
     b = request.get_json(silent=True) or {}; text = (b.get("text") or "").strip()
     if not text or not b.get("beat"): return jsonify(error="type a message (and open a beat)"), 400
     if studio.current: return jsonify(error="A job is rendering right now; edit when it has finished."), 409
+    if _interview(jid):
+        from studio import interview_edit
+        try: return jsonify(interview_edit.chat(studio.job(jid).dir, b["beat"], text, config.load()))
+        except Exception as e: return jsonify(error=str(e)[:300]), 500
     try: return jsonify(debug.chat(studio, jid, b["beat"], text, config.load(), edit=True))
     except Exception as e: return jsonify(error=str(e)[:300]), 500
 
