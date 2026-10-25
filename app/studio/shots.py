@@ -163,7 +163,7 @@ SHOT_CHECK = """This is one frame from a phone video of a conversation filmed wh
 "usable": false for a close-up of clothing or a shirt filling the frame, a hand or finger over the lens, a blurry smear, or only
 floor / ceiling with nothing else. A room, a street or a person seen upside down or sideways is still usable (it will be turned)."""
 
-VIS_VERSION = 3   # bump to re-run the check (3: turns from faces only, 2026-10-25)
+VIS_VERSION = 4   # bump to re-run the check (4: turns from upright faces only, 2026-10-25)
 TURN = {"bottom": 180, "left": 90, "right": 270}   # degrees clockwise that bring the top back up
 
 
@@ -177,7 +177,7 @@ def vision_check(an, work, cfg, log=print, every=2):
     ("rot", degrees clockwise), a finger / shirt close-up / smear is blurred ("bad"). Faces found only after turning the
     frame confirm the turn. Cached in faces.json ("vis")."""
     secs = an.get("secs") or []
-    if secs and an.get("vis") == 2:   # v2 guessed "which way is up" with the vision model - wrong on most frames (checked
+    if secs and an.get("vis") in (2, 3):   # v2 guessed "which way is up" with the vision model - wrong on most frames (checked
         cv2, _np = _cv()               # 2026-10-25); keep its blur verdicts, redo the turns from faces only
         if cv2 is not None:
             n = face_turns(an, work, cv2)
@@ -219,6 +219,25 @@ def vision_check(an, work, cfg, log=print, every=2):
     return an
 
 
+def _upright(cv2, im):
+    """Score of faces that are the right way up in this picture: eyes above the mouth (YuNet's landmarks), weighted by size.
+    (A face lying on its side or upside down can still be detected; its landmarks give it away.)"""
+    if not MODEL.exists(): return 0.0
+    H, W = im.shape[:2]; sc = 640 / max(H, W)
+    im2 = cv2.resize(im, (int(W * sc), int(H * sc))) if sc < 1 else im
+    h2, w2 = im2.shape[:2]
+    det = _YN.get((w2, h2))
+    if det is None: det = _YN[(w2, h2)] = cv2.FaceDetectorYN.create(str(MODEL), "", (w2, h2), 0.6, 0.3, 50)
+    _, fs = det.detect(im2)
+    tot = 0.0
+    for r in ([] if fs is None else fs):
+        w, h = float(r[2]), float(r[3])
+        if w * h / (w2 * h2) < GUEST_MIN_AREA: continue
+        eyes_y = (r[5] + r[7]) / 2; mouth_y = (r[11] + r[13]) / 2
+        if mouth_y - eyes_y > 0.25 * h and abs(r[4] - r[6]) > 0.2 * w: tot += float(r[14]) * (w * h) ** 0.5
+    return tot
+
+
 def face_turns(an, work, cv2):
     """rot (degrees clockwise) for faceless seconds where a face shows up only after turning the frame (a phone held on
     its side or upside down while filming a person); everything else stays as filmed. -> number of seconds turned."""
@@ -228,10 +247,9 @@ def face_turns(an, work, cv2):
         if x.get("faces"): continue
         im = cv2.imread(str(fd / f"{x['t'] + 1:05d}.jpg"))
         if im is None: continue
-        hits = {r: [f for f in _faces(cv2, cv2.cvtColor(_turn_img(cv2, im, r), cv2.COLOR_BGR2GRAY), _turn_img(cv2, im, r)) if f[2] * f[3] >= GUEST_MIN_AREA]
-                for r in (90, 180, 270)}
-        best = max(hits, key=lambda r: len(hits[r]))
-        if hits[best]: x["rot"] = best; n += 1
+        hits = {r: _upright(cv2, _turn_img(cv2, im, r)) for r in (0, 90, 180, 270)}
+        best = max(hits, key=hits.get)
+        if best and hits[best] > 0 and hits[0] == 0: x["rot"] = best; n += 1
     return n
 
 
