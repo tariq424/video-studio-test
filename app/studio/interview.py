@@ -28,7 +28,7 @@ from pathlib import Path
 from . import media
 
 VIDEO_EXT = (".mov", ".mp4", ".m4v", ".mkv")
-CUT_VERSION = "11"   # bump when the way parts are cut changes, so cached parts are made again
+CUT_VERSION = "12"   # bump when the way parts are cut changes, so cached parts are made again
 PLAN = """You edit a documentary from the creator's OWN interview footage. The interview audio is the star: viewers should mostly
 hear the people on camera. Your narration only bridges: a hook, where we are, a line between topics, a closing line.
 
@@ -519,7 +519,7 @@ class TripFootage:
               "landscape", "street", "road", "houses", "house", "town", "view", "island", "palm", "trees", "garden", "cliff", "lighthouse"}
     SKIP = {"airplane", "airport", "plane", "aircraft", "cabin", "seat", "hotel room", "bed", "bathroom", "screenshot", "phone", "menu",
             "selfie", "receipt", "document", "screen", "hotel", "guest room", "ironing", "couch", "sofa", "bedroom", "dimly lit",
-            "traveller", "traveler", "tourist"}   # (the catalogue calls the person filming "the traveller": that is you)
+            "traveller", "traveler", "tourist", "television", "tv ", "monitor", "laptop"}   # (the catalogue calls the person filming "the traveller": that is you)
     STOP = set("the a an and or of in on at to for with from by is are was were this that these those it its he she they them his her their "
                "what who where when how very just like yeah okay oh so but not no yes there here have has had be been do does did will "
                "would can could about over into up down out all some many more most also bermuda".split())
@@ -619,7 +619,7 @@ class TripFootage:
         f, st, r = pick
         W, H = (1080, 1920) if kind == "short" else (1920, 1080)
         if r["_vid"]:
-            rot = shots.orient(f, self.root, self.log) if self.root else ""
+            rot = ""   # ffmpeg already turns phone clips upright from their rotation tag; a guessed turn put one upside down
             fd = float(r.get("seconds") or 0)
             vf = (rot + "," if rot else "") + f"scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H},fps=30,format=yuv420p,setsar=1"
             media.ff(*(["-stream_loop", "-1"] if fd - st < d else []), "-ss", f"{min(st, max(0.0, fd - 1)):.2f}", "-i", f, "-t", f"{d:.2f}", "-an", "-vf", vf, *ENC[:6], out, timeout=900)
