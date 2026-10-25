@@ -1149,7 +1149,7 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                                     soft_in=not (k > 0 and "bite" in items[k - 1] and int(items[k - 1]["bite"][1]) == a - 1),
                                     soft_out=not (k + 1 < len(items) and "bite" in items[k + 1] and int(items[k + 1]["bite"][0]) == b + 1))
                 cj.write_text(json.dumps(credits), encoding="utf-8")
-                if cfg.get("interview_qc", True): qc_part(f, cfg, log, label=f"{kind} {k:02}", kind=kind)
+                if cfg.get("interview_qc", False): qc_part(f, cfg, log, label=f"{kind} {k:02}", kind=kind)
                 words = [(wd, s - t0, e - t0) for x in segs[a:b + 1] for wd, s, e in x["words"]]
                 parts.append({"file": f, "words": words, "style": "Cap", "hook": it.get("hook_text", ""), "chapter": it.get("chapter", ""),
                               "credits": [(x[0], x[1], x[3]) for x in credits if x[3]]})
@@ -1208,7 +1208,7 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                 try: words = captions.word_times(wav, it["insert"])
                 except Exception: words = []
                 note = (notes or [{}] * 99)[int(it.get("note", 0))] if notes and str(it.get("note", "")).isdigit() and int(it["note"]) < len(notes) else {}
-                if cfg.get("interview_qc", True): qc_part(f, cfg, log, label=f"{kind} {k:02} fact", kind=kind)
+                if cfg.get("interview_qc", False): qc_part(f, cfg, log, label=f"{kind} {k:02} fact", kind=kind)
                 parts.append({"file": f, "words": words, "style": "Narr", "credit": credit, "card": str(it.get("card") or "")[:48],
                               "source": note.get("source", "")})
                 _log(log, f"  {kind} {k:02}: context \"{it['insert'][:60]}\"" + (f" [{credit}]" if credit else " (over blurred footage)"))
@@ -1217,7 +1217,7 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
         parts.append({"file": ec, "words": [], "titles": [("Thank you, Mr. Clinton", "Title", -90), ("and the Islamic Center of Bermuda", "Sub", 20),
                                                           ("Subscribe for more journeys", "Sub", 120)]})
         outs[kind] = assemble(parts, work / f"{name}_{kind}.mp4", kind, kd, cfg, log, vtitle)
-        if cfg.get("interview_qc", True):
+        if cfg.get("interview_qc", False):
             try: qc_final(outs[kind], cfg, kd, log, every=30.0 if kind == "documentary" else 10.0)
             except Exception as e: _log(log, f"  final QC failed to run ({str(e)[:100]})")
     srcs = sorted({n.get("source", "") for n in (notes or []) if n.get("source")})

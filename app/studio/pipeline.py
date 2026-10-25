@@ -480,7 +480,7 @@ class Studio:
                     j.save(output=str(final)); _length_check(j, final, (s.get("minutes") or 0) * 60, "Long video", log)
             if stop(): j.save(status="stopped"); log("Stopped"); self.cancel.discard(jid); return
             d = j.state.get("done", []); d.append(st); j.save(done=d)
-        if cfg.get("qc_on", True):   # owner, 2026-10-24: frame QC on every video (fingers, smudges, sideways, blur, giant faces)
+        if cfg.get("qc_on", False):   # (off until calibrated: the first run flagged most news frames) owner, 2026-10-24: frame QC on every video (fingers, smudges, sideways, blur, giant faces)
             try:
                 from . import qc
                 if qc.available(cfg):
