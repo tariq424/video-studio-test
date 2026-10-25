@@ -163,7 +163,7 @@ SHOT_CHECK = """This is one frame from a phone video of a conversation filmed wh
 "usable": false for a close-up of clothing or a shirt filling the frame, a hand or finger over the lens, a blurry smear, or only
 floor / ceiling with nothing else. A room, a street or a person seen upside down or sideways is still usable (it will be turned)."""
 
-VIS_VERSION = 2   # bump to re-run the check (2: which way is up, 2026-10-25)
+VIS_VERSION = 3   # bump to re-run the check (3: turns from faces only, 2026-10-25)
 TURN = {"bottom": 180, "left": 90, "right": 270}   # degrees clockwise that bring the top back up
 
 
@@ -177,6 +177,13 @@ def vision_check(an, work, cfg, log=print, every=2):
     ("rot", degrees clockwise), a finger / shirt close-up / smear is blurred ("bad"). Faces found only after turning the
     frame confirm the turn. Cached in faces.json ("vis")."""
     secs = an.get("secs") or []
+    if secs and an.get("vis") == 2:   # v2 guessed "which way is up" with the vision model - wrong on most frames (checked
+        cv2, _np = _cv()               # 2026-10-25); keep its blur verdicts, redo the turns from faces only
+        if cv2 is not None:
+            n = face_turns(an, work, cv2)
+            an["vis"] = VIS_VERSION; (Path(work) / "faces.json").write_text(json.dumps(an), encoding="utf-8")
+            log(f"  framing: {n} second(s) to turn upright (faces found only after turning)")
+        return an
     if not secs or an.get("vis") == VIS_VERSION or not cfg: return an
     fd = Path(work) / "frames1s"
     try:
@@ -194,18 +201,13 @@ def vision_check(an, work, cfg, log=print, every=2):
         if not img.exists(): continue
         try: j = parse_json(footage._vision(dict(cfg, vet_provider="local"), img, SHOT_CHECK))
         except Exception: continue
-        rot = TURN.get(str(j.get("top", "top")).lower().strip(), 0)
-        if cv2 is not None:   # faces settle it: found only after a turn -> that turn; found upright -> no turn
-            im = cv2.imread(str(img))
-            if im is not None:
-                hits = {r: len(_faces(cv2, cv2.cvtColor(_turn_img(cv2, im, r), cv2.COLOR_BGR2GRAY), _turn_img(cv2, im, r))) for r in (90, 180, 270)}
-                best = max(hits, key=hits.get)
-                if hits[best] >= (1 if rot else 2): rot = best   # (2 faces needed to overrule an upright verdict)
+        rot = 0   # (the model's "which way is up" was wrong on most frames: turns come from faces only, face_turns below)
         bad = (not bool(j.get("usable", True))) or str(j.get("shot", "")) in ("clothing_closeup", "hand_or_finger", "blurry")
         for t in range(x["t"], x["t"] + every):
             if t in by and not by[t].get("faces"):
                 by[t]["bad"] = bool(bad); by[t]["rot"] = rot
         n_bad += bool(bad); n_rot += bool(rot)
+    if cv2 is not None: n_rot = face_turns(an, work, cv2)
     an["vis"] = VIS_VERSION
     (Path(work) / "faces.json").write_text(json.dumps(an), encoding="utf-8")
     try:   # free the vision model's memory now (~20 GB with its long context): transcription and renders need it
@@ -215,6 +217,22 @@ def vision_check(an, work, cfg, log=print, every=2):
     except Exception: pass
     log(f"  framing: {n_bad} frame(s) to blur, {n_rot} to turn upright")
     return an
+
+
+def face_turns(an, work, cv2):
+    """rot (degrees clockwise) for faceless seconds where a face shows up only after turning the frame (a phone held on
+    its side or upside down while filming a person); everything else stays as filmed. -> number of seconds turned."""
+    fd = Path(work) / "frames1s"; n = 0
+    for x in an.get("secs") or []:
+        x["rot"] = 0
+        if x.get("faces"): continue
+        im = cv2.imread(str(fd / f"{x['t'] + 1:05d}.jpg"))
+        if im is None: continue
+        hits = {r: [f for f in _faces(cv2, cv2.cvtColor(_turn_img(cv2, im, r), cv2.COLOR_BGR2GRAY), _turn_img(cv2, im, r)) if f[2] * f[3] >= GUEST_MIN_AREA]
+                for r in (90, 180, 270)}
+        best = max(hits, key=lambda r: len(hits[r]))
+        if hits[best]: x["rot"] = best; n += 1
+    return n
 
 
 def kind_keep(s):
