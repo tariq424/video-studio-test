@@ -1257,11 +1257,12 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
             items[0] = dict(items[0], hook_text=str(sp.get("hook") or "")[:48])
         if hk:   # cold open: the most striking line, with the hook text on screen, before the story starts
             f = cut_bite_framed(src, hk["t0"], hk["t1"], kd / "hook.mp4", kind, flip, an, cuts, log, ladder=ladder, keep=keep)
-            parts.append({"file": f, "words": [(w, s - hk["t0"], e - hk["t0"]) for w, s, e in hk["words"]], "style": "Cap", "hook": hk["text"]})
+            parts.append({"file": f, "words": [(w, s - hk["t0"], e - hk["t0"]) for w, s, e in hk["words"]], "style": "Cap", "hook": hk["text"],
+                          "m": {"type": "bite", "src": str(src), "flip": flip, "si": 0, "t0": hk["t0"], "t1": hk["t1"], "text": hk.get("quote", "")}})
         if hk or not (kind == "short" and sp):   # title card: what this is, before the story (the Short's comes after its opener)
             tt = kd / "title.mp4"
             if not media.ok(tt, 0.5): card_part(card_bg, 3.2, tt, kind)
-            parts.append({"file": tt, "words": [], "titles": [(vtitle, "Title", -50), ("A conversation in Bermuda", "Sub", 90)]})
+            parts.append({"file": tt, "words": [], "titles": [(vtitle, "Title", -50), ("A conversation in Bermuda", "Sub", 90)], "m": {"type": "card"}})
         for k, it in enumerate(items):
             if "bite" in it:
                 a, b = int(it["bite"][0]), int(it["bite"][1])
@@ -1282,11 +1283,12 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                 if cfg.get("interview_qc", False): qc_part(f, cfg, log, label=f"{kind} {k:02}", kind=kind)
                 words = [(wd, s - t0, e - t0) for x in segs[a:b + 1] for wd, s, e in x["words"]]
                 parts.append({"file": f, "words": words, "style": "Cap", "hook": it.get("hook_text", ""), "chapter": it.get("chapter", ""),
-                              "credits": [(x[0], x[1], x[3]) for x in credits if x[3]]})
+                              "credits": [(x[0], x[1], x[3]) for x in credits if x[3]],
+                              "m": {"type": "bite", "src": str(bsrc), "flip": bflip, "si": segs[a].get("src", 0), "t0": t0, "t1": t1, "text": said}})
                 if it.get("hook_text"):   # the title card goes right after the opener
                     tt = kd / "title.mp4"
                     if not media.ok(tt, 0.5): card_part(card_bg, 3.2, tt, kind)
-                    parts.append({"file": tt, "words": [], "titles": [(vtitle, "Title", -50), ("A conversation in Bermuda", "Sub", 90)]})
+                    parts.append({"file": tt, "words": [], "titles": [(vtitle, "Title", -50), ("A conversation in Bermuda", "Sub", 90)], "m": {"type": "card"}})
                 _log(log, f"  {kind} {k:02}: soundbite {t0:.0f}-{t1:.0f}s \"{segs[a]['text'][:60]}\"")
             elif it.get("narr") and keep:   # a joke / bridge line over the real scene nearby, muted
                 from . import captions
@@ -1297,7 +1299,8 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                 if not media.ok(f, 0.5): scene_part(sources[si][0], sources[si][1], sources[si][2], st, wav, f, kind, log)
                 try: words = captions.word_times(wav, it["narr"])
                 except Exception: words = []
-                parts.append({"file": f, "words": words, "style": "Narr"})
+                parts.append({"file": f, "words": words, "style": "Narr", "m": {"type": "narr", "text": it["narr"], "src": str(sources[si][0]),
+                                                                                  "flip": sources[si][1], "si": si, "t0": st}})
                 _log(log, f"  {kind} {k:02}: narration \"{it['narr'][:60]}\" over clip {si} at {st:.0f}s")
             elif it.get("narr"):
                 br = str(it.get("broll") or "")
@@ -1364,12 +1367,18 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                 note = (notes or [{}] * 99)[int(it.get("note", 0))] if notes and str(it.get("note", "")).isdigit() and int(it["note"]) < len(notes) else {}
                 if cfg.get("interview_qc", False): qc_part(f, cfg, log, label=f"{kind} {k:02} fact", kind=kind)
                 parts.append({"file": f, "words": words, "style": "Narr", "credit": credit, "card": str(it.get("card") or "")[:48],
-                              "source": note.get("source", "")})
+                              "source": note.get("source", ""), "m": {"type": "fact", "text": it["insert"], "note": it.get("note")}})
                 _log(log, f"  {kind} {k:02}: context \"{it['insert'][:60]}\"" + (f" [{credit}]" if credit else " (over blurred footage)"))
         ec = kd / "end.mp4"   # end card: thanks + subscribe, music carries it out
         if not media.ok(ec, 0.5): card_part(card_bg, 6.0 if kind == "documentary" else 4.0, ec, kind)
         parts.append({"file": ec, "words": [], "titles": [("Thank you, Mr. Clinton", "Title", -90), (str(cfg.get("interview_thanks_sub") or "and the Islamic Center of Bermuda"), "Sub", 20),
-                                                          ("Subscribe for more journeys", "Sub", 120)]})
+                                                          ("Subscribe for more journeys", "Sub", 120)], "m": {"type": "card"}})
+        man = {"kind": kind, "out": str(work / f"{name}_{kind}.mp4"), "title": vtitle, "gps": gps_of(src), "parts": parts,
+               "sources": [[str(p_), fl_, str(root if i_ == 0 else root / "extra" / Path(p_).stem.rstrip("."))] for i_, (p_, fl_, _a) in enumerate(sources)],
+               "cfg": {k_: cfg[k_] for k_ in ("interview_music_db", "interview_duck_threshold", "interview_duck_ratio") if k_ in cfg}}
+        (work / f"{name}_{kind}_parts.json").write_text(json.dumps(man, indent=1, ensure_ascii=False, default=str), encoding="utf-8")   # for the Video Studio editor
+        if cfg.get("interview_manifest_only") and Path(man["out"]).exists():
+            outs[kind] = Path(man["out"]); _log(log, f"  manifest written: {name}_{kind}_parts.json"); continue
         outs[kind] = assemble(parts, work / f"{name}_{kind}.mp4", kind, kd, cfg, log, vtitle)
         if cfg.get("interview_qc", False):
             try: qc_final(outs[kind], cfg, kd, log, every=30.0 if kind == "documentary" else 10.0)
