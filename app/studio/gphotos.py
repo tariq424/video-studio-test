@@ -76,8 +76,9 @@ def details(page, url, shot=None):
     page.goto(url, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(3500); _guard(page)
     page.keyboard.press("i"); page.wait_for_timeout(2500)   # the info panel
-    info = page.evaluate("""() => { const c = [...document.querySelectorAll('[role="complementary"], c-wiz aside, [aria-label*="Info" i]')];
-        return c.map(x => x.innerText).filter(Boolean).join('\\n'); }""") or ""
+    body = page.inner_text("body", timeout=8000) or ""
+    i = body.rfind("\nInfo\n")   # the info panel is the last block of the page text
+    info = body[i + 6:] if i >= 0 else body[-3000:]
     html = page.content()
     lat = lon = None
     for m in re.finditer(r"maps[^\"']*?[?&](?:q|center|ll)=(-?\d+\.\d+)(?:,|%2C)(-?\d+\.\d+)", html):
@@ -88,11 +89,11 @@ def details(page, url, shot=None):
             if -90 <= a <= 90 and -180 <= b <= 180: lat, lon = a, b; break
     lines = [x.strip() for x in info.splitlines() if x.strip()]
     fname = next((x for x in lines if re.search(r"\.(heic|jpe?g|png|mov|mp4|webp)$", x, re.I)), "")
-    date = next((x for x in lines if re.match(r"^(Mon|Tue|Wed|Thu|Fri|Sat|Sun|[A-Z][a-z]{2} \d{1,2}, \d{4})", x)), "")
+    date = next((x for x in lines if re.match(r"^[A-Z][a-z]{2} \d{1,2}, \d{4}$", x)), "")
     when = next((x for x in lines if re.search(r"\d{1,2}:\d{2}\s*(AM|PM)", x)), "")
     place = ""
     for i, x in enumerate(lines):   # the location sits after the camera / size lines; take the first line that looks like a place
-        if re.search(r"(Bermuda|Hamilton|Street|St\.|Road|Rd|Lane|Avenue|Ave|Park|Bay|Beach|Hotel|Restaurant|,)", x) and not re.search(r"\d{1,2}:\d{2}|MP|×|ƒ/|mm|ISO", x):
+        if re.search(r",", x) and not re.search(r"\d{1,2}:\d{2}|MP|×|ƒ/|mm|ISO|items|Backed|quality|Shared|\d{4}", x):
             place = x; break
     if shot: page.screenshot(path=str(shot), full_page=False)
     kind = "video" if re.search(r"\.(mov|mp4)$", fname, re.I) or re.search(r"\b\d+:\d{2}\b", " ".join(lines[:3])) and "video" in html[:200000].lower() else "photo"
