@@ -105,7 +105,12 @@ def transcribe(src, work, log=print):
             _GPU_BAD = True
             _log(log, f"  GPU transcription unavailable ({str(e)[:80]}); CPU")
             segs = run(WhisperModel("small.en", device="cpu", compute_type="int8"), "CPU")
-    else: segs = run(WhisperModel("small.en", device="cpu", compute_type="int8"), "CPU")
+    else:
+        try: segs = run(WhisperModel("small.en", device="cpu", compute_type="int8"), "CPU")
+        except RuntimeError as e:   # the PC short of memory for a moment (the vision model / a news render): wait, try once more
+            if "alloc" not in str(e): raise
+            _log(log, "  transcription ran out of memory; waiting 2 min and trying again"); time.sleep(120)
+            segs = run(WhisperModel("small.en", device="cpu", compute_type="int8"), "CPU")
     out.write_text(json.dumps(segs, indent=1, ensure_ascii=False), encoding="utf-8")
     return segs
 
