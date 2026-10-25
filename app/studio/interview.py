@@ -1180,6 +1180,18 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
         ks = set(int(x) for x in cfg["interview_keep_srcs"])
         tri_all = dict(tri_all, drop=[d_ for d_ in tri_all.get("drop") or [] if not any(segs[i].get("src", 0) in ks for i in range(int(d_[0]), int(d_[1]) + 1))])
     outs, trip = {}, None
+    if cfg.get("interview_plan_only"):   # stop after the plans, for a look before hours of rendering
+        sp_ = short_plan(cfg, segs, pl, context, notes, work, log, short_secs=int(cfg.get("interview_short_secs", 180)), tri=tri_all)
+        rows = []
+        for nm, its in (("documentary", augment_items(tri_all, segs) if tri_all else []), ("short", _items(sp_) if sp_ else [])):
+            rows.append(f"===== {nm}")
+            for it in its:
+                if "bite" in it:
+                    a_, b_ = int(it["bite"][0]), int(it["bite"][1])
+                    rows.append(f"[clip {segs[a_].get('src', 0)} {segs[a_]['start']:.0f}-{segs[b_]['end']:.0f}s] " + " ".join(x["text"] for x in segs[a_:b_ + 1])[:300])
+                else: rows.append("   >> " + json.dumps({k_: v_ for k_, v_ in it.items() if k_ in ("insert", "narr", "note", "card")}, ensure_ascii=False))
+        (work / "plan_review.txt").write_text("\n".join(rows), encoding="utf-8")
+        _log(log, f"plan only: {work / 'plan_review.txt'}"); return {"plan": str(work / "plan_review.txt")}
     for kind in kinds:
         sp = short_plan(cfg, segs, pl, context, notes, work, log, short_secs=int(cfg.get("interview_short_secs", 180)),
                         tri=tri_all) if kind == "short" and cfg.get("interview_short_pass", True) else None
