@@ -131,6 +131,13 @@ def run(cfg, job, log=print):
                 log(f"  Google Photos: '{q}' -> {len(hits)} item(s)")
                 for h in hits: media_db.upsert(db, {"url": h["url"], "found_by": q, "label": h.get("label", ""), "group_date": h.get("group", "")})
                 time.sleep(4)
+            if job.get("details_from"):   # every item of an earlier search (dedup), e.g. to look for a shop sign
+                prev = json.loads((work / "gphotos_result.json").read_text(encoding="utf-8")) if (work / "gphotos_result.json").exists() else {}
+                urls = []
+                for h in (prev.get("search") or {}).get(job["details_from"], []) or res["search"].get(job["details_from"], []):
+                    tail = h["url"].rsplit("/", 1)[-1]
+                    if tail not in [x.rsplit("/", 1)[-1] for x in urls]: urls.append(h["url"])
+                job["details"] = (job.get("details") or []) + urls
             for k, u in enumerate(job.get("details") or []):
                 d = details(page, u, shot=work / f"item_{k}.png")
                 res["details"].append(d); media_db.upsert(db, d)
