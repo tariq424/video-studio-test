@@ -274,7 +274,8 @@ def plan_keep(an, t0, t1, min_len=2.0):
         k = kind_keep(s)
         g = None
         if k == "guest":
-            gs, _ = split(s["faces"]); g = max(gs, key=lambda f: f[2] * f[3])
+            gs, ss = split(s["faces"]); g = max(gs, key=lambda f: f[2] * f[3])
+            if ss: g = g + [max(ss, key=lambda f: f[2] * f[3])]   # the holder beside him: framed out where a crop can
         raw.append([max(t0, t), min(t1, t + 1), k, g, s.get("tilt", 0)])
         t += 1
     for i, r in enumerate(raw):   # a lone turn/blur second among plain ones is noise; a "none" between two turns of one kind joins them
@@ -300,6 +301,8 @@ def plan_keep(an, t0, t1, min_len=2.0):
     for a, b, k, _g, _t, rs in shots:
         gs = [r[3] for r in rs if r[3]]
         g = [sum(x[n] for x in gs) / len(gs) for n in range(4)] if gs and k == "guest" else None
+        sb = [r[3][4] for r in rs if r[3] and len(r[3]) > 4]
+        if g and sb and holder_out("documentary", g + [max(sb, key=lambda f: f[2] * f[3])]): g = g + [max(sb, key=lambda f: f[2] * f[3])]
         tl = sorted(r[4] for r in rs); tilt = tl[len(tl) // 2] if tl else 0.0
         res.append((a, b, k, g, tilt))
     return res
@@ -396,7 +399,7 @@ def vf_frame(kind, guest=None, tilt=0.0, flip=True, src_w=1920, src_h=1080, rot=
         zoom = min(max(GUEST_H[kind] / max(gh, 0.01), 1.0), 1.8)   # the guest's face at a comfortable size
     else:
         cx, cy, gw, zoom = 0.5, 0.5, 0.0, 1.0
-    ch = f"ih/{zoom:.3f}"; cw = f"min(iw\\,{ch}*{ar:.4f})"
+    ch = f"min(ih/{zoom:.3f}\\,iw/{ar:.4f})"; cw = f"min(iw\\,{ch}*{ar:.4f})"   # (a tall clip in a wide frame: fill, never pillarbox)
     x = f"max(0\\,min(iw-{cw}\\,iw*{cx:.3f}-{cw}/2))"
     if holder:   # keep the camera holder out of the frame: the crop stops short of his face, the guest's face still whole
         hl, hr = holder[0] - holder[2] / 2, holder[0] + holder[2] / 2
