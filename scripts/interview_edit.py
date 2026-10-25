@@ -27,7 +27,8 @@ def main():
     lock.write_text(str(time.time()), encoding="utf-8")
     try:
         outs = interview.build(cfg, a["src"], work, a.get("context", ""), log, tuple(a.get("kinds") or ("short", "documentary")),
-                               bool(a.get("flip", True)), a.get("name", "interview"), a.get("version", ""), a.get("notes"))
+                               bool(a.get("flip", True)), a.get("name", "interview"), a.get("version", ""), a.get("notes"),
+                               extras=a.get("extras"))
         log(f"DONE: {outs}")
     except Exception as e:
         import traceback

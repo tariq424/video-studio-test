@@ -237,7 +237,8 @@ def triage(cfg, segs, context, notes, work, log=print):
     out = Path(work) / "triage.json"
     if out.exists(): return json.loads(out.read_text(encoding="utf-8"))
     n = len(segs)
-    lines = "\n".join(f"[{x['i']}] {x['start']:.0f}-{x['end']:.0f}: {x['text']}" for x in segs)
+    lines = "\n".join((f"--- next clip of the same afternoon (clip {x['src']}) ---\n" if k and x.get("src", 0) != segs[k - 1].get("src", 0) else "")
+                      + f"[{x['i']}] {x['start']:.0f}-{x['end']:.0f}: {x['text']}" for k, x in enumerate(segs))
     def check(j):
         for d in j.get("drop") or []:
             if not (0 <= int(d[0]) <= int(d[1]) < n): raise ValueError(f"drop {d[:2]} is outside 0-{n - 1}")
@@ -265,8 +266,9 @@ def triage(cfg, segs, context, notes, work, log=print):
 
 def _cut_points(segs, a, b):
     """Audio in/out for segments a..b: halfway into the pauses around them, so pieces of one stretch join without repeats."""
-    t0 = segs[a]["start"] - 0.15 if a == 0 else max(segs[a]["start"] - 0.4, (segs[a - 1]["end"] + segs[a]["start"]) / 2)
-    t1 = segs[b]["end"] + 0.3 if b == len(segs) - 1 else min(segs[b]["end"] + 0.4, (segs[b]["end"] + segs[b + 1]["start"]) / 2)
+    same = lambda i, j: segs[i].get("src", 0) == segs[j].get("src", 0)
+    t0 = segs[a]["start"] - 0.15 if a == 0 or not same(a, a - 1) else max(segs[a]["start"] - 0.4, (segs[a - 1]["end"] + segs[a]["start"]) / 2)
+    t1 = segs[b]["end"] + 0.3 if b == len(segs) - 1 or not same(b, b + 1) else min(segs[b]["end"] + 0.4, (segs[b]["end"] + segs[b + 1]["start"]) / 2)
     return max(0.0, t0), t1
 
 
@@ -303,6 +305,7 @@ def augment_items(tri, segs, max_bite=45.0):
     for i in range(n):
         if i in chap:
             flush(); pend_chap = chap[i]
+        if cur and segs[i].get("src", 0) != segs[cur[0]].get("src", 0): flush()   # a new clip starts a new piece
         if i in drop:
             flush()
         else:
@@ -1065,9 +1068,11 @@ def hook(cfg, segs, context, kind, work, log=print):
     return res
 
 
-def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), flip=True, name="interview", version="", notes=None):
+def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), flip=True, name="interview", version="", notes=None, extras=None):
     src = Path(src); root = Path(work); root.mkdir(parents=True, exist_ok=True)
     segs = transcribe(src, root, log)
+    main_segs = segs
+    for x in segs: x.setdefault("src", 0)
     work = root / version if version else root; work.mkdir(parents=True, exist_ok=True)
     bf = root / "broll.json"   # probing every clip in the folder is slow on a busy PC: once per folder
     broll = json.loads(bf.read_text(encoding="utf-8")) if bf.exists() else broll_list(src)
@@ -1077,6 +1082,19 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
     from . import shots
     an = shots.analyze(src, root, flip, log)
     if cfg.get("interview_vision_check", True): an = shots.vision_check(an, root, cfg, log)
+    # more clips of the same conversation (owner, 2026-10-24: "use all the clips that can be used"): each transcribed and
+    # framed on its own, then joined after the main one in the order they were filmed; segment numbers run on
+    sources = [(src, flip, an)]
+    for k, ex in enumerate(extras or [], start=1):
+        ep = Path(ex["src"] if isinstance(ex, dict) else ex); efl = bool(ex.get("flip", True)) if isinstance(ex, dict) else True
+        ew = root / "extra" / ep.stem.rstrip("."); ew.mkdir(parents=True, exist_ok=True)
+        es = transcribe(ep, ew, log)
+        ean = shots.analyze(ep, ew, efl, log)
+        if cfg.get("interview_vision_check", True): ean = shots.vision_check(ean, ew, cfg, log)
+        sources.append((ep, efl, ean))
+        base = len(segs)
+        segs = segs + [dict(x, i=base + j, src=k) for j, x in enumerate(es)]
+        _log(log, f"  clip {k}: {ep.name} ({len(es)} segments, numbers {base}-{len(segs) - 1})")
     bfiles = [x for x in sorted(bdir.iterdir()) if x.stem in broll and x.suffix.lower() in VIDEO_EXT]
     nice = next((x for x in bfiles if "bay" in x.stem.lower() or "wave" in x.stem.lower()), bfiles[0] if bfiles else None)
     card_bg = (nice, 2.0, False, shots.orient(nice, root, log)) if nice else (src, 30.0, flip, "")
@@ -1095,14 +1113,14 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                 [(it["insert"], kd / "narr" / f"i{k}.wav") for k, it in enumerate(items) if it.get("insert")]
         if batch:   # all of this video's narration in one Kokoro run (each separate run costs ~2 min of start-up)
             (kd / "narr").mkdir(exist_ok=True); tts.kokoro_batch(cfg, batch, log, f"interview narration ({kind})")
-        used = [(segs[int(x["bite"][0])]["start"], segs[int(x["bite"][1])]["end"]) for x in items if "bite" in x]
+        used = [(segs[int(x["bite"][0])]["start"], segs[int(x["bite"][1])]["end"]) for x in items if "bite" in x and segs[int(x["bite"][0])].get("src", 0) == 0]
         cuts = Cutaways(src, an, used, bfiles, root, flip, log)
         oc = own_clips(src, root, log)
         if trip is None:
-            trip = TripFootage(Path(src).parent / "labeled" / "catalog", [src] + [f for f, _, _ in oc], root, log, near=gps_of(src),
+            trip = TripFootage(Path(src).parent / "labeled" / "catalog", [src] + [p_ for p_, _, _ in sources[1:]] + [f for f, _, _ in oc], root, log, near=gps_of(src),
                                radius_km=float(cfg.get("interview_trip_radius_km", 2.0))) if cfg.get("interview_trip_footage", True) else False
         ladder = Ladder(cfg, src, flip, kd, kind, log, own=oc, scenic=card_bg, trip=trip or None)
-        hk = hook(cfg, segs, context, kind, work, log) if cfg.get("interview_hook", True) and not (kind == "short" and sp) else None
+        hk = hook(cfg, main_segs, context, kind, work, log) if cfg.get("interview_hook", True) and not (kind == "short" and sp) else None
         if kind == "short" and sp and items and "bite" in items[0]:   # the Short's own opener is its cold open: hook text from its thread
             items[0] = dict(items[0], hook_text=str(sp.get("hook") or "")[:48])
         if hk:   # cold open: the most striking line, with the hook text on screen, before the story starts
@@ -1120,7 +1138,9 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                 credits = []
                 cj = kd / f"{k:02}_bite.json"
                 if media.ok(kd / f"{k:02}_bite.mp4", 0.5) and cj.exists(): credits = json.loads(cj.read_text(encoding="utf-8"))
-                f = cut_bite_framed(src, t0, t1, kd / f"{k:02}_bite.mp4", kind, flip, an, cuts, log, ladder=ladder,
+                bsrc, bflip, ban = sources[segs[a].get("src", 0)]
+                ladder.src, ladder.flip = bsrc, bflip   # blur fallback from the clip being cut
+                f = cut_bite_framed(bsrc, t0, t1, kd / f"{k:02}_bite.mp4", kind, bflip, ban, cuts, log, ladder=ladder,
                                     visual=str(it.get("visual") or ""), text=said, credits=credits,
                                     words=[w for x in segs[max(0, a - 1):b + 2] for w in x["words"]],
                                     soft_in=not (k > 0 and "bite" in items[k - 1] and int(items[k - 1]["bite"][1]) == a - 1),

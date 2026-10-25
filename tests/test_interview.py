@@ -142,3 +142,13 @@ def test_trip_footage_place_subject_scenery(tmp_path):
     assert tf.pick("Tucker's Town", "the land in Tucker's Town", 6, "place") is None   # not filmed there: no place match
     assert tf.pick("Tucker's Town", "the land in Tucker's Town", 6, "scenery") is None   # named place: no anonymous scenery as if it were it
     assert tf.pick("", "it's very nice here", 6, "scenery")[2]["original"].endswith("beach.MOV")
+
+
+def test_augment_breaks_at_a_new_clip():
+    from studio import interview
+    segs = _segs(6)
+    for x in segs[3:]: x["src"] = 1
+    its = interview.augment_items({"chapters": [{"at": 0, "title": "A"}]}, segs)
+    assert [tuple(x["bite"]) for x in its if "bite" in x] == [(0, 2), (3, 5)]
+    t0, _ = interview._cut_points(segs, 3, 5)
+    assert t0 == segs[3]["start"] - 0.15   # the new clip starts clean, not halfway into the other clip's pause
