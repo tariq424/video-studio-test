@@ -208,6 +208,11 @@ def vision_check(an, work, cfg, log=print, every=2):
         n_bad += bool(bad); n_rot += bool(rot)
     an["vis"] = VIS_VERSION
     (Path(work) / "faces.json").write_text(json.dumps(an), encoding="utf-8")
+    try:   # free the vision model's memory now (~20 GB with its long context): transcription and renders need it
+        import requests
+        requests.post(cfg.get("ollama_url", "http://127.0.0.1:11434").rstrip("/") + "/api/generate",
+                      json={"model": cfg.get("vet_model", "qwen2.5vl:7b"), "keep_alive": 0}, timeout=30)
+    except Exception: pass
     log(f"  framing: {n_bad} frame(s) to blur, {n_rot} to turn upright")
     return an
 
