@@ -313,6 +313,7 @@ def augment_items(tri, segs, max_bite=45.0):
     drop = set()
     for d in tri.get("drop") or []:   # never cut him off mid-sentence: a drop starts after a finished sentence and ends at one
         a, b = int(d[0]), int(d[1])
+        if tri.get("exact"): drop.update(range(a, b + 1)); continue   # a hand-written plan: its drops as written
         for _ in range(3):
             if a <= b and a > 0 and not ends(a - 1): a += 1
         for _ in range(3):
