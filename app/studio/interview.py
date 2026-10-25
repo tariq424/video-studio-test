@@ -349,7 +349,7 @@ def augment_items(tri, segs, max_bite=45.0):
         if i in after:
             flush()
             for x in after[i]:
-                if items and ("insert" in x or "narr" in x) and ("insert" in items[-1] or "narr" in items[-1]): continue   # never two in a row
+                if not tri.get("exact") and items and ("insert" in x or "narr" in x) and ("insert" in items[-1] or "narr" in items[-1]): continue   # never two in a row
                 items.append(x)
     flush()
     return items
