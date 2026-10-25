@@ -480,6 +480,20 @@ class Studio:
                     j.save(output=str(final)); _length_check(j, final, (s.get("minutes") or 0) * 60, "Long video", log)
             if stop(): j.save(status="stopped"); log("Stopped"); self.cancel.discard(jid); return
             d = j.state.get("done", []); d.append(st); j.save(done=d)
+        if cfg.get("qc_on", True):   # owner, 2026-10-24: frame QC on every video (fingers, smudges, sideways, blur, giant faces)
+            try:
+                from . import qc
+                if qc.available(cfg):
+                    for mp4 in sorted((j.dir / "output").glob("*.mp4")):
+                        if stop(): break
+                        vert = "short" in mp4.stem.lower() or "9_16" in mp4.stem
+                        log(f"Quality check: {mp4.name}")
+                        qc.qc_part(mp4, cfg, log, every=4.0 if vert else 6.0, label=mp4.stem[:30], kind="short" if vert else "documentary")
+                        qc.qc_final(mp4, cfg, j.dir / "qc", log, every=10.0 if vert else 30.0)
+                else: log("Quality check skipped (the local vision model isn't running)")
+            except Exception as e:
+                if str(e) == "cancelled" or type(e).__name__ == "Paused": raise
+                log(f"Quality check skipped ({type(e).__name__}: {str(e)[:200]})")
         j.save(status="finished", stage="done"); log("Finished.")
         if j.state.get("trace"):
             debug.trace(j.dir, {"ev": "finished"}); p = debug.render_md(j.dir)
