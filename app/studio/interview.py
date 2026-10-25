@@ -28,7 +28,7 @@ from pathlib import Path
 from . import media
 
 VIDEO_EXT = (".mov", ".mp4", ".m4v", ".mkv")
-CUT_VERSION = "12"   # bump when the way parts are cut changes, so cached parts are made again
+CUT_VERSION = "13"   # bump when the way parts are cut changes, so cached parts are made again
 PLAN = """You edit a documentary from the creator's OWN interview footage. The interview audio is the star: viewers should mostly
 hear the people on camera. Your narration only bridges: a hook, where we are, a line between topics, a closing line.
 
@@ -538,6 +538,8 @@ class TripFootage:
             if any(k in words for k in self.SKIP): continue
             vid = p.suffix.lower() in VIDEO_EXT
             if vid and float(r.get("seconds") or 0) < 3: continue
+            hm = re.search(r"T(\d\d):", str(r.get("taken", "")))
+            if hm and not 6 <= int(hm.group(1)) < 20: continue   # night clips (a hotel TV passed for "aerial view") don't fit a daytime story
             r["_vid"], r["_words"] = vid, set(re.findall(r"[a-z]{3,}", words)) - self.STOP
             r["_where"] = " ".join(str(r.get(k, "")) for k in ("place", "area", "address")).lower()
             self.recs.append(r)
@@ -572,6 +574,11 @@ class TripFootage:
             if sc > bs: best, bs = r, sc
         if not best: return None
         f = Path(best["original"])
+        if best["_vid"] and self.root:   # a clip that looks sideways can't be turned reliably (one came out upside down): not used
+            from . import shots
+            if shots.orient(f, self.root, self.log):
+                self.recs = [r for r in self.recs if r is not best]
+                return self.pick(visual, text, d, mode)
         if not self._faceless(f, best, d):   # someone's face in the stretch we'd use (you, family): never; try the next best
             self.recs = [r for r in self.recs if r is not best]
             return self.pick(visual, text, d, mode)
@@ -619,7 +626,7 @@ class TripFootage:
         f, st, r = pick
         W, H = (1080, 1920) if kind == "short" else (1920, 1080)
         if r["_vid"]:
-            rot = ""   # ffmpeg already turns phone clips upright from their rotation tag; a guessed turn put one upside down
+            rot = ""
             fd = float(r.get("seconds") or 0)
             vf = (rot + "," if rot else "") + f"scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H},fps=30,format=yuv420p,setsar=1"
             media.ff(*(["-stream_loop", "-1"] if fd - st < d else []), "-ss", f"{min(st, max(0.0, fd - 1)):.2f}", "-i", f, "-t", f"{d:.2f}", "-an", "-vf", vf, *ENC[:6], out, timeout=900)
