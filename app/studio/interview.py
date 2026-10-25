@@ -252,8 +252,11 @@ def triage(cfg, segs, context, notes, work, log=print):
     n = len(segs)
     lines = "\n".join((f"--- next clip of the same afternoon (clip {x['src']}) ---\n" if k and x.get("src", 0) != segs[k - 1].get("src", 0) else "")
                       + f"[{x['i']}] {x['start']:.0f}-{x['end']:.0f}: {x['text']}" for k, x in enumerate(segs))
+    span = lambda a, b: sum(x["end"] - x["start"] for x in segs[a:b + 1])   # clips restart at 0 s: sum segments, never end - start
+    total = span(0, n - 1)
     def check(j):
         for d in j.get("drop") or []:
+            if int(d[1]) >= n and int(d[0]) < n: d[1] = n - 1                # a range running past the end: clamp, don't refuse
             if not (0 <= int(d[0]) <= int(d[1]) < n): raise ValueError(f"drop {d[:2]} is outside 0-{n - 1}")
         for f in (j.get("facts") or []) + (j.get("jokes") or []):
             if not 0 <= int(f.get("after", -1)) < n: raise ValueError(f"'after' {f.get('after')} is outside 0-{n - 1}")
@@ -261,17 +264,17 @@ def triage(cfg, segs, context, notes, work, log=print):
         for f in j.get("facts") or []:
             if notes and not (str(f.get("note", "")).isdigit() and int(f["note"]) < len(notes)): raise ValueError(f"fact note {f.get('note')} isn't a note number")
         if not j.get("chapters"): raise ValueError("chapters are needed")
-        dropped = sum(segs[int(d[1])]["end"] - segs[int(d[0])]["start"] for d in j.get("drop") or [])
-        if dropped > 0.6 * (segs[-1]["end"] - segs[0]["start"]): raise ValueError(f"{dropped / 60:.0f} min dropped; drop only boring or repeated stretches")
+        dropped = sum(span(int(d[0]), int(d[1])) for d in j.get("drop") or [])
+        if dropped > 0.6 * total: raise ValueError(f"{dropped / 60:.0f} min dropped; drop only boring or repeated stretches")
     _log(log, f"Interview: marking up all {n} segments (keep / drop / facts / jokes; script AI)")
     from .llm import LLM
     with LLM(dict(cfg), log, lambda: False) as llm:
         j = llm.chat_json("You are an award-winning documentary editor. Reply with JSON only.",
-                          TRIAGE.format(context=context, segments=lines[:70000],
+                          TRIAGE.format(context=context, segments=lines[:140000],
                                         notes="\n".join(f"[{i}] {x['fact']}" for i, x in enumerate(notes or [])) or "(none)"),
                           max_tokens=6000, check=check)
     out.write_text(json.dumps(j, indent=1, ensure_ascii=False), encoding="utf-8")
-    dropped = sum(segs[int(d[1])]["end"] - segs[int(d[0])]["start"] for d in j.get("drop") or [])
+    dropped = sum(span(int(d[0]), int(d[1])) for d in j.get("drop") or [])
     _log(log, f"  triage: {len(j.get('drop') or [])} stretch(es) dropped ({dropped / 60:.1f} min), {len(j.get('facts') or [])} fact(s), "
               f"{len(j.get('jokes') or [])} joke(s), {len(j.get('chapters') or [])} chapter(s)")
     return j
