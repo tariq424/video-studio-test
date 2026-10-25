@@ -883,7 +883,7 @@ def _snap(bounds, words, t0, t1, reach=1.2):
 
 
 def cut_bite_framed(src, t0, t1, out, kind, flip, an, cuts, log=print, ladder=None, visual="", text="", credits=None, words=None,
-                    soft_in=True, soft_out=True, keep=False):
+                    soft_in=True, soft_out=True, keep=False, place=None):
     """A soundbite with its own audio and a framed picture: on the guest, level, covered where the picture is bad (the
     holder, a ceiling, a shirt close-up, the phone on its side). Picture changes sit in pauses and dissolve."""
     if media.ok(out, 0.5): return out
@@ -911,6 +911,14 @@ def cut_bite_framed(src, t0, t1, out, kind, flip, an, cuts, log=print, ladder=No
             if cs is not None:
                 media.ff("-ss", f"{cs:.2f}", "-i", src, "-t", f"{d + ext:.2f}", "-an", "-vf", shots.vf_frame(kind, None, 0.0, flip), *ENC[:10], v, timeout=900)
                 _log(log, f"    {a:.0f}-{b:.0f}s: same scene from {cs:.0f}s (close-up / finger here)")
+                segs.append(v); durs.append(d); continue
+            if place:   # nothing clean nearby: the creator's own clip of the same place, same afternoon
+                pf, pfl = place[int(a) % len(place)]
+                pd = media.dur(pf); pst = (a * 7.3) % max(1.0, pd - d - ext - 1.0)
+                prot = "" if pfl else shots.orient(pf, Path(out).parent.parent, log)
+                media.ff("-ss", f"{pst:.2f}", "-i", pf, "-t", f"{d + ext:.2f}", "-an", "-vf", (prot + "," if prot else "") + shots.vf_frame(kind, None, 0.0, pfl),
+                         *ENC[:10], v, timeout=900)
+                _log(log, f"    {a:.0f}-{b:.0f}s: same place, {Path(pf).name} at {pst:.0f}s (close-up here, nothing clean nearby)")
                 segs.append(v); durs.append(d); continue
         if keep:   # owner, 2026-10-25: his footage is never swapped - turned upright, blurred where not worth seeing sharp
             rot = int(k[4:]) if k.startswith("turn") else 0
@@ -1201,6 +1209,7 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
     bfiles = [x for x in sorted(bdir.iterdir()) if x.stem in broll and x.suffix.lower() in VIDEO_EXT]
     nice = next((x for x in bfiles if "bay" in x.stem.lower() or "wave" in x.stem.lower()), bfiles[0] if bfiles else None)
     keep = bool(cfg.get("interview_keep_scene", True))   # owner, 2026-10-25: never swap his footage for another place
+    place = [(Path(x["src"]), bool(x.get("flip", False))) for x in cfg.get("interview_place_clips") or [] if Path(x["src"]).exists()]
     card_bg = (src, 30.0, flip, "") if keep or not nice else (nice, 2.0, False, shots.orient(nice, root, log))
     sdur = {i: media.dur(p_) for i, (p_, _, _) in enumerate(sources)}
     tri_all = triage(cfg, segs, context, notes, work, log) if cfg.get("interview_doc_mode", "augment") == "augment" else None
@@ -1266,7 +1275,8 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                                     visual=str(it.get("visual") or ""), text=said, credits=credits,
                                     words=[w for x in segs[max(0, a - 1):b + 2] for w in x["words"]],
                                     soft_in=not (k > 0 and "bite" in items[k - 1] and int(items[k - 1]["bite"][1]) == a - 1),
-                                    soft_out=not (k + 1 < len(items) and "bite" in items[k + 1] and int(items[k + 1]["bite"][0]) == b + 1), keep=keep)
+                                    soft_out=not (k + 1 < len(items) and "bite" in items[k + 1] and int(items[k + 1]["bite"][0]) == b + 1), keep=keep,
+                                    place=place if segs[a].get("src", 0) in set(int(x) for x in cfg.get("interview_place_srcs") or []) else None)
                 cj.write_text(json.dumps(credits), encoding="utf-8")
                 if cfg.get("interview_qc", False): qc_part(f, cfg, log, label=f"{kind} {k:02}", kind=kind)
                 words = [(wd, s - t0, e - t0) for x in segs[a:b + 1] for wd, s, e in x["words"]]
