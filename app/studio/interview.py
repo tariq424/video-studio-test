@@ -28,7 +28,7 @@ from pathlib import Path
 from . import media
 
 VIDEO_EXT = (".mov", ".mp4", ".m4v", ".mkv")
-CUT_VERSION = "16"   # bump when the way parts are cut changes, so cached parts are made again
+CUT_VERSION = "17"   # bump when the way parts are cut changes, so cached parts are made again
 PLAN = """You edit a documentary from the creator's OWN interview footage. The interview audio is the star: viewers should mostly
 hear the people on camera. Your narration only bridges: a hook, where we are, a line between topics, a closing line.
 
@@ -906,6 +906,12 @@ def cut_bite_framed(src, t0, t1, out, kind, flip, an, cuts, log=print, ladder=No
     for n, (a, b, k, g, tilt) in enumerate(plan):
         v = tmpd / f"s{n:02}.mp4"; d = b - a
         ext = XFADE if n < len(plan) - 1 else 0.0   # each piece runs on under the dissolve into the next
+        if keep and k == "blur":   # the holder's close-up / a finger: the nearest clean moment of the SAME clip, else blurred
+            cs = clean_start(an, a, b, d + ext, media.dur(src))
+            if cs is not None:
+                media.ff("-ss", f"{cs:.2f}", "-i", src, "-t", f"{d + ext:.2f}", "-an", "-vf", shots.vf_frame(kind, None, 0.0, flip), *ENC[:10], v, timeout=900)
+                _log(log, f"    {a:.0f}-{b:.0f}s: same scene from {cs:.0f}s (close-up / finger here)")
+                segs.append(v); durs.append(d); continue
         if keep:   # owner, 2026-10-25: his footage is never swapped - turned upright, blurred where not worth seeing sharp
             rot = int(k[4:]) if k.startswith("turn") else 0
             vf = shots.vf_frame(kind, g if k == "guest" else None, 0.0 if rot else tilt, flip, rot=rot, blur=(k == "blur"))
@@ -947,6 +953,18 @@ def cut_bite_framed(src, t0, t1, out, kind, flip, an, cuts, log=print, ladder=No
     return out
 
 
+def clean_start(an, a, b, d, dur, reach=45.0):
+    """Start of the nearest stretch of d seconds in the same clip (within reach) that is clean as filmed - no close-up of the
+    camera holder, no finger, not on its side - outside a-b; None if there is none."""
+    from . import shots
+    by = {x["t"]: shots.kind_keep(x) for x in an.get("secs") or []}
+    ok = lambda t0: t0 >= 0 and t0 + d <= dur - 0.2 and all(by.get(t, "none") in ("none", "guest") for t in range(int(t0), int(t0 + d) + 1))
+    for step in range(0, int(reach) + 1):
+        for t0 in (a - d - step, b + step):
+            if ok(t0): return float(t0)
+    return None
+
+
 def scene_window(segs, items, k, d, durs):
     """Where a fact / joke pause takes its picture (owner, 2026-10-25: the real scene, never another place): the same clip
     near the pause, a stretch no soundbite shows (a dropped bit), else the seconds just before. -> (src index, start)."""
@@ -974,12 +992,12 @@ def scene_part(src, flip, an, start, wav, out, kind, log=print):
     return out
 
 
-def clip_part(clip, wav, out, kind, root, log=print, start=0.0):
+def clip_part(clip, wav, out, kind, root, log=print, start=0.0, flip=False):
     """Narration over one of the creator's own clips of that exact place (named in the note), upright, back camera."""
     from . import shots
     d = media.dur(wav) + 0.35
-    rot = shots.orient(clip, root, log)
-    vf = (rot + "," if rot else "") + shots.vf_frame(kind, None, 0.0, False) + f",fade=t=in:st=0:d=0.3,fade=t=out:st={d - 0.3:.2f}:d=0.3"
+    rot = "" if flip else shots.orient(clip, root, log)
+    vf = (rot + "," if rot else "") + shots.vf_frame(kind, None, 0.0, flip) + f",fade=t=in:st=0:d=0.3,fade=t=out:st={d - 0.3:.2f}:d=0.3"
     loop = ["-stream_loop", "-1"] if media.dur(clip) < start + d else []
     media.ff(*loop, "-ss", f"{start:.2f}", "-i", clip, "-i", wav, "-t", f"{d:.2f}", "-map", "0:v:0", "-map", "1:a:0", "-vf", vf,
              "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,apad", *ENC, "-shortest", out, timeout=900)
@@ -1298,7 +1316,7 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                     if clips:
                         c = clips[k % len(clips)]
                         if c.suffix.lower() in (".jpg", ".jpeg", ".png", ".heic", ".webp"): still_part(c, wav, f, kind)
-                        else: clip_part(c, wav, f, kind, root, log, start=float(note_.get("clip_start", 0.0)))
+                        else: clip_part(c, wav, f, kind, root, log, start=float(note_.get("clip_start", 0.0)), flip=bool(note_.get("clip_flip", False)))
                         credit = ""; _log(log, f"    fact over your clip {c.name}")
                     else:
                         si, st = scene_window(segs, items, k, media.dur(wav) + 0.35, sdur)
