@@ -908,7 +908,7 @@ def cut_bite_framed(src, t0, t1, out, kind, flip, an, cuts, log=print, ladder=No
         ext = XFADE if n < len(plan) - 1 else 0.0   # each piece runs on under the dissolve into the next
         if keep and place and k == "none": k = "blur"   # a clip filmed mostly on the holder's neck (third floor): only shots of the guest stay
         if keep and k == "blur":   # the holder's close-up / a finger: the nearest clean moment of the SAME clip, else blurred
-            cs = clean_start(an, a, b, d + ext, media.dur(src))
+            cs = None if place else clean_start(an, a, b, d + ext, media.dur(src))   # (in a neck-filmed clip "clean" isn't)
             if cs is not None:
                 media.ff("-ss", f"{cs:.2f}", "-i", src, "-t", f"{d + ext:.2f}", "-an", "-vf", shots.vf_frame(kind, None, 0.0, flip), *ENC[:10], v, timeout=900)
                 _log(log, f"    {a:.0f}-{b:.0f}s: same scene from {cs:.0f}s (close-up / finger here)")
