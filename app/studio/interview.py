@@ -499,7 +499,7 @@ def still_part(img, wav, out, kind):
     return out
 
 
-ENC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"]
+ENC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-profile:v", "high", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"]
 
 
 def cut_bite(src, t0, t1, out, kind, k, flip=True):
@@ -1025,7 +1025,7 @@ def assemble(parts, out, kind, work, cfg, log=print, title=""):
     joined = Path(work) / f"_{kind}_joined.mp4"
     media.ff("-f", "concat", "-safe", 0, "-i", lst, "-c", "copy", joined, timeout=1800)
     sub = ass.as_posix().replace(":", "\\:")
-    media.ff("-i", joined, "-vf", f"subtitles='{sub}'", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-c:a", "copy",
+    media.ff("-i", joined, "-vf", f"subtitles='{sub}'", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-profile:v", "high", "-movflags", "+faststart", "-c:a", "copy",
              "-movflags", "+faststart", out, timeout=7200)
     joined.unlink(missing_ok=True)
     try:

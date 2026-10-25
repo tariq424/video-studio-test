@@ -9,7 +9,7 @@ from pathlib import Path
 
 from . import media
 
-ENC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]
+ENC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-profile:v", "high"]
 
 
 def _log(log, m):
