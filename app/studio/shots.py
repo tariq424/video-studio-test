@@ -155,41 +155,113 @@ def analyze(src, work, flip=True, log=print):
     return res
 
 
-SHOT_CHECK = """This is one frame from a phone video of a conversation filmed while walking and driving. Is it a usable shot for a
-documentary? Reply with JSON only: {"shot": "scenery|street|building|interior|person|clothing_closeup|hand_or_finger|ceiling|floor|blurry|other",
-"sideways": true|false, "usable": true|false}. Not usable: a close-up of clothing or a shirt filling the frame, a hand or finger over the
-lens, a ceiling, a floor, a blurry smear, or a picture lying on its side or upside down."""
+SHOT_CHECK = """This is one frame from a phone video of a conversation filmed while walking and driving. Reply with JSON only:
+{"shot": "scenery|street|building|interior|person|clothing_closeup|hand_or_finger|ceiling|floor|blurry|other",
+"top": "top|bottom|left|right", "usable": true|false}.
+"top": where the TOP of the real scene is in this picture (the sky, the ceiling, people's heads): "top" if the picture is upright,
+"bottom" if it is upside down, "left" or "right" if the phone was held on its side.
+"usable": false for a close-up of clothing or a shirt filling the frame, a hand or finger over the lens, a blurry smear, or only
+floor / ceiling with nothing else. A room, a street or a person seen upside down or sideways is still usable (it will be turned)."""
+
+VIS_VERSION = 2   # bump to re-run the check (2: which way is up, 2026-10-25)
+TURN = {"bottom": 180, "left": 90, "right": 270}   # degrees clockwise that bring the top back up
+
+
+def _turn_img(cv2, im, rot):
+    return im if not rot else cv2.rotate(im, {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_COUNTERCLOCKWISE}[rot])
 
 
 def vision_check(an, work, cfg, log=print, every=2):
-    """The local vision model looks at the seconds where no face was found (every 2nd second, applied to both): shirt
-    close-ups, a finger over the lens, floors, and stretches filmed with the phone on its side are marked bad and get
-    covered like a ceiling (owner, 2026-10-24 review of v15). Cached in faces.json ("vis")."""
+    """Every 2nd second where no face was found: the local vision model says what the frame shows and which way is up.
+    Owner, 2026-10-25: never swap his footage for something else - an upside-down or sideways stretch is turned upright
+    ("rot", degrees clockwise), a finger / shirt close-up / smear is blurred ("bad"). Faces found only after turning the
+    frame confirm the turn. Cached in faces.json ("vis")."""
     secs = an.get("secs") or []
-    if not secs or an.get("vis") == 1 or not cfg: return an
+    if not secs or an.get("vis") == VIS_VERSION or not cfg: return an
     fd = Path(work) / "frames1s"
     try:
         from . import footage
         from .llm import parse_json
     except Exception:
         return an
-    todo = [x for x in secs if kind_of(x) == "none" and "bad" not in x]
-    log(f"  framing: the vision model checks {len(todo[::every])} faceless frames (shirt close-ups, fingers, sideways)")
+    cv2, np = _cv()
+    todo = [x for x in secs if not x.get("faces")]
+    log(f"  framing: the vision model checks {len(todo[::every])} faceless frames (which way is up; fingers, shirt close-ups)")
     by = {x["t"]: x for x in secs}
-    n_bad = 0
+    n_bad = n_rot = 0
     for x in todo[::every]:
         img = fd / f"{x['t'] + 1:05d}.jpg"
         if not img.exists(): continue
         try: j = parse_json(footage._vision(dict(cfg, vet_provider="local"), img, SHOT_CHECK))
         except Exception: continue
-        bad = (not bool(j.get("usable", True))) or bool(j.get("sideways")) or str(j.get("shot", "")) in ("clothing_closeup", "hand_or_finger", "ceiling", "floor", "blurry")
+        rot = TURN.get(str(j.get("top", "top")).lower().strip(), 0)
+        if cv2 is not None:   # faces settle it: found only after a turn -> that turn; found upright -> no turn
+            im = cv2.imread(str(img))
+            if im is not None:
+                hits = {r: len(_faces(cv2, cv2.cvtColor(_turn_img(cv2, im, r), cv2.COLOR_BGR2GRAY), _turn_img(cv2, im, r))) for r in (90, 180, 270)}
+                best = max(hits, key=hits.get)
+                if hits[best] >= (1 if rot else 2): rot = best   # (2 faces needed to overrule an upright verdict)
+        bad = (not bool(j.get("usable", True))) or str(j.get("shot", "")) in ("clothing_closeup", "hand_or_finger", "blurry")
         for t in range(x["t"], x["t"] + every):
-            if t in by and kind_of(by[t]) == "none": by[t]["bad"] = bool(bad)
-        n_bad += bool(bad)
-    an["vis"] = 1
+            if t in by and not by[t].get("faces"):
+                by[t]["bad"] = bool(bad); by[t]["rot"] = rot
+        n_bad += bool(bad); n_rot += bool(rot)
+    an["vis"] = VIS_VERSION
     (Path(work) / "faces.json").write_text(json.dumps(an), encoding="utf-8")
-    log(f"  framing: {n_bad} faceless frame(s) marked unusable")
+    log(f"  framing: {n_bad} frame(s) to blur, {n_rot} to turn upright")
     return an
+
+
+def kind_keep(s):
+    """Keep-the-scene mode (owner, 2026-10-25): what to DO with a second of his footage - never what to swap it for.
+    turnN = turn N degrees clockwise; blur = finger / shirt / smear or the holder's own big face; guest = frame on him."""
+    small, big = split(s["faces"])
+    if s.get("rot") and not s.get("faces"): return f"turn{s['rot']}"
+    if s.get("bad") and not small: return "blur"
+    if small: return "guest"
+    if big: return "blur"   # the camera holder's own close-up (his neck, his chin): the scene stays, blurred
+    return "none"
+
+
+def plan_keep(an, t0, t1, min_len=2.0):
+    """[(a, b, kind, guest_box, tilt)] like plan_shots, with the keep-the-scene kinds. A turn needs 2+ agreeing checks."""
+    by = {s["t"]: s for s in an.get("secs", [])}
+    raw = []
+    t = math.floor(t0)
+    while t < t1:
+        s = by.get(t) or {"faces": [], "tilt": 0}
+        k = kind_keep(s)
+        g = None
+        if k == "guest":
+            gs, _ = split(s["faces"]); g = max(gs, key=lambda f: f[2] * f[3])
+        raw.append([max(t0, t), min(t1, t + 1), k, g, s.get("tilt", 0)])
+        t += 1
+    for i, r in enumerate(raw):   # a lone turn/blur second among plain ones is noise; a "none" between two turns of one kind joins them
+        if r[2].startswith("turn"):
+            same = sum(1 for q in raw[max(0, i - 3):i + 4] if q[2] == r[2])
+            if same < 3: r[2] = "none"
+    for i in range(1, len(raw) - 1):
+        if raw[i][2] == "none" and raw[i - 1][2] == raw[i + 1][2] and raw[i - 1][2] != "none": raw[i][2] = raw[i - 1][2]
+    if not raw: return [(t0, t1, "none", None, 0.0)]
+    shots = []
+    for r in raw:
+        if shots and shots[-1][2] == r[2]: shots[-1][1] = r[1]; shots[-1][5].append(r)
+        else: shots.append([r[0], r[1], r[2], None, 0.0, [r]])
+    i = 0
+    while i < len(shots):
+        if shots[i][1] - shots[i][0] < min_len and len(shots) > 1:
+            j = i - 1 if i > 0 and (i == len(shots) - 1 or shots[i - 1][1] - shots[i - 1][0] >= shots[i + 1][1] - shots[i + 1][0]) else i + 1
+            a, b = sorted((i, j)); keep = shots[j]
+            keep[0], keep[1] = shots[a][0], shots[b][1]; keep[5] = shots[a][5] + shots[b][5]
+            shots.pop(i if j != i else j); i = max(0, i - 1); continue
+        i += 1
+    res = []
+    for a, b, k, _g, _t, rs in shots:
+        gs = [r[3] for r in rs if r[3]]
+        g = [sum(x[n] for x in gs) / len(gs) for n in range(4)] if gs and k == "guest" else None
+        tl = sorted(r[4] for r in rs); tilt = tl[len(tl) // 2] if tl else 0.0
+        res.append((a, b, k, g, tilt))
+    return res
 
 
 def kind_of(s):
@@ -258,10 +330,20 @@ def holder_out(kind, guest, src_w=1920, src_h=1080):
     return room >= gr - gl and room >= (W / H) * src_h / src_w / 2.6
 
 
-def vf_frame(kind, guest=None, tilt=0.0, flip=True, src_w=1920, src_h=1080):
-    """Filter: mirror removed, level, framed on the guest (or centred), scaled to the output."""
+def vf_frame(kind, guest=None, tilt=0.0, flip=True, src_w=1920, src_h=1080, rot=0, blur=False):
+    """Filter: mirror removed, turned upright (rot = degrees clockwise), level, framed on the guest (or centred), scaled to
+    the output; blur=True softens a stretch that is kept but not worth seeing sharp (owner: blur, never swap)."""
     W, H = (1080, 1920) if kind == "short" else (1920, 1080)
     f = ["hflip"] if flip else []
+    if rot:
+        f.append({90: "transpose=1", 180: "hflip,vflip", 270: "transpose=2"}[rot])
+        if rot in (90, 270): src_w, src_h = src_h, src_w
+        if rot in (90, 270) and (src_w < src_h) != (W < H):   # a tall picture in a wide frame: centred over a blurred copy of itself
+            tail = ",boxblur=22:2,eq=brightness=-0.08" if blur else ""
+            return (",".join(f) + f",split[a][b];[a]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=30:2,"
+                    f"eq=brightness=-0.18[bg];[b]scale={W}:{H}:force_original_aspect_ratio=decrease:flags=lanczos{tail}[fg];"
+                    f"[bg][fg]overlay=(W-w)/2:(H-h)/2,fps=30,format=yuv420p,setsar=1")
+        guest, tilt = None, 0.0
     if 2.0 <= abs(tilt) <= 15.0:   # level the horizon; zoom so the turned corners stay outside the frame
         r = math.radians(-tilt); z = abs(math.cos(r)) + abs(math.sin(r)) * max(src_w, src_h) / min(src_w, src_h)
         f.append(f"rotate={r:.4f}:fillcolor=black,scale=iw*{z:.3f}:ih*{z:.3f},crop={src_w}:{src_h}")
@@ -291,6 +373,7 @@ def vf_frame(kind, guest=None, tilt=0.0, flip=True, src_w=1920, src_h=1080):
     y = f"max(0\\,min(ih-{ch}\\,ih*{max(cy - 0.08, 0):.3f}-{ch}/2+{ch}*0.05))"   # a little headroom above the face
     f.append(f"crop={cw}:{ch}:{x}:{y}")
     f.append(f"scale={W}:{H}:force_original_aspect_ratio=decrease:flags=lanczos,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2")
+    if blur: f.append("boxblur=22:2,eq=brightness=-0.08")
     f.append("fps=30,format=yuv420p,setsar=1")
     return ",".join(f)
 

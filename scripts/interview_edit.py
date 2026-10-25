@@ -21,6 +21,7 @@ def main():
     def log(m):
         line = f"[{time.strftime('%H:%M:%S')}] {m}"; print(line, flush=True); lf.write(line + "\n"); lf.flush()
     cfg = config.load()
+    cfg.update(a.get("cfg") or {})   # per-video settings (keep-the-scene, Short length and topics, end-card line)
     lock = work / "interview.lock"   # one edit at a time per work folder (two runs once wrote the same file)
     if lock.exists() and time.time() - lock.stat().st_mtime < 4 * 3600:
         log(f"another interview edit is running here (lock {lock}); not starting"); return
