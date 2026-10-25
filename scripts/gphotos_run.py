@@ -24,7 +24,7 @@ def main():
     job = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     cfg = config.load(); cfg.update(job.get("cfg") or {})
     if job.get("setup_key"): print(setup_key(), flush=True)
-    if job.get("search") or job.get("details") or job.get("download"): gphotos.run(cfg, job, lambda m: print(m, flush=True))
+    if job.get("search") or job.get("details") or job.get("download") or job.get("details_from"): gphotos.run(cfg, job, lambda m: print(m, flush=True))
     if job.get("backup"): media_db.backup(cfg, lambda m: print(m, flush=True))
     print("done", flush=True)
 
