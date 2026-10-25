@@ -72,6 +72,14 @@ def _log(log, m):
 
 
 # ------------------------------------------------------------------ 1-2 transcript
+_GPU_BAD = False
+def cfg_gpu_ok():
+    """GPU whisper only when the CUDA BLAS library is present (else ctranslate2 fails, and a retry hangs)."""
+    import ctypes.util, os
+    if os.name != "nt": return True
+    return any(os.path.exists(os.path.join(d, "cublas64_12.dll")) for d in os.environ.get("PATH", "").split(os.pathsep) if d)
+
+
 def transcribe(src, work, log=print):
     out = Path(work) / "transcript.json"
     if out.exists(): return json.loads(out.read_text(encoding="utf-8"))
@@ -89,10 +97,15 @@ def transcribe(src, work, log=print):
                         "words": [[w.word.strip(), round(w.start, 2), round(w.end, 2)] for w in (s.words or []) if w.word.strip()]})
             if time.time() - t0 > 60: _log(log, f"  transcribed to {int(s.end // 60)} min"); t0 = time.time()
         return res
-    try: segs = run(WhisperModel("large-v3-turbo", device="cuda", compute_type="float16"), "GPU")
-    except Exception as e:
-        _log(log, f"  GPU transcription unavailable ({str(e)[:80]}); CPU")
-        segs = run(WhisperModel("small.en", device="cpu", compute_type="int8"), "CPU")
+    global _GPU_BAD
+    # a second CUDA attempt after a failed one (missing cublas) hangs forever, so try the GPU once per process
+    if not _GPU_BAD and cfg_gpu_ok():
+        try: segs = run(WhisperModel("large-v3-turbo", device="cuda", compute_type="float16"), "GPU")
+        except Exception as e:
+            _GPU_BAD = True
+            _log(log, f"  GPU transcription unavailable ({str(e)[:80]}); CPU")
+            segs = run(WhisperModel("small.en", device="cpu", compute_type="int8"), "CPU")
+    else: segs = run(WhisperModel("small.en", device="cpu", compute_type="int8"), "CPU")
     out.write_text(json.dumps(segs, indent=1, ensure_ascii=False), encoding="utf-8")
     return segs
 
