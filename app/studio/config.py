@@ -34,7 +34,7 @@ DEFAULTS = {
     "imagegen_first": "hf",   # one service per video, rotating; the others are the fallback
     "source_snapshot_max_uses": 2,    # source screenshots taken just for describing (rung-2 clips/screenshots are reused free)
     # WanGP memory policy (wangp.py): never started with the job; launched for a generation, stopped right after
-    "wangp_on_demand": True,
+    "wangp_on_demand": False,   # owner: WanGP is not used (2026-10-25)
     "wangp_start_timeout": 300,
     "script_provider": "deepseek",
     "qa_provider": "off",
