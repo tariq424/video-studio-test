@@ -25,8 +25,11 @@ def main():
         if not (b / f.name).exists(): shutil.copy2(f, b / f.name)   # the untouched original
         vert = "short" in f.stem.lower()
         log(f"== {job} {f.name}")
-        qc.qc_part(f, cfg, log, every=4.0 if vert else 6.0, label=f.stem[:30], kind="short" if vert else "documentary")
-        qc.qc_final(f, cfg, b, log, every=10.0 if vert else 30.0)
+        try:
+            qc.qc_part(f, cfg, log, every=4.0 if vert else 6.0, label=f.stem[:30], kind="short" if vert else "documentary")
+            qc.qc_final(f, cfg, b, log, every=10.0 if vert else 30.0)
+        except Exception as e:   # e.g. the video is open in a player: skip it, carry on
+            log(f"   skipped ({type(e).__name__}: {str(e)[:150]})")
     log("ALL DONE")
 
 
