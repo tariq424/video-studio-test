@@ -154,6 +154,9 @@ def _copilot(cfg, q, timeout=90):
             new = last[k + len(ask):] if k >= 0 else ""
             parts = [p.strip() for p in re.split(r"\n+", new) if len(p.split()) > 6 and not re.search(r"Press Tab|Message Copilot|Copilot may make mistakes", p)]
             _evidence(cfg, page, "copilot_last")
+            if re.search(r"reached your daily limit", last, re.I):   # free plan quota: wait for the reset, never upgrade
+                m = re.search(r"check back at ([0-9: ]+[AP]M)", last, re.I)
+                raise RuntimeError("Copilot daily limit reached" + (f" (resets {m.group(1)})" if m else ""))
             if not parts: raise RuntimeError("Copilot gave no readable answer")
             return parts[:6]
         finally:
@@ -185,8 +188,9 @@ def search(cfg, query, log=None):
             rec["empty"] = rec.get("empty", 0) + 1
             _log(log, f"    search {name}: no results; next route")
         except Exception as e:
-            rec.update(fail=rec.get("fail", 0) + 1, rest_until=now + REST[name], why=str(e)[:160])
-            _log(log, f"    search {name}: {str(e)[:100]}; rested {REST[name] // 60} min; next route")
+            rest = 6 * 3600 if "daily limit" in str(e) else REST[name]
+            rec.update(fail=rec.get("fail", 0) + 1, rest_until=now + rest, why=str(e)[:160])
+            _log(log, f"    search {name}: {str(e)[:100]}; rested {rest // 60} min; next route")
     _save(cfg, st)
     _log(log, f"    search: {len(result)} snippet(s)" + (f" via {used}" if used else " (every route failed or resting)"))
     return result, used
