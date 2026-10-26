@@ -35,6 +35,20 @@ upright samples sideways; B's black was named by both checks but dropped, and th
     whatever the ok fields say (round 2's confirm replied ok:true with problem "black" and was discarded).
   - the pixel black test is a FLAT-black test: mean luminance under 24 AND stddev under 4. Limited-range video
     black measures 16, not 0; a dark but real scene has texture, a black frame does not.
+
+v5 (2026-10-26, after smoke round 3: black PASS via the pixel test; orientation produced ZERO false flags on A
+but also ZERO catches on B, and the strip answers were never recorded; B's upside-down sample at 37 s escaped
+because a confirmed SOFT flag skipped the orientation check; A's remaining hard flags were "finger" on ordinary
+footage of hands typing / pointing):
+  - orientation is now PAIRWISE rotate-and-compare: the frame as-is against one rotation at a time (180, then
+    90 CCW, then 90 CW), each side at readable height (768 px), instead of one 4-panel strip whose panels
+    shrank past readability under the vision model's own downscale. Every pair's answer is recorded per
+    sample (the "orient" field in the reports), so a miss is attributable: the model picked the as-is side,
+    answered "none", or its reply failed to parse.
+  - the orientation check now runs on frames with a confirmed SOFT fault too; only a confirmed HARD fault or
+    an unchecked frame skips it.
+  - "finger" is defined strictly in both prompts: a finger or thumb pressed against the lens, blocking the
+    view. Hands visible IN the scene (typing, pointing, holding objects) are normal footage, not a fault.
 """
 import json
 import shutil
@@ -44,7 +58,7 @@ from . import media
 
 ENC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-profile:v", "high"]
 
-QCVER = 4
+QCVER = 5
 HARD = ("sideways", "upside_down", "black", "finger", "smudge")
 SOFT = ("blurry", "face_closeup", "clothing_closeup")
 
@@ -64,19 +78,24 @@ def available(cfg):
 
 QC = """Quality check of one frame from a finished travel documentary. Reply with JSON only:
 {"ok": true|false, "problem": "none|finger|smudge|sideways|upside_down|blurry|clothing_closeup|face_closeup|black"}
-Not ok: a finger or hand over the lens, a smudge or fog on the lens, a picture lying on its side or upside down, a blurry smear,
-a close-up of clothing filling the frame, one person's face filling most of the frame, or a black / empty frame."""
+Not ok: a finger or thumb pressed against the lens itself, blocking the view (one big blurry skin-coloured shape with
+nothing recognisable behind it), a smudge or fog on the lens, a picture lying on its side or upside down, a blurry smear,
+a close-up of clothing filling the frame, one person's face filling most of the frame, or a black / empty frame.
+Hands visible IN the picture - typing on a keyboard, pointing at a screen, holding or using objects - are normal
+footage, NOT a finger fault."""
 
 CONFIRM = """A first quality check of this single frame claimed the problem: "{problem}".
 Be strict: confirm ONLY if that exact fault is obvious in this frame. A normal shot - including a person's face
 in a talking-head shot, a dark but visible scene, or a frame caught mid-transition - is NOT a fault.
+If the claimed problem is "finger": confirm ONLY when a finger or thumb is pressed against the lens, blocking the
+camera's view. Hands visible in the scene - typing, pointing, holding objects - are NOT a finger fault.
 Reply with JSON only: {{"ok": true|false, "problem": "none|finger|smudge|sideways|upside_down|blurry|clothing_closeup|face_closeup|black"}}"""
 
-ORIENT = """Four versions of one picture side by side, numbered 1 to 4 from the left. Version 1 is the picture as-is;
-versions 2, 3 and 4 are the same picture rotated: 180 degrees, 90 degrees one way, 90 degrees the other way.
-Look at any text or captions, at faces, and at which way is up in the scene. Reply with JSON only:
-{"upright": 1} - the number of the version that looks upright and readable.
-If there is no readable text and no clear up or down in the scene, or you cannot tell, reply {"upright": "none"}."""
+ORIENT2 = """Two versions of one picture side by side. LEFT is the picture as-is; RIGHT is the same picture
+rotated {deg}. Look at any text or captions, at faces, and at which way is up in the scene. Reply with JSON only:
+{{"upright": "left"}} if the LEFT version looks upright and readable,
+{{"upright": "right"}} if the RIGHT version looks upright and readable,
+{{"upright": "none"}} if neither version looks clearly upright, or you cannot tell."""
 
 
 def _pixel_flat_black(img):
@@ -111,40 +130,64 @@ def _judge(cfg, img):
     return {"state": "bad", "prob": prob, "raw": prob, "first": prob, "confirm": prob2, "via": "model"}
 
 
+def _orient_pair(cfg, im, img, tag, deg_text, rot):
+    """Build one LEFT (as-is) / RIGHT (rotated) pair image at readable size and ask which side is upright.
+    -> "left" | "right" | "none" | "error:<why>" (an unparseable reply keeps its first 60 chars as evidence)."""
+    try:
+        from PIL import Image
+        H = 768
+        left = im.resize((max(1, int(im.width * H / im.height)), H))
+        r = im.transpose(rot)
+        right = r.resize((max(1, int(r.width * H / r.height)), H))
+        pair = Image.new("RGB", (left.width + right.width, H))
+        pair.paste(left, (0, 0)); pair.paste(right, (left.width, 0))
+        sp = Path(img).with_name(Path(img).stem + f"_o2_{tag}.jpg"); pair.save(sp, quality=85)
+    except Exception: return "error:build"
+    from . import footage
+    from .llm import parse_json
+    try: raw = footage._vision(dict(cfg, vet_provider="local"), sp, ORIENT2.format(deg=deg_text))
+    except Exception: return "error:vision"
+    try:
+        j = parse_json(raw)
+        a = str((j or {}).get("upright") or "none").strip().lower()
+    except Exception: return "error:parse:" + str(raw)[:60].replace("\n", " ")
+    return a if a in ("left", "right", "none") else "error:answer:" + a[:20]
+
+
 def _orientation(cfg, img):
-    """Rotate-and-compare: one strip (as-is | 180 | 90 | 90 the other way), one question - which panel is
-    upright? -> "upside_down" | "sideways" | None (panel 1, "none", or any failure: no evidence, no flag)."""
+    """Orientation by pairwise rotate-and-compare -> (fault | None, log). The frame as-is is compared against
+    its 180, 90-CCW and 90-CW rotations, one pair at a time, each side at readable height - round 3's single
+    4-panel strip produced no catches and no evidence: its panels were too small to read after the vision
+    model's own downscale, and the answer was never recorded. Every pair's answer is logged here, so the next
+    miss is attributable: the model picked the as-is side, answered "none", or its reply failed to parse.
+    The 180 pair runs first and a "right" there ends the check (upside-down); a sideways frame is caught by
+    whichever 90 pair turns it upright."""
     try:
         from PIL import Image
         im = Image.open(img).convert("RGB")
-        panels = [im, im.transpose(Image.ROTATE_180), im.transpose(Image.ROTATE_90), im.transpose(Image.ROTATE_270)]
-        H = 512; rs = []
-        for p in panels:
-            rs.append(p.resize((max(1, int(p.width * H / p.height)), H)))
-        strip = Image.new("RGB", (sum(p.width for p in rs), H))
-        x = 0
-        for p in rs: strip.paste(p, (x, 0)); x += p.width
-        sp = Path(img).with_name(Path(img).stem + "_o4.jpg"); strip.save(sp, quality=80)
-    except Exception: return None
-    from . import footage
-    from .llm import parse_json
-    try: j = parse_json(footage._vision(dict(cfg, vet_provider="local"), sp, ORIENT))
-    except Exception: return None
-    try: u = int(j.get("upright"))
-    except Exception: return None
-    if u == 2: return "upside_down"
-    if u in (3, 4): return "sideways"
-    return None
+    except Exception: return None, "open-error"
+    log = []
+    a = _orient_pair(cfg, im, img, "180", "180 degrees", Image.ROTATE_180); log.append(f"180:{a}")
+    if a == "right": return "upside_down", ";".join(log)
+    a = _orient_pair(cfg, im, img, "90ccw", "90 degrees counterclockwise", Image.ROTATE_90); log.append(f"90ccw:{a}")
+    if a == "right": return "sideways", ";".join(log)
+    a = _orient_pair(cfg, im, img, "90cw", "90 degrees clockwise", Image.ROTATE_270); log.append(f"90cw:{a}")
+    if a == "right": return "sideways", ";".join(log)
+    return None, ";".join(log)
 
 
 def _judge_frame(cfg, img):
-    """Full per-frame verdict: the model/pixel judge, plus rotate-and-compare orientation when the frame
-    wasn't already judged bad or unchecked."""
+    """Full per-frame verdict: the model/pixel judge, plus rotate-and-compare orientation. Orientation runs on
+    every frame that is not already a confirmed HARD fault or unchecked - INCLUDING frames with a confirmed
+    SOFT fault: round 3's B 37 s sample was an upside-down face confirmed as face_closeup (soft), and the old
+    order never orientation-tested it, so the rotation fault escaped both checks."""
     v = _judge(cfg, img)
-    if v["state"] != "ok": return v
-    o = _orientation(cfg, img)
-    if o: return {"state": "bad", "prob": o, "raw": o, "first": "panel", "confirm": "panel", "via": "orient"}
-    return v
+    if v["state"] == "unchecked": return v
+    if v["state"] == "bad" and v["prob"] in HARD: return v
+    o, olog = _orientation(cfg, img)
+    if o: return {"state": "bad", "prob": o, "raw": o, "first": v.get("first", ""), "confirm": v.get("confirm", ""),
+                  "via": "orient", "orient": olog}
+    return {**v, "orient": olog}
 
 
 def _flags(samples):
@@ -252,6 +295,7 @@ def qc_part(path, cfg, log=print, every=4.0, label="", kind="documentary"):
                                "soft": soft, "ignored_single": single,
                                "samples": [{"t": round(s["t"], 1), "state": s["state"], "prob": s["prob"],
                                             "first": s.get("first", ""), "confirm": s.get("confirm", ""), "via": s.get("via", ""),
+                                            "orient": s.get("orient", ""),
                                             "rescued": bool(s.get("rescued", False))} for s in samples]}, indent=1), encoding="utf-8")
     return path
 
@@ -280,6 +324,7 @@ def qc_final(out, cfg, work, log=print, every=30.0):
         rows.append({"t": s["t"], "ok": not hard,
                      "problem": s["prob"] if hard else ("none" if s["state"] != "unchecked" else "unchecked"),
                      "raw": s["raw"], "first": s.get("first", ""), "confirm": s.get("confirm", ""), "via": s.get("via", ""),
+                     "orient": s.get("orient", ""),
                      "rescued": bool(s.get("rescued", False)), "unchecked": s["state"] == "unchecked",
                      "soft": s["prob"] if (s["state"] == "bad" and s["prob"] in SOFT) else ""})
     if ims:

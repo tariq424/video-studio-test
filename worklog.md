@@ -5,14 +5,21 @@
 - **Steps done:**
   - Round 1: steps 1 (apply v2, bc521cd), 2 (smoke specimens, 36271ea) and 3 (run, 2dc347b; B FAIL).
   - Round 2: step 4 (apply v3, 1980d64) and step 5 (re-run, report mode; FAIL, 9acc260/4727f5f).
-  - Round 3: step 6, part 1 (apply v4, 83ee757) and part 2 (run, report mode; FAIL; stop rule triggered). The job is stopped here for Tariq's review.
-- **Next step (exact):** Tariq's review. It's a scope decision under the agreed stop rule: "orientation is not judgeable by this local model".
-  - No further prompt tweaks.
-  - Do NOT enable `qc_on` or `interview_qc`, set `qc_mode`, or run QC on existing videos.
+  - Round 3: step 6, part 1 (apply v4, 83ee757) and part 2 (run; FAIL; fb8e8b2).
+  - Since 2026-10-26 3:55 PM the loop runs through the Claude-Koda exchange doc (Google Doc 1GV6ZvXQJwyyiNfy1ZM1FT22Jo-xGKCPpW5FAgQIViE4). Tariq overrode the stop rule: no round cap; it runs until a full PASS or a genuine WALL.
+  - Round 4: v5 applied; run in progress.
+- **Next step (exact):** round 4 run (hook `qc-smoke`, started 3:59:56 PM).
+  1. Post the RESULT with first/confirm/via/orient traces in the exchange doc.
+  2. Commit results to `qc_smoke_results/round4/`.
+  3. Then wait for Koda's next MSG.
 - **Flags, unchanged in every commit:**
   - `qc_on` = False. Code default; set nowhere in `config.py`, `settings.json` or any job cfg.
   - `interview_qc` = False. Code default; set nowhere.
   - `qc_mode`: set nowhere, so the patched code defaults to "report".
+- **Round 4 setup (2026-10-26, from MSG 002 in the exchange doc):**
+  - qc.py v5 came from Drive (`qc_v5.py`, id 10wvOhwheH3YI6FE5_aI3EEvAvP5H44Nd). It is 22,880 bytes, has SHA-256 `8683fcfa413029913ba5b0f991b1ec071072ea6443a7164192931ce74abb4a78` and contains `QCVER = 5`.
+  - v4 was backed up to `F:\code\patches\qc_v4.py`. v5 is applied on F: and in the repo; hash matched, compiles.
+  - The round-3 `*.qc.json` files were moved to `qc_smoke\_to_delete\round3_qcjson\`. The specimens are unchanged.
 - **Step 6, part 2: round 3 run (2026-10-26, 15:00-15:05 local, v4, report mode, same specimens):**
   - `qc.available` was True (`qwen2.5vl:7b`). Specimen SHA-256s are unchanged after the run.
   - Results are in `qc_smoke_results/round3/`:
