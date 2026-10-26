@@ -1,0 +1,79 @@
+{
+ "qcver": 4,
+ "status": "complete",
+ "unchecked": 0,
+ "frames": [
+  {
+   "t": 2.0,
+   "ok": false,
+   "problem": "finger",
+   "raw": "finger",
+   "first": "finger",
+   "confirm": "finger",
+   "via": "model",
+   "rescued": true,
+   "unchecked": false,
+   "soft": ""
+  },
+  {
+   "t": 32.0,
+   "ok": true,
+   "problem": "none",
+   "raw": "finger",
+   "first": "finger",
+   "confirm": "none",
+   "via": "model",
+   "rescued": false,
+   "unchecked": false,
+   "soft": ""
+  },
+  {
+   "t": 62.0,
+   "ok": true,
+   "problem": "none",
+   "raw": "finger",
+   "first": "finger",
+   "confirm": "none",
+   "via": "model",
+   "rescued": false,
+   "unchecked": false,
+   "soft": ""
+  },
+  {
+   "t": 92.0,
+   "ok": true,
+   "problem": "none",
+   "raw": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "rescued": false,
+   "unchecked": false,
+   "soft": ""
+  },
+  {
+   "t": 122.0,
+   "ok": true,
+   "problem": "none",
+   "raw": "face_closeup",
+   "first": "face_closeup",
+   "confirm": "face_closeup",
+   "via": "model",
+   "rescued": false,
+   "unchecked": false,
+   "soft": "face_closeup"
+  },
+  {
+   "t": 152.0,
+   "ok": true,
+   "problem": "none",
+   "raw": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "rescued": false,
+   "unchecked": false,
+   "soft": ""
+  }
+ ]
+}

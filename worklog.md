@@ -5,15 +5,48 @@
 - **Steps done:**
   - Round 1: steps 1 (apply v2, bc521cd), 2 (smoke specimens, 36271ea) and 3 (run, 2dc347b; B FAIL).
   - Round 2: step 4 (apply v3, 1980d64) and step 5 (re-run, report mode; FAIL, 9acc260/4727f5f).
-  - Round 3: step 6, part 1 (apply v4) done.
-- **Next step (exact):** step 6, part 2 (round 3). The round-2 `*.qc.json` files are already moved to `qc_smoke\_to_delete\round2_qcjson\`.
-  1. Run hook `qc-smoke` (`qc_videos.py` on the same specimens).
-  2. Put the sheets and json in `qc_smoke_results/round3/`, with the verdict per criterion, the "via" field for every flag and miss, and the stop rule applied.
-  3. Then stop for Tariq's review.
+  - Round 3: step 6, part 1 (apply v4, 83ee757) and part 2 (run, report mode; FAIL; stop rule triggered). The job is stopped here for Tariq's review.
+- **Next step (exact):** Tariq's review. It's a scope decision under the agreed stop rule: "orientation is not judgeable by this local model".
+  - No further prompt tweaks.
+  - Do NOT enable `qc_on` or `interview_qc`, set `qc_mode`, or run QC on existing videos.
 - **Flags, unchanged in every commit:**
   - `qc_on` = False. Code default; set nowhere in `config.py`, `settings.json` or any job cfg.
   - `interview_qc` = False. Code default; set nowhere.
   - `qc_mode`: set nowhere, so the patched code defaults to "report".
+- **Step 6, part 2: round 3 run (2026-10-26, 15:00-15:05 local, v4, report mode, same specimens):**
+  - `qc.available` was True (`qwen2.5vl:7b`). Specimen SHA-256s are unchanged after the run.
+  - Results are in `qc_smoke_results/round3/`:
+    - sheets and json for both specimens;
+    - `A_round3_finger_flags.png`: A's frames hard-flagged as finger;
+    - `B_round3_orient_strips.jpg`: the rotate-and-compare strips the model saw for B at 13, 19 and 31 s. In each strip the upright panel is plain to see: panel 3 at 13 and 19 s, panel 2 at 31 s.
+- **Round 3 verdict:**
+  - **A: zero hard-fault flags. FAIL.**
+    - Hard faults: `qc_part` would cover 9.5-16.5 s and 57.5-70.5 s as finger.
+      - 13 s: finger/finger, via model, rescued by its probe.
+      - 61 and 67 s: finger/finger, via model.
+    - `qc_final` flags 2 s as finger (finger/finger, via model, rescued).
+    - These frames show hands typing on a keyboard or pointing at a screen, not a finger over the lens.
+    - Orientation (via orient) put **no** flag on A.
+    - Soft flags: blurry at 1, 25, 169 and 175 s; face_closeup at 43 and 121 s.
+  - **B: sideways 10-20 s caught as sideways. FAIL.**
+    - 13 s and 19 s: first "sideways", confirm "none", via model. The rotate-and-compare check ran and returned no flag.
+  - **B: upside down 30-40 s caught as upside_down. FAIL.**
+    - 31 s: first "finger", confirm "none", via model. Rotate-and-compare ran and returned no flag.
+    - 37 s: first "face_closeup", confirm "face_closeup", via model. That is a confirmed soft flag, and because the frame was already judged bad, rotate-and-compare never ran on it.
+  - **B: black 50-60 s caught. PASS.**
+    - 55 s: black, via pixel (flat-black test), rescued by its probe. The right label.
+  - **B: nothing else hard-flagged. FAIL.**
+    - Finger, via model: 61 and 67 s (persistent) and 127 s (rescued). The `qc_part` spans are 51.5-70.5 s (black plus finger) and 123.5-130.5 s.
+    - 115 s finger was single and ignored.
+  - **B: blur reported as soft, not hard. PASS.** 73 and 79 s were blurry/blurry, via model, soft.
+  - **Both: status complete. PASS.** Unchecked is 0% for both: 0/30 in `qc_part` and 0/6 in `qc_final`.
+  - **Overall round 3: FAIL. Stop rule triggered:** A took hard flags, and B's rotation faults were not caught with the right labels. Under the agreed rule this is reported as **"orientation is not judgeable by this local model"**, a scope decision for Tariq, with no further prompt tweaks.
+- **Facts for the decision:**
+  - The pixel black test works.
+  - Orientation via orient produced zero false flags on A, but also zero catches on B, even with clearly upright panels in the strip.
+  - The report does not record the orientation answer itself (panel 1, "none", or a parse failure), only that no flag came back.
+  - A frame with a confirmed soft flag skips the orientation check.
+  - The remaining hard false positives on A are now "finger", via model.
 - **Step 6, part 1 verified (2026-10-26, round 3; task from the Koda handoff doc, CURRENT MESSAGE "STEP 6"):**
   - qc.py v4 came from Tariq's Google Drive (`qc_v4.py`, id 1mGVZok5J5w44ertXszMc1chUhyRbJKNA). The muse.ai link is blocked by this session's network allowlist.
   - It is 19,284 bytes, has SHA-256 `69a550ea2b303006abff5909e26d657cc6057530e1a2b897d204b5cb66682600` and contains `QCVER = 4`. Saved as `F:\code\patches\qc.py`.

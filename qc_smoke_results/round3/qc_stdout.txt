@@ -1,0 +1,10 @@
+== patches specimen_A.mp4
+    QC specimen_A: REPORT ONLY 9.5-16.5s finger - would be covered by a still in fix mode
+    QC specimen_A: REPORT ONLY 57.5-70.5s finger - would be covered by a still in fix mode
+  final QC: 6 frames checked, 1 flagged: 2s finger
+== patches specimen_B.mp4
+    QC specimen_B: 115.0s finger ignored (single sample, not persistent)
+    QC specimen_B: REPORT ONLY 51.5-70.5s black, finger - would be covered by a still in fix mode
+    QC specimen_B: REPORT ONLY 123.5-130.5s finger - would be covered by a still in fix mode
+  final QC: 6 frames checked, 0 flagged
+ALL DONE
