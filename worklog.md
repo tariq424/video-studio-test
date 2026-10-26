@@ -2,22 +2,41 @@
 ## QC STATUS
 
 - **Job:** frame QC recalibration. Apply the prepared patch, then run the report-mode smoke test. Nothing gets enabled in this job.
-- **Steps done:** 1 (apply).
-- **Next step (exact):** STEP 2. Make the smoke specimens in `F:\code\patches\qc_smoke\`.
-  - `specimen_A.mp4`: a copy of the source below.
-  - `specimen_B.mp4`: A with 4 injected faults, 10 s each. Then verify B plays end to end with audio.
+- **Steps done:** 1 (apply), 2 (smoke specimens).
+- **Next step (exact):** STEP 3.
+  1. Confirm the vision model is reachable: hook `qc-avail` writes `F:\code\patches\qc_smoke\avail.txt`.
+  2. Run the QC: hook `qc-smoke` runs `scripts\qc_videos.py` on `F:\code\patches\qc_smoke\list.json` (the two specimen paths), with backups in `F:\code\patches\qc_smoke\backup`.
+  3. Copy the sheets and json to `qc_smoke_results/` and write the verdict here.
 - **Flags, unchanged in every commit:**
   - `qc_on` = False. Code default; set nowhere in `config.py`, `settings.json` or any job cfg.
   - `interview_qc` = False. Code default; set nowhere.
   - `qc_mode`: set nowhere, so the patched code defaults to "report".
-- **Step 1 verified (2026-10-26):**
+- **Step 1 verified (2026-10-26, commit bc521cd):**
   - The patch `F:\code\patches\qc.py` is 12,311 bytes, has SHA-256 `7d7ed59145f4d6c143b174589374d6a9d2093480f4b26103f5a38381ccda6177` and contains `QCVER = 2`.
-  - Original backed up to `F:\code\patches\qc_v1_original.py` (SHA-256 `9f2bc68a5ee0af4257fe9bb09c60364af97af30980bc486a6bbb35c646d9dd1f`).
-  - The patch was copied over `app/studio/qc.py` on F: and in the repo. The SHA-256 of both copies matches the pickup hash, and py_compile is OK on both. No other code file was changed.
-- **Specimen A source (chosen, copy not made yet):** `F:\newsroom\staging\20261023_032233\output\AI_Just_Learned_to_Hack_Power_and_Water_Systems_short.mp4`.
-  - 178.0 s, 1080x1920. Published (approved by Tariq), item 907bb4a591d1.
-  - File dated 2026-10-23, before the v1 QC run, so it was never QC-modified.
-- **Injected timestamps:** none yet.
+  - Original backed up to `F:\code\patches\qc_v1_original.py` (SHA-256 `9f2bc68a...93273d`).
+  - The patch was copied over `app/studio/qc.py` on F: and in the repo. The SHA-256 of both copies matches, and py_compile is OK. No other code file was changed.
+- **Step 2 verified (2026-10-26):**
+  - **specimen_A.mp4** (164,968,649 bytes, SHA-256 `a8c53647...843dff`) is a byte-identical copy of `F:\videos\newsroom\staging\20261023_032233\output\AI_Just_Learned_to_Hack_Power_and_Water_Systems_short.mp4`.
+    - Newsroom item 907bb4a591d1, "AI is getting better at hacking power, water systems...". Status: published, so approved by Tariq.
+    - 178.0 s, 1080x1920, h264 + aac. The file is dated 2026-10-23, before the v1 QC run, so it was never QC-modified.
+    - It is the shortest approved video of 90 s or more.
+  - **specimen_B.mp4** (88,598,047 bytes, SHA-256 `5814dfbd...4cc4d7a`) was built by `F:\code\patches\qc_smoke\make_B.py` with the PC's ffmpeg 7.1. Video re-encoded with x264 veryfast crf 20; audio stream-copied.
+  - **Injected faults (actual), each 10.0 s, with ffmpeg `enable='between(t,a,b)'`:**
+    - 10.0-20.0 s: sideways. `transpose=1`, then refilled to 1080x1920.
+    - 30.0-40.0 s: upside down. `hflip,vflip`, i.e. 180 degrees.
+    - 50.0-60.0 s: black. `drawbox` fill.
+    - 70.0-80.0 s: strong blur. `boxblur=20:2`.
+    - Clean video between each pair of faults: 10 s.
+  - **Frame grabs check the placements:** at 9/11, 19/21, 29/31, 39/41, 49/51, 59/61, 69/71 and 79/81 s, each fault is present inside its window and absent outside it. Grabs saved as `F:\code\patches\qc_smoke\grabs_B.png`.
+  - **B plays end to end:** a full ffmpeg decode gives exit 0 with no errors. Duration is 178.005 s, the same as A. The audio is intact: mean -18.1 dB and max -1.5 dB, identical to A.
+- **Step 3 note on sampling, worked out before the run, so not a result:**
+  - `qc_videos.py` picks its spacing by file name. "specimen_*" has no "short" in it, so `qc_part` samples every 6 s at 1, 7, 13, 19, 25, ... s, and `qc_final` samples every 30 s.
+  - A hard fault counts only when it appears in 2 neighbouring samples. Inside the fault windows the samples are:
+    - sideways 10-20: 13 and 19;
+    - upside down 30-40: 31 and 37;
+    - black 50-60: **only 55**;
+    - blur 70-80: 73 and 79.
+  - So the black window can't meet the persistence rule unless a neighbouring sample is also flagged black.
 - **Verdict:** not run yet.
 
 ---
