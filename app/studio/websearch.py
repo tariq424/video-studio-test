@@ -99,6 +99,31 @@ def _google(cfg, q):
     return relevant(_clean(re.findall(r'<div[^>]*class="[^"]*(?:VwiC3b|BNeawe s3v9rd)[^"]*"[^>]*>(.*?)</div>', r.text, re.S)), q)
 
 
+ACCEPT = r"^(continue|got it|ok|okay|next|let's go|get started|try it|try the new copilot|accept|agree|i agree|done|start chatting)$"
+DECLINE = r"^(not now|no thanks|no, thanks|maybe later|skip|decline|dismiss|close|cancel)$"
+
+
+def _clear_prompts(page, log=None, rounds=4):
+    """Tariq (2026-10-26): accept Copilot's "updated experience" notices; decline any upgrade / subscription offer."""
+    for _ in range(rounds):
+        clicked = False
+        for b in page.locator("button, [role=button], a[role=button]").all()[:80]:
+            try:
+                if not b.is_visible(): continue
+                t = " ".join((b.inner_text() or b.get_attribute("aria-label") or "").split()).lower()
+            except Exception: continue
+            if not t: continue
+            if re.search(r"upgrade|subscribe|buy|premium|pro\b|free trial", t): continue   # never accept an upgrade
+            ctx = ""
+            try: ctx = page.inner_text("body")[:4000].lower()
+            except Exception: pass
+            upsell = bool(re.search(r"upgrade|subscribe|copilot pro|free trial|premium", ctx))
+            if (upsell and re.match(DECLINE, t)) or (not upsell and re.match(ACCEPT, t)):
+                try: b.click(timeout=2000); clicked = True; _log(log, f"    copilot: clicked '{t}'"); page.wait_for_timeout(1500); break
+                except Exception: pass
+        if not clicked: return
+
+
 def _copilot(cfg, q, timeout=90):
     """Ask Copilot in the signed-in Microsoft 365 profile for a short factual description; its answer is the snippet."""
     from playwright.sync_api import sync_playwright
@@ -109,6 +134,7 @@ def _copilot(cfg, q, timeout=90):
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         try:
             page.goto("https://copilot.microsoft.com/", wait_until="domcontentloaded", timeout=60000); page.wait_for_timeout(5000)
+            _clear_prompts(page)
             box = None
             for sel in ["#m365-chat-editor-target-element", "[aria-label='Message Copilot']", "textarea#userInput", "textarea", "[contenteditable=true]"]:
                 loc = page.locator(sel)
@@ -123,10 +149,12 @@ def _copilot(cfg, q, timeout=90):
                 if body == last: stable += 1
                 else: stable, last = 0, body
                 if stable >= 2 and len(body) > len(before) + 80: break
+                if stable == 1: _clear_prompts(page, rounds=1)
             k = last.rfind(ask[:60])   # the answer is the text after our own question (the sidebar comes before it)
             new = last[k + len(ask):] if k >= 0 else ""
             parts = [p.strip() for p in re.split(r"\n+", new) if len(p.split()) > 6 and not re.search(r"Press Tab|Message Copilot|Copilot may make mistakes", p)]
-            if not parts: _evidence(cfg, page, "copilot"); raise RuntimeError("Copilot gave no readable answer")
+            _evidence(cfg, page, "copilot_last")
+            if not parts: raise RuntimeError("Copilot gave no readable answer")
             return parts[:6]
         finally:
             ctx.close()
