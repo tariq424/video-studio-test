@@ -2,14 +2,22 @@
 ## QC STATUS
 
 - **Job:** frame QC recalibration. Apply the prepared patch, then run the report-mode smoke test. Nothing gets enabled in this job.
-- **Steps done:** 1 (apply), 2 (smoke specimens, commit 36271ea), 3 (run, report mode). The job is stopped here, awaiting Tariq's review.
-- **Next step (exact):** none in this job. Tariq reviews the smoke result.
-  - Do NOT enable `qc_on` or `interview_qc`, set `qc_mode`, or run QC on existing videos without his approval.
-  - Since B failed, the likely next work is fixing detection; he decides.
+- **Steps done:**
+  - Round 1: steps 1 (apply v2, bc521cd), 2 (smoke specimens, 36271ea) and 3 (run, 2dc347b; B FAIL).
+  - Round 2: step 4 (apply v3).
+- **Next step (exact):** round 2, step 5. Re-run on the SAME specimens; do not rebuild them.
+  1. Delete the `*.qc.json` files next to the specimens.
+  2. Hook `qc-smoke` runs `scripts\qc_videos.py` on `F:\code\patches\qc_smoke\list.json`, with backups in `F:\code\patches\qc_smoke\backup`.
+  3. Put the sheets and json in `qc_smoke_results/round2/` and write the verdict here, with the "first" and "confirm" verdicts for any missed fault.
+  4. Then stop.
 - **Flags, unchanged in every commit:**
   - `qc_on` = False. Code default; set nowhere in `config.py`, `settings.json` or any job cfg.
   - `interview_qc` = False. Code default; set nowhere.
   - `qc_mode`: set nowhere, so the patched code defaults to "report".
+- **Step 4 verified (2026-10-26, round 2):**
+  - The v3 patch `F:\code\patches\qc.py` is 15,975 bytes, has SHA-256 `572c7f299b3fee43bb4c66c0fa0d083f039be918b32826d6f47a85342ee5c4e6` and contains `QCVER = 3`.
+  - The v2 file in the repo was backed up to `F:\code\patches\qc_v2.py` (SHA-256 `7d7ed591...6177`). The v1 original stays at `qc_v1_original.py`.
+  - v3 was copied over `app/studio/qc.py` on F: and in the repo. The SHA-256 of both copies matches the pickup hash, and py_compile is OK. No other code file was changed.
 - **Step 1 verified (2026-10-26, commit bc521cd):**
   - The patch `F:\code\patches\qc.py` is 12,311 bytes, has SHA-256 `7d7ed59145f4d6c143b174589374d6a9d2093480f4b26103f5a38381ccda6177` and contains `QCVER = 2`.
   - Original backed up to `F:\code\patches\qc_v1_original.py` (SHA-256 `9f2bc68a...93273d`).

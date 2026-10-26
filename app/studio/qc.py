@@ -14,6 +14,16 @@ restored from preqc):
   - qc_mode: cfg "qc_mode" = "report" (default) only reports - it never modifies the video; "fix" covers hard spans.
   - unchecked frames (vision model error) are counted, never silently passed: if more than 10% of a video's
     samples are unchecked, its QC status in the report is "incomplete", not "passed".
+
+v3 (2026-10-26, after smoke test 1: specimen A passed, B's sideways / upside-down / black were all missed):
+  - black is detected from pixels, not by asking the model: a frame whose mean luminance is under 6 is black.
+  - persistence is resolved adaptively: an isolated hard flag probes the frames halfway to its neighbouring
+    samples (+/- half a step); the same problem there confirms it. A 10 s fault can no longer fall between
+    samples at a 6 s interval and die on the two-in-a-row rule.
+  - the vision prompts judge orientation FIRST, using any visible text / captions / faces as the anchor, and an
+    upside-down face is upside_down, not face_closeup.
+  - every sample's first and confirmation verdicts are recorded in the reports ("samples" / row fields),
+    so a miss can be attributed: the first look, or the confirmation.
 """
 import json
 import shutil
@@ -23,7 +33,7 @@ from . import media
 
 ENC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-profile:v", "high"]
 
-QCVER = 2
+QCVER = 3
 HARD = ("sideways", "upside_down", "black", "finger", "smudge")
 SOFT = ("blurry", "face_closeup", "clothing_closeup")
 
@@ -43,41 +53,69 @@ def available(cfg):
 
 QC = """Quality check of one frame from a finished travel documentary. Reply with JSON only:
 {"ok": true|false, "problem": "none|finger|smudge|sideways|upside_down|blurry|clothing_closeup|face_closeup|black"}
+Judge ORIENTATION FIRST, using any visible text, captions, faces and the horizon as your anchor: text or captions
+running vertically or rotated 90 degrees means "sideways"; text, captions or a face upside down means "upside_down".
+If the picture is rotated or upside down, report that - even when a face fills the frame (an upside-down face is
+"upside_down", not "face_closeup").
 Not ok: a finger or hand over the lens, a smudge or fog on the lens, a picture lying on its side or upside down, a blurry smear,
 a close-up of clothing filling the frame, one person's face filling most of the frame, or a black / empty frame."""
 
 CONFIRM = """A first quality check of this single frame claimed the problem: "{problem}".
-Be strict: confirm ONLY if that exact fault is obvious in this frame. A normal shot - including a person's face
+Be strict: confirm ONLY if that exact fault is obvious in this frame. Judge orientation by any visible text,
+captions and faces: an upside-down face confirms "upside_down". A normal shot - including a person's face
 in a talking-head shot, a dark but visible scene, or a frame caught mid-transition - is NOT a fault.
 Reply with JSON only: {{"ok": true|false, "problem": "none|finger|smudge|sideways|upside_down|blurry|clothing_closeup|face_closeup|black"}}"""
 
 
+def _pixel_black(img):
+    """A near-pure-black frame is a measurement, not an opinion: mean luminance under 6 (of 255)."""
+    try:
+        from PIL import Image, ImageStat
+        return ImageStat.Stat(Image.open(img).convert("L")).mean[0] < 6.0
+    except Exception: return False
+
+
 def _judge(cfg, img):
-    """-> {"state": "ok"|"bad"|"unchecked", "prob": <problem or "none">, "raw": <first check's problem>}.
-    A first-check flag stands only when a second, strict check agrees on the same problem (two-agree rule)."""
+    """-> {"state": "ok"|"bad"|"unchecked", "prob", "raw" (= the first verdict), "first", "confirm"}.
+    Black is decided from pixels. Anything else: a first-check flag stands only when a second, strict
+    check agrees on the same problem (two-agree rule). Both verdicts are kept for the report."""
+    if _pixel_black(img): return {"state": "bad", "prob": "black", "raw": "black", "first": "pixel", "confirm": "pixel"}
     from . import footage
     from .llm import parse_json
     try: j = parse_json(footage._vision(dict(cfg, vet_provider="local"), img, QC))
-    except Exception: return {"state": "unchecked", "prob": "unchecked", "raw": ""}
+    except Exception: return {"state": "unchecked", "prob": "unchecked", "raw": "", "first": "error", "confirm": ""}
     prob = str(j.get("problem") or "none").strip().lower()
-    if bool(j.get("ok", True)) or prob in ("none", ""): return {"state": "ok", "prob": "none", "raw": prob}
+    if bool(j.get("ok", True)) or prob in ("none", ""): return {"state": "ok", "prob": "none", "raw": prob, "first": prob, "confirm": ""}
     try: j2 = parse_json(footage._vision(dict(cfg, vet_provider="local"), img, CONFIRM.format(problem=prob)))
-    except Exception: return {"state": "unchecked", "prob": prob, "raw": prob}
+    except Exception: return {"state": "unchecked", "prob": prob, "raw": prob, "first": prob, "confirm": "error"}
     prob2 = str(j2.get("problem") or "none").strip().lower()
-    if not bool(j2.get("ok", True)) and prob2 == prob: return {"state": "bad", "prob": prob, "raw": prob}
-    return {"state": "ok", "prob": "none", "raw": prob}   # unconfirmed flag: dropped, kept in "raw" for the report
+    if not bool(j2.get("ok", True)) and prob2 == prob: return {"state": "bad", "prob": prob, "raw": prob, "first": prob, "confirm": prob2}
+    return {"state": "ok", "prob": "none", "raw": prob, "first": prob, "confirm": prob2}   # unconfirmed flag: dropped, both verdicts kept
 
 
-def _persistent(samples):
-    """Mask over samples: True where a HARD fault is part of a run - the same problem in a neighbouring sample too."""
-    flags = [(s["state"] == "bad" and s["prob"] in HARD) for s in samples]
-    out = []
+def _flags(samples):
+    return [(s["state"] == "bad" and s["prob"] in HARD) for s in samples]
+
+
+def _resolve(samples, probe):
+    """Persistence, resolved adaptively. A hard flag stands when the same problem appears in a neighbouring
+    sample; an ISOLATED hard flag probes the frames halfway to its neighbours (probe(t, prob) -> verdict dict
+    or None) and stands only if the same problem shows there. Sets s["rescued"] on probed samples."""
+    flags = _flags(samples); keep = list(flags)
     for i, f in enumerate(flags):
-        if not f: out.append(False); continue
+        if not f: continue
         prev_ok = i > 0 and flags[i - 1] and samples[i - 1]["prob"] == samples[i]["prob"]
         next_ok = i < len(samples) - 1 and flags[i + 1] and samples[i + 1]["prob"] == samples[i]["prob"]
-        out.append(bool(prev_ok or next_ok))
-    return out
+        if prev_ok or next_ok: continue
+        s = samples[i]
+        step = (samples[i + 1]["t"] - s["t"]) if i + 1 < len(samples) else ((s["t"] - samples[i - 1]["t"]) if i > 0 else 4.0)
+        rescued = False
+        if probe:
+            for dt in (-step / 2, step / 2):
+                v = probe(s["t"] + dt, s["prob"])
+                if v and v.get("state") == "bad" and v.get("prob") == s["prob"]: rescued = True; break
+        keep[i] = rescued; s["rescued"] = rescued
+    return keep
 
 
 def _mode(cfg):
@@ -109,7 +147,12 @@ def qc_part(path, cfg, log=print, every=4.0, label="", kind="documentary"):
         samples.append({"t": t, "img": img, **v})
     nun = sum(1 for s in samples if s["state"] == "unchecked")
     incomplete = bool(samples) and nun / len(samples) > 0.10
-    keep = _persistent(samples)
+    def probe(t2, prob):
+        if t2 < 0 or t2 > d - 0.3: return None
+        img2 = tmp / f"qcR{int(t2 * 10)}.jpg"
+        media.ff("-ss", f"{t2:.2f}", "-i", path, "-frames:v", 1, "-vf", "scale=768:-2", img2, timeout=120)
+        return _judge(cfg, img2) if img2.exists() else None
+    keep = _resolve(samples, probe)
     bad = [(s["t"], s["prob"], s["img"]) for s, k in zip(samples, keep) if k]
     single = [(s["t"], s["prob"]) for s, k in zip(samples, keep)
               if s["state"] == "bad" and s["prob"] in HARD and not k]
@@ -152,7 +195,10 @@ def qc_part(path, cfg, log=print, every=4.0, label="", kind="documentary"):
     rep.write_text(json.dumps({"qcver": QCVER, "mode": mode, "size": path.stat().st_size, "checked": len(samples),
                                "unchecked": nun, "status": "incomplete" if incomplete else "complete",
                                "fixed": fixed, "would_fix": would if mode == "report" else [],
-                               "soft": soft, "ignored_single": single}, indent=1), encoding="utf-8")
+                               "soft": soft, "ignored_single": single,
+                               "samples": [{"t": round(s["t"], 1), "state": s["state"], "prob": s["prob"],
+                                            "first": s.get("first", ""), "confirm": s.get("confirm", ""),
+                                            "rescued": bool(s.get("rescued", False))} for s in samples]}, indent=1), encoding="utf-8")
     return path
 
 
@@ -168,13 +214,19 @@ def qc_final(out, cfg, work, log=print, every=30.0):
         if not img.exists(): continue
         v = _judge(cfg, img)
         samples.append({"t": round(t, 1), **v}); ims.append((t, img))
-    keep = _persistent(samples)
+    def probe(t2, prob):
+        if t2 < 0 or t2 > d - 0.5: return None
+        img2 = tmp / f"fR{int(t2 * 10)}.jpg"
+        media.ff("-ss", f"{t2:.2f}", "-i", out, "-frames:v", 1, "-vf", "scale=480:-2", img2, timeout=120)
+        return _judge(cfg, img2) if img2.exists() else None
+    keep = _resolve(samples, probe)
     rows = []
     for s, k in zip(samples, keep):
         hard = k
         rows.append({"t": s["t"], "ok": not hard,
                      "problem": s["prob"] if hard else ("none" if s["state"] != "unchecked" else "unchecked"),
-                     "raw": s["raw"], "unchecked": s["state"] == "unchecked",
+                     "raw": s["raw"], "first": s.get("first", ""), "confirm": s.get("confirm", ""),
+                     "rescued": bool(s.get("rescued", False)), "unchecked": s["state"] == "unchecked",
                      "soft": s["prob"] if (s["state"] == "bad" and s["prob"] in SOFT) else ""})
     if ims:
         first = Image.open(ims[0][1]); w, h = first.size; cols = 6
