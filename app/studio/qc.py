@@ -86,6 +86,24 @@ short-circuit on its own):
     textless inversions. If round 6 shows one, that is a different, separately evidenced failure.
   - everything else from v6 stands: single-image tests, strict finger definition, flat-black pixel test,
     orientation on confirmed-SOFT frames, per-sample orient log.
+
+v8 (2026-10-26) - THE SAFE VERSION, prepared at Tariq's order after he closed the smoke-test loop at round 6.
+The loop's final tally: black SOLVED (pixel test), finger SOLVED (strict prompts), sideways SOLVED in qc_part
+(single-image tests, every injected sample recovered in rounds 5-6), soft classes fine; upside_down NOT
+catchable on qwen2.5vl:7b - round 6's text probe quoted the inverted captions word for word and still called
+them upright, so this model reads inverted text without registering inversion. Tariq's condition for ever
+enabling QC: it must not fail videos over orientation.
+  - orientation is REPORT-ONLY: sideways / upside_down move from HARD to SOFT. Detection still runs exactly
+    as v7 (single-image tests + text probe, answers logged per sample) and findings appear in the reports'
+    soft lists and on the qc_final sheet as "(soft)" notes - but they can never form a cover span, never
+    appear in would_fix / fixed, and never mark a qc_final frame failed. HARD is now black, finger, smudge:
+    the classes with a clean six-round record.
+  - the persistence probe reach is capped at 4 s (it was half the sample step). In qc_final (30 s step) a
+    probe used to land 15 s away - inside a different shot - and round 6 showed a real neighbouring fault
+    rescuing a false flag that way (B qc_final 2 s). qc_part's reach (3 s at a 6 s step) is unchanged.
+  - nothing else changes: prompts, two-agree, the pixel black test, the finger definition, the orientation
+    machinery and its logging are v7's, untouched. This file does not set qc_on / interview_qc - enabling
+    QC at all stays Tariq's separate decision, made in config, not here.
 """
 import json
 import shutil
@@ -95,9 +113,9 @@ from . import media
 
 ENC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-profile:v", "high"]
 
-QCVER = 7
-HARD = ("sideways", "upside_down", "black", "finger", "smudge")
-SOFT = ("blurry", "face_closeup", "clothing_closeup")
+QCVER = 8
+HARD = ("black", "finger", "smudge")
+SOFT = ("blurry", "face_closeup", "clothing_closeup", "sideways", "upside_down")
 
 
 def _log(log, m):
@@ -276,7 +294,9 @@ def _flags(samples):
 def _resolve(samples, probe):
     """Persistence, resolved adaptively. A hard flag stands when the same problem appears in a neighbouring
     sample; an ISOLATED hard flag probes the frames halfway to its neighbours (probe(t, prob) -> verdict dict
-    or None) and stands only if the same problem shows there. Sets s["rescued"] on probed samples."""
+    or None) and stands only if the same problem shows there. Sets s["rescued"] on probed samples.
+    v8: the probe reach is capped at 4 s - at qc_final's 30 s step, half a step is 15 s, far enough to land
+    in a different shot and let an unrelated real fault "rescue" a false flag (round 6, B qc_final 2 s)."""
     flags = _flags(samples); keep = list(flags)
     for i, f in enumerate(flags):
         if not f: continue
@@ -285,9 +305,10 @@ def _resolve(samples, probe):
         if prev_ok or next_ok: continue
         s = samples[i]
         step = (samples[i + 1]["t"] - s["t"]) if i + 1 < len(samples) else ((s["t"] - samples[i - 1]["t"]) if i > 0 else 4.0)
+        reach = min(step / 2, 4.0)
         rescued = False
         if probe:
-            for dt in (-step / 2, step / 2):
+            for dt in (-reach, reach):
                 v = probe(s["t"] + dt, s["prob"])
                 if v and v.get("state") == "bad" and v.get("prob") == s["prob"]: rescued = True; break
         keep[i] = rescued; s["rescued"] = rescued
