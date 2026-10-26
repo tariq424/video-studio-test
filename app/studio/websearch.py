@@ -123,9 +123,9 @@ def _copilot(cfg, q, timeout=90):
                 if body == last: stable += 1
                 else: stable, last = 0, body
                 if stable >= 2 and len(body) > len(before) + 80: break
-            new = last.replace(before, " ") if last.startswith(before[:200]) else last
-            new = new.replace(ask, " ")
-            parts = [p.strip() for p in re.split(r"\n+", new) if len(p.split()) > 6]
+            k = last.rfind(ask[:60])   # the answer is the text after our own question (the sidebar comes before it)
+            new = last[k + len(ask):] if k >= 0 else ""
+            parts = [p.strip() for p in re.split(r"\n+", new) if len(p.split()) > 6 and not re.search(r"Press Tab|Message Copilot|Copilot may make mistakes", p)]
             if not parts: _evidence(cfg, page, "copilot"); raise RuntimeError("Copilot gave no readable answer")
             return parts[:6]
         finally:
