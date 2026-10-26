@@ -26,7 +26,7 @@ HIDE_CHROME = """() => {
 def _log(log, m): (log or print)(m)
 
 
-def _launch(pw, cfg, size=None, video_dir=None):
+def _launch(pw, cfg, size=None):
     from .imagegen import profile_dir, Skip
     prof = profile_dir(cfg, "marble")
     if not prof.exists() or not any(prof.iterdir()):
@@ -34,7 +34,6 @@ def _launch(pw, cfg, size=None, video_dir=None):
     W, H = size or (1280, 720)
     kw = dict(user_data_dir=str(prof), headless=False, channel="chrome", viewport={"width": W, "height": H},
               args=["--disable-blink-features=AutomationControlled", "--enable-webgl", "--ignore-gpu-blocklist"])
-    if video_dir: kw.update(record_video_dir=str(video_dir), record_video_size={"width": W, "height": H})
     ctx = pw.chromium.launch_persistent_context(**kw)
     return ctx, (ctx.pages[0] if ctx.pages else ctx.new_page())
 
@@ -91,37 +90,39 @@ def generate(cfg, prompt, log=None, timeout=900):
 
 
 def record(cfg, world_url, out, secs, size=(1280, 720), log=None, load_timeout=240):
-    """Record a slow walk through a loaded world -> MP4 of `secs` seconds at `size` (the video's size; recorded at <= 1280 px
-    and scaled). Raises if the world never finishes loading."""
+    """Walk slowly through a loaded world and capture it -> MP4 of `secs` seconds at `size`. Frames are page screenshots
+    taken while W is held (no Playwright video, which needs its own ffmpeg download), timed and re-encoded at 30 fps.
+    Raises if the world never finishes loading."""
     from playwright.sync_api import sync_playwright
     out = Path(out); out.parent.mkdir(parents=True, exist_ok=True)
     W, H = size; r = min(1.0, 1280 / max(W, H)); RW, RH = int(W * r) // 2 * 2, int(H * r) // 2 * 2
-    vdir = out.parent / (out.stem + "_rec"); vdir.mkdir(exist_ok=True)
+    fdir = out.parent / (out.stem + "_frames")
+    if fdir.exists(): shutil.rmtree(fdir, ignore_errors=True)
+    fdir.mkdir(exist_ok=True)
+    n = 0
     with sync_playwright() as pw:
-        ctx, page = _launch(pw, cfg, (RW, RH), vdir)
-        t_open = time.time()
+        ctx, page = _launch(pw, cfg, (RW, RH))
         try:
             page.goto(world_url, wait_until="domcontentloaded", timeout=60000); page.wait_for_timeout(3000); _dismiss(page)
             if not _loaded(page, load_timeout): raise RuntimeError(f"the world did not finish loading in {load_timeout}s")
             page.wait_for_timeout(4000)   # splats settle
             page.evaluate(HIDE_CHROME); page.wait_for_timeout(500)
-            t_go = time.time() - t_open
             page.mouse.move(RW / 2, RH / 2)
-            page.keyboard.down("w")
-            steps = max(1, int(secs * 10))
-            for i in range(steps):   # walk forward, with a slow pan to one side
-                page.mouse.move(RW / 2 + 0.6 * i, RH / 2); page.wait_for_timeout(100)
-            page.keyboard.up("w"); page.wait_for_timeout(300)
+            page.keyboard.down("w"); t0 = time.time()
+            while time.time() - t0 < secs:   # walk forward with a slow pan, one screenshot per frame
+                page.mouse.move(RW / 2 + 30 * (time.time() - t0), RH / 2)
+                page.screenshot(path=str(fdir / f"f{n:05d}.jpg"), type="jpeg", quality=90); n += 1
+            took = time.time() - t0
+            page.keyboard.up("w")
         finally:
-            vid = page.video
             ctx.close()
-        webm = Path(vid.path()) if vid else None
-    if not webm or not webm.exists(): raise RuntimeError("Playwright recorded no video")
-    media.ff("-ss", f"{t_go:.2f}", "-i", webm, "-t", f"{secs:.2f}", "-an", "-vf",
+    if n < 2: raise RuntimeError("no frames captured")
+    rate = n / took
+    media.ff("-framerate", f"{rate:.3f}", "-i", fdir / "f%05d.jpg", "-t", f"{secs:.2f}", "-vf",
              f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps=30,format=yuv420p",
              "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", out, timeout=600)
     if not media.ok(out): raise RuntimeError("recording could not be encoded")
-    _log(log, f"    marble: recorded {media.dur(out):.1f}s walk-through -> {out.name}")
+    _log(log, f"    marble: {n} frames ({rate:.1f}/s) -> {media.dur(out):.1f}s walk-through {out.name}")
     return out
 
 
