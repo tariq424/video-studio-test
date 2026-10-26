@@ -1,7 +1,7 @@
 <!-- QC STATUS (frame QC recalibration job; keep this block at the top, update at every commit) -->
 ## QC STATUS
 
-- **Job:** frame QC recalibration. Apply the prepared patch, then run the report-mode smoke test. Nothing gets enabled in this job.
+- **Job:** frame QC recalibration. Apply the prepared patch, then run the report-mode smoke test. Enabled at Tariq's approval after the round 7 gate.
 - **Steps done:**
   - Round 1: steps 1 (apply v2, bc521cd), 2 (smoke specimens, 36271ea) and 3 (run, 2dc347b; B FAIL).
   - Round 2: step 4 (apply v3, 1980d64) and step 5 (re-run, report mode; FAIL, 9acc260/4727f5f).
@@ -10,19 +10,23 @@
   - Round 4: v5 applied (2e2cee6); run 3:59-4:12 PM; FAIL (6c25cd5).
   - Round 5: v6 applied (8010bd3); run 4:25-4:32 PM. Everything PASS except the upside-down segment (4967fe3).
   - Round 6: v7 applied (69da7a4); run 4:48-4:55 PM. FAIL: upside-down still missed, plus one false sideways flag in B's qc_final at 2 s.
-- **Next step (exact):** none. LOOP CLOSED by Tariq (MSG 005, 5:00 PM: "stop this madness"). No v8 will be written.
-  - Applied file stays qc.py v7. QC stays OFF.
-  - Enabling QC, and whether orientation is dropped as a blocking fault, is a separate decision for Tariq.
-  - Final tally:
-    - black solved (pixel test);
-    - finger solved;
-    - sideways solved in `qc_part`;
-    - soft classes fine;
-    - upside down not solvable with `qwen2.5vl:7b` (the model reads inverted text and calls it upright).
-- **Flags, unchanged in every commit:**
-  - `qc_on` = False. Code default; set nowhere in `config.py`, `settings.json` or any job cfg.
-  - `interview_qc` = False. Code default; set nowhere.
-  - `qc_mode`: set nowhere, so the patched code defaults to "report".
+- Round 7: v8 "safe version" applied at Tariq's order (247ceb0, sha 88c6ec4e...b446). Run 9:13-9:19 PM UTC: GATE PASS.
+- **Next step (exact):** none. QC ENABLED by Tariq's approval (5:07 PM ET, "yes do enable QC and v8").
+  - PC `settings.json`: `qc_on` = True, `qc_mode` = "report". Backup of the previous file: `F:\code\patches\settings_before_qc_on.json`.
+  - `interview_qc` remains unset, so False.
+  - `config.load()` runs per job, so no VS restart is needed.
+  - Rollback: delete the 2 keys (or set `qc_on` false). v7 is backed up as `patches\qc_v7.py`.
+- **Flags now:** `qc_on` = True (settings.json on the PC only; not in repo code); `qc_mode` = "report"; `interview_qc` = False.
+- **Round 7 verdict (v8: orientation is SOFT/report-only; probe reach capped at 4 s): GATE PASS.**
+  - Results: `qc_smoke_results/round7/`.
+  - **A:** `would_fix` empty; `qc_final` 0/6; status complete; 0 unchecked.
+    - Soft notes: 115 s sideways (a false soft note; harmless in report mode), plus blurry and face_closeup.
+  - **B:** `would_fix` contains only 51.5-58.5 s black.
+    - Sideways at 13 s and 19 s: reported as soft.
+    - Blur at 73 s and 79 s: soft.
+    - Upside-down at 31 s and 37 s: not detected (known model limit).
+    - `qc_final` 0/6: the round-6 false 2 s sideways is gone.
+    - Status complete; 0 unchecked.
 - **Round 6 verdict (v7, text-anchored probe on as-is yes): FAIL.**
   - Results: `qc_smoke_results/round6/`.
   - **A zero hard flags: PASS.** `would_fix` empty; `qc_final` 0/6. 115 s sideways was single and ignored, as in round 5.

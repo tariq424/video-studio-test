@@ -1,0 +1,85 @@
+{
+ "qcver": 8,
+ "status": "complete",
+ "unchecked": 0,
+ "frames": [
+  {
+   "t": 2.0,
+   "ok": true,
+   "problem": "none",
+   "raw": "finger",
+   "first": "finger",
+   "confirm": "none",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"AI PLANNED ATTACKS ON WATER SY\")",
+   "rescued": false,
+   "unchecked": false,
+   "soft": ""
+  },
+  {
+   "t": 32.0,
+   "ok": true,
+   "problem": "none",
+   "raw": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"considered the most advanced o\")",
+   "rescued": false,
+   "unchecked": false,
+   "soft": ""
+  },
+  {
+   "t": 62.0,
+   "ok": true,
+   "problem": "none",
+   "raw": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"AI SECURITY \u00b7 CONDENSED\nThe st\")",
+   "rescued": false,
+   "unchecked": false,
+   "soft": ""
+  },
+  {
+   "t": 92.0,
+   "ok": true,
+   "problem": "none",
+   "raw": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"It's a clock that is moving fa\")",
+   "rescued": false,
+   "unchecked": false,
+   "soft": ""
+  },
+  {
+   "t": 122.0,
+   "ok": true,
+   "problem": "none",
+   "raw": "face_closeup",
+   "first": "face_closeup",
+   "confirm": "face_closeup",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"AI SECURITY \u00b7 CONDENSED\ntheir \")",
+   "rescued": false,
+   "unchecked": false,
+   "soft": "face_closeup"
+  },
+  {
+   "t": 152.0,
+   "ok": true,
+   "problem": "none",
+   "raw": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"AI SECURITY \u00b7 CONDENSED\nmore c\")",
+   "rescued": false,
+   "unchecked": false,
+   "soft": ""
+  }
+ ]
+}
