@@ -144,26 +144,11 @@ def _cfg_no_google(cfg):
 
 # ------------------------------------------------------------------ research (public web search, no account)
 def research(cfg, text, log):
-    """Narration -> (visual description, image prompt). Public search results (Google first, DuckDuckGo if Google answers with
-    a block page), then the script model turns the snippets + narration into one concrete, photographable scene."""
-    import requests
-    UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"}
+    """Narration -> (visual description, image prompt). Public search results (websearch: DuckDuckGo / Bing / Copilot in turn,
+    Google rarely and last), then the script model turns the snippets + narration into one concrete, photographable scene."""
+    from . import websearch
     q = " ".join(text.split()[:18])
-    snippets, src = [], ""
-    for name, url in (("google", "https://www.google.com/search?hl=en&num=8&q="), ("duckduckgo", "https://html.duckduckgo.com/html/?q=")):
-        try:
-            r = requests.get(url + requests.utils.quote(q), headers=UA, timeout=20)
-            html = r.text if r.status_code == 200 else ""
-            if name == "google" and (not html or "unusual traffic" in html or "/sorry/" in r.url):
-                _log(log, "    search: Google answered with a block page; using DuckDuckGo"); continue
-            parts = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', html, re.S) if name == "duckduckgo" else \
-                re.findall(r'<div[^>]*class="[^"]*(?:VwiC3b|BNeawe s3v9rd|st)[^"]*"[^>]*>(.*?)</div>', html, re.S)
-            snippets = [re.sub(r"<[^>]+>|&\w+;|&#\d+;", " ", s) for s in parts][:8]
-            snippets = [" ".join(s.split()) for s in snippets if len(s.split()) > 4]
-            if snippets: src = name; break
-        except Exception as e:
-            _log(log, f"    search ({name}) failed: {str(e)[:80]}")
-    _log(log, f"    search: {len(snippets)} snippet(s)" + (f" from {src}" if src else ""))
+    snippets, src = websearch.search(cfg, q, log)
     from .llm import LLM
     c = dict(cfg)
     if c.get("script_provider") == "claude" and not c.get("anthropic_api_key"): c["script_provider"] = "deepseek" if c.get("deepseek_api_key") else "local"
