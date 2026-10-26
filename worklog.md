@@ -4,13 +4,22 @@
 - **Job:** frame QC recalibration. Apply the prepared patch, then run the report-mode smoke test. Nothing gets enabled in this job.
 - **Steps done:**
   - Round 1: steps 1 (apply v2, bc521cd), 2 (smoke specimens, 36271ea) and 3 (run, 2dc347b; B FAIL).
-  - Round 2: step 4 (apply v3, 1980d64) and step 5 (re-run, report mode; FAIL). The job is stopped here, awaiting Tariq's review.
-- **Next step (exact):** none. Tariq reviews round 2.
-  - Do NOT enable `qc_on` or `interview_qc`, set `qc_mode`, or run QC on existing videos without his approval.
+  - Round 2: step 4 (apply v3, 1980d64) and step 5 (re-run, report mode; FAIL, 9acc260/4727f5f).
+  - Round 3: step 6, part 1 (apply v4) done.
+- **Next step (exact):** step 6, part 2 (round 3). The round-2 `*.qc.json` files are already moved to `qc_smoke\_to_delete\round2_qcjson\`.
+  1. Run hook `qc-smoke` (`qc_videos.py` on the same specimens).
+  2. Put the sheets and json in `qc_smoke_results/round3/`, with the verdict per criterion, the "via" field for every flag and miss, and the stop rule applied.
+  3. Then stop for Tariq's review.
 - **Flags, unchanged in every commit:**
   - `qc_on` = False. Code default; set nowhere in `config.py`, `settings.json` or any job cfg.
   - `interview_qc` = False. Code default; set nowhere.
   - `qc_mode`: set nowhere, so the patched code defaults to "report".
+- **Step 6, part 1 verified (2026-10-26, round 3; task from the Koda handoff doc, CURRENT MESSAGE "STEP 6"):**
+  - qc.py v4 came from Tariq's Google Drive (`qc_v4.py`, id 1mGVZok5J5w44ertXszMc1chUhyRbJKNA). The muse.ai link is blocked by this session's network allowlist.
+  - It is 19,284 bytes, has SHA-256 `69a550ea2b303006abff5909e26d657cc6057530e1a2b897d204b5cb66682600` and contains `QCVER = 4`. Saved as `F:\code\patches\qc.py`.
+  - The v3 file that was applied was backed up to `F:\code\patches\qc_v3.py` (SHA-256 `572c7f29...e4c6`).
+  - v4 was copied over `app/studio/qc.py` on F: and in the repo. The SHA-256 matches and py_compile is OK. No other code file was changed.
+  - The round-2 `*.qc.json` files were moved to `F:\code\patches\qc_smoke\_to_delete\round2_qcjson\`. The specimens were not rebuilt; their SHA-256s are unchanged.
 - **Step 5, round 2 run (2026-10-26, 12:54-12:58 local, v3, report mode, same specimens, not rebuilt):**
   - The old `specimen_A.qc.json` and `specimen_B.qc.json` were moved to `F:\code\patches\qc_smoke\_to_delete\round1_qcjson\`, since rm isn't permitted from my side, so every frame was judged fresh.
   - `qc.available` was True at 12:54:43 (`qwen2.5vl:7b`).

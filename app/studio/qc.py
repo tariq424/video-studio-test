@@ -24,6 +24,17 @@ v3 (2026-10-26, after smoke test 1: specimen A passed, B's sideways / upside-dow
     upside-down face is upside_down, not face_closeup.
   - every sample's first and confirmation verdicts are recorded in the reports ("samples" / row fields),
     so a miss can be attributed: the first look, or the confirmation.
+
+v4 (2026-10-26, after smoke round 2: A failed - the orientation-first prompt made qwen2.5vl:7b call 24 of 30
+upright samples sideways; B's black was named by both checks but dropped, and the pixel test missed it):
+  - the vision prompts revert to the round-1 wording (A was clean under it). The model's DIRECT sideways /
+    upside_down verdicts are ignored entirely - two rounds proved they are noise in both directions.
+  - orientation is decided by rotate-and-compare instead: a 4-panel strip (as-is, 180, 90, 90 the other way)
+    and one question - which panel looks upright and readable? "Cannot tell" is a valid answer and flags nothing.
+  - two-agree is judged on the problem field alone: if both checks name the same problem it is confirmed,
+    whatever the ok fields say (round 2's confirm replied ok:true with problem "black" and was discarded).
+  - the pixel black test is a FLAT-black test: mean luminance under 24 AND stddev under 4. Limited-range video
+    black measures 16, not 0; a dark but real scene has texture, a black frame does not.
 """
 import json
 import shutil
@@ -33,7 +44,7 @@ from . import media
 
 ENC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-profile:v", "high"]
 
-QCVER = 3
+QCVER = 4
 HARD = ("sideways", "upside_down", "black", "finger", "smudge")
 SOFT = ("blurry", "face_closeup", "clothing_closeup")
 
@@ -53,44 +64,87 @@ def available(cfg):
 
 QC = """Quality check of one frame from a finished travel documentary. Reply with JSON only:
 {"ok": true|false, "problem": "none|finger|smudge|sideways|upside_down|blurry|clothing_closeup|face_closeup|black"}
-Judge ORIENTATION FIRST, using any visible text, captions, faces and the horizon as your anchor: text or captions
-running vertically or rotated 90 degrees means "sideways"; text, captions or a face upside down means "upside_down".
-If the picture is rotated or upside down, report that - even when a face fills the frame (an upside-down face is
-"upside_down", not "face_closeup").
 Not ok: a finger or hand over the lens, a smudge or fog on the lens, a picture lying on its side or upside down, a blurry smear,
 a close-up of clothing filling the frame, one person's face filling most of the frame, or a black / empty frame."""
 
 CONFIRM = """A first quality check of this single frame claimed the problem: "{problem}".
-Be strict: confirm ONLY if that exact fault is obvious in this frame. Judge orientation by any visible text,
-captions and faces: an upside-down face confirms "upside_down". A normal shot - including a person's face
+Be strict: confirm ONLY if that exact fault is obvious in this frame. A normal shot - including a person's face
 in a talking-head shot, a dark but visible scene, or a frame caught mid-transition - is NOT a fault.
 Reply with JSON only: {{"ok": true|false, "problem": "none|finger|smudge|sideways|upside_down|blurry|clothing_closeup|face_closeup|black"}}"""
 
+ORIENT = """Four versions of one picture side by side, numbered 1 to 4 from the left. Version 1 is the picture as-is;
+versions 2, 3 and 4 are the same picture rotated: 180 degrees, 90 degrees one way, 90 degrees the other way.
+Look at any text or captions, at faces, and at which way is up in the scene. Reply with JSON only:
+{"upright": 1} - the number of the version that looks upright and readable.
+If there is no readable text and no clear up or down in the scene, or you cannot tell, reply {"upright": "none"}."""
 
-def _pixel_black(img):
-    """A near-pure-black frame is a measurement, not an opinion: mean luminance under 6 (of 255)."""
+
+def _pixel_flat_black(img):
+    """A black frame is a measurement, not an opinion: FLAT black - mean luminance under 24 (limited-range
+    video black measures 16, not 0) AND stddev under 4 (a dark but real scene has texture; a black frame has none)."""
     try:
         from PIL import Image, ImageStat
-        return ImageStat.Stat(Image.open(img).convert("L")).mean[0] < 6.0
+        st = ImageStat.Stat(Image.open(img).convert("L"))
+        return st.mean[0] < 24.0 and st.stddev[0] < 4.0
     except Exception: return False
 
 
 def _judge(cfg, img):
-    """-> {"state": "ok"|"bad"|"unchecked", "prob", "raw" (= the first verdict), "first", "confirm"}.
-    Black is decided from pixels. Anything else: a first-check flag stands only when a second, strict
-    check agrees on the same problem (two-agree rule). Both verdicts are kept for the report."""
-    if _pixel_black(img): return {"state": "bad", "prob": "black", "raw": "black", "first": "pixel", "confirm": "pixel"}
+    """-> {"state": "ok"|"bad"|"unchecked", "prob", "raw", "first", "confirm", "via"}.
+    Black is decided from pixels. Anything else: a flag is the problem FIELD of the first check; it stands
+    only when the confirmation check names the SAME problem (the ok fields are ignored - the model pairs
+    ok:true with a named problem too often to trust them). Direct sideways / upside_down verdicts are
+    recorded but never acted on: orientation is decided separately, by rotate-and-compare."""
+    if _pixel_flat_black(img): return {"state": "bad", "prob": "black", "raw": "black", "first": "pixel", "confirm": "pixel", "via": "pixel"}
     from . import footage
     from .llm import parse_json
     try: j = parse_json(footage._vision(dict(cfg, vet_provider="local"), img, QC))
-    except Exception: return {"state": "unchecked", "prob": "unchecked", "raw": "", "first": "error", "confirm": ""}
+    except Exception: return {"state": "unchecked", "prob": "unchecked", "raw": "", "first": "error", "confirm": "", "via": "model"}
     prob = str(j.get("problem") or "none").strip().lower()
-    if bool(j.get("ok", True)) or prob in ("none", ""): return {"state": "ok", "prob": "none", "raw": prob, "first": prob, "confirm": ""}
+    if prob in ("none", ""): return {"state": "ok", "prob": "none", "raw": prob, "first": prob, "confirm": "", "via": "model"}
     try: j2 = parse_json(footage._vision(dict(cfg, vet_provider="local"), img, CONFIRM.format(problem=prob)))
-    except Exception: return {"state": "unchecked", "prob": prob, "raw": prob, "first": prob, "confirm": "error"}
+    except Exception: return {"state": "unchecked", "prob": prob, "raw": prob, "first": prob, "confirm": "error", "via": "model"}
     prob2 = str(j2.get("problem") or "none").strip().lower()
-    if not bool(j2.get("ok", True)) and prob2 == prob: return {"state": "bad", "prob": prob, "raw": prob, "first": prob, "confirm": prob2}
-    return {"state": "ok", "prob": "none", "raw": prob, "first": prob, "confirm": prob2}   # unconfirmed flag: dropped, both verdicts kept
+    if prob2 != prob: return {"state": "ok", "prob": "none", "raw": prob, "first": prob, "confirm": prob2, "via": "model"}
+    if prob in ("sideways", "upside_down"):   # both checks agree, and it still doesn't count: see _orientation
+        return {"state": "ok", "prob": "none", "raw": prob, "first": prob, "confirm": prob2, "via": "model"}
+    return {"state": "bad", "prob": prob, "raw": prob, "first": prob, "confirm": prob2, "via": "model"}
+
+
+def _orientation(cfg, img):
+    """Rotate-and-compare: one strip (as-is | 180 | 90 | 90 the other way), one question - which panel is
+    upright? -> "upside_down" | "sideways" | None (panel 1, "none", or any failure: no evidence, no flag)."""
+    try:
+        from PIL import Image
+        im = Image.open(img).convert("RGB")
+        panels = [im, im.transpose(Image.ROTATE_180), im.transpose(Image.ROTATE_90), im.transpose(Image.ROTATE_270)]
+        H = 512; rs = []
+        for p in panels:
+            rs.append(p.resize((max(1, int(p.width * H / p.height)), H)))
+        strip = Image.new("RGB", (sum(p.width for p in rs), H))
+        x = 0
+        for p in rs: strip.paste(p, (x, 0)); x += p.width
+        sp = Path(img).with_name(Path(img).stem + "_o4.jpg"); strip.save(sp, quality=80)
+    except Exception: return None
+    from . import footage
+    from .llm import parse_json
+    try: j = parse_json(footage._vision(dict(cfg, vet_provider="local"), sp, ORIENT))
+    except Exception: return None
+    try: u = int(j.get("upright"))
+    except Exception: return None
+    if u == 2: return "upside_down"
+    if u in (3, 4): return "sideways"
+    return None
+
+
+def _judge_frame(cfg, img):
+    """Full per-frame verdict: the model/pixel judge, plus rotate-and-compare orientation when the frame
+    wasn't already judged bad or unchecked."""
+    v = _judge(cfg, img)
+    if v["state"] != "ok": return v
+    o = _orientation(cfg, img)
+    if o: return {"state": "bad", "prob": o, "raw": o, "first": "panel", "confirm": "panel", "via": "orient"}
+    return v
 
 
 def _flags(samples):
@@ -143,7 +197,7 @@ def qc_part(path, cfg, log=print, every=4.0, label="", kind="documentary"):
     for k, t in enumerate(times):
         img = tmp / f"qc{k:03}.jpg"
         media.ff("-ss", f"{t:.2f}", "-i", path, "-frames:v", 1, "-vf", "scale=768:-2", img, timeout=120)
-        v = _judge(cfg, img) if img.exists() else {"state": "unchecked", "prob": "unchecked", "raw": ""}
+        v = _judge_frame(cfg, img) if img.exists() else {"state": "unchecked", "prob": "unchecked", "raw": ""}
         samples.append({"t": t, "img": img, **v})
     nun = sum(1 for s in samples if s["state"] == "unchecked")
     incomplete = bool(samples) and nun / len(samples) > 0.10
@@ -151,7 +205,7 @@ def qc_part(path, cfg, log=print, every=4.0, label="", kind="documentary"):
         if t2 < 0 or t2 > d - 0.3: return None
         img2 = tmp / f"qcR{int(t2 * 10)}.jpg"
         media.ff("-ss", f"{t2:.2f}", "-i", path, "-frames:v", 1, "-vf", "scale=768:-2", img2, timeout=120)
-        return _judge(cfg, img2) if img2.exists() else None
+        return _judge_frame(cfg, img2) if img2.exists() else None
     keep = _resolve(samples, probe)
     bad = [(s["t"], s["prob"], s["img"]) for s, k in zip(samples, keep) if k]
     single = [(s["t"], s["prob"]) for s, k in zip(samples, keep)
@@ -197,7 +251,7 @@ def qc_part(path, cfg, log=print, every=4.0, label="", kind="documentary"):
                                "fixed": fixed, "would_fix": would if mode == "report" else [],
                                "soft": soft, "ignored_single": single,
                                "samples": [{"t": round(s["t"], 1), "state": s["state"], "prob": s["prob"],
-                                            "first": s.get("first", ""), "confirm": s.get("confirm", ""),
+                                            "first": s.get("first", ""), "confirm": s.get("confirm", ""), "via": s.get("via", ""),
                                             "rescued": bool(s.get("rescued", False))} for s in samples]}, indent=1), encoding="utf-8")
     return path
 
@@ -212,20 +266,20 @@ def qc_final(out, cfg, work, log=print, every=30.0):
         t = min(d - 1.0, 2.0 + k * every); img = tmp / f"f{k:03}.jpg"
         media.ff("-ss", f"{t:.2f}", "-i", out, "-frames:v", 1, "-vf", "scale=480:-2", img, timeout=120)
         if not img.exists(): continue
-        v = _judge(cfg, img)
+        v = _judge_frame(cfg, img)
         samples.append({"t": round(t, 1), **v}); ims.append((t, img))
     def probe(t2, prob):
         if t2 < 0 or t2 > d - 0.5: return None
         img2 = tmp / f"fR{int(t2 * 10)}.jpg"
         media.ff("-ss", f"{t2:.2f}", "-i", out, "-frames:v", 1, "-vf", "scale=480:-2", img2, timeout=120)
-        return _judge(cfg, img2) if img2.exists() else None
+        return _judge_frame(cfg, img2) if img2.exists() else None
     keep = _resolve(samples, probe)
     rows = []
     for s, k in zip(samples, keep):
         hard = k
         rows.append({"t": s["t"], "ok": not hard,
                      "problem": s["prob"] if hard else ("none" if s["state"] != "unchecked" else "unchecked"),
-                     "raw": s["raw"], "first": s.get("first", ""), "confirm": s.get("confirm", ""),
+                     "raw": s["raw"], "first": s.get("first", ""), "confirm": s.get("confirm", ""), "via": s.get("via", ""),
                      "rescued": bool(s.get("rescued", False)), "unchecked": s["state"] == "unchecked",
                      "soft": s["prob"] if (s["state"] == "bad" and s["prob"] in SOFT) else ""})
     if ims:
