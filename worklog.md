@@ -9,15 +9,28 @@
   - Since 2026-10-26 3:55 PM the loop runs through the Claude-Koda exchange doc (Google Doc 1GV6ZvXQJwyyiNfy1ZM1FT22Jo-xGKCPpW5FAgQIViE4). Tariq overrode the stop rule: no round cap; it runs until a full PASS or a genuine WALL.
   - Round 4: v5 applied (2e2cee6); run 3:59-4:12 PM; FAIL (6c25cd5).
   - Round 5: v6 applied (8010bd3); run 4:25-4:32 PM. Everything PASS except the upside-down segment (4967fe3).
-  - Round 6: v7 applied (MSG 004); run started 4:48 PM.
-- **Next step (exact):** round 6 run (started 4:48 PM).
-  1. Collect results into `qc_smoke_results/round6/`.
-  2. Post the RESULT in the exchange doc.
-  3. Wait for MSG 005.
+  - Round 6: v7 applied (69da7a4); run 4:48-4:55 PM. FAIL: upside-down still missed, plus one false sideways flag in B's qc_final at 2 s.
+- **Next step (exact):** wait for MSG 005 (v8) in the exchange doc, then round 7.
 - **Flags, unchanged in every commit:**
   - `qc_on` = False. Code default; set nowhere in `config.py`, `settings.json` or any job cfg.
   - `interview_qc` = False. Code default; set nowhere.
   - `qc_mode`: set nowhere, so the patched code defaults to "report".
+- **Round 6 verdict (v7, text-anchored probe on as-is yes): FAIL.**
+  - Results: `qc_smoke_results/round6/`.
+  - **A zero hard flags: PASS.** `would_fix` empty; `qc_final` 0/6. 115 s sideways was single and ignored, as in round 5.
+  - **B sideways caught as sideways: PASS.** 13 s and 19 s: asis:no;180:no;90ccw:yes; span 9.5-22.5 s.
+  - **B upside down caught as upside_down: FAIL.**
+    - 31 s: asis:yes;text:upright("the most advanced ones researc")
+    - 37 s: asis:yes;text:upright("They only succeeded between se")
+    - The model reads the upside-down caption text correctly, but calls it upright.
+  - **B black: PASS.** Pixel test.
+  - **B nothing else hard: FAIL** (new, in `qc_final` only).
+    - B's `qc_final` flags 2 s sideways (asis:no;180:no;90ccw:yes), rescued by the probe at about 17 s, which falls inside the real sideways segment.
+    - The 2 s frame is upright (`B_final_2s_flagged_sideways.jpg`). The same frame in A answered asis:yes, so the answer varies between runs.
+    - `qc_part` for B has only the real spans.
+  - **B blur soft: PASS.** 73 and 79 s answered no to as-is and to every rotation.
+  - **Complete: PASS.** 0% unchecked.
+
 - **Round 6 setup (MSG 004):**
   - qc_v7.py from Drive (id 1YZELkOs1lXQ3wWjWhsqDjoC6r-J2b2CD): 28,887 bytes, SHA-256 `1e0a785d...98d6`, `QCVER = 7`.
   - v6 was backed up to `F:\code\patches\qc_v6.py`. v7 applied; hash matches; compiles.
