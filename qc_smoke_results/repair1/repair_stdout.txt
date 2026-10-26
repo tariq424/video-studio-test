@@ -1,0 +1,43 @@
+markers in specimen_B: [(51.5, 58.5, ['black'])]
+== rung stock
+    stock px5115937: subject check failed ("Could not resolve authentication method. Expected one of ap)
+    stock px39554104: subject check failed ("Could not resolve authentication method. Expected one of ap)
+    stock px34909768: subject check failed ("Could not resolve authentication method. Expected one of ap)
+   -> no: no usable stock (50 found, 3 checked) (33.9s)
+== rung ai_image
+  hf skipped (cooling down until 21:24: Hugging Face quota (You have exceeded your free ZeroGPU quota (90s requested vs. 0s left). Try again)
+  chatgpt: asking for an image from the narration
+  chatgpt: 1 image(s) ready (79s)
+  parallax: rembg cut-out (35% of the frame is the subject) over a filled background
+   -> OK: AI image (chatgpt) -> image-to-video (140.0s)
+== rung chatgpt_chain
+    search (duckduckgo) failed: ('Connection aborted.', ConnectionResetError(10054, 'An existing connection was 
+    search: 0 snippet(s)
+    prompt: Photorealistic documentary still: dark municipal water treatment control room at night, multiple monitors glow with abstract blue-green process graphics, a pers
+  chatgpt: asking for an image from the narration
+  chatgpt: 1 image(s) ready (77s)
+  parallax: rembg cut-out (19% of the frame is the subject) over a filled background
+   -> OK: search -> prompt -> ChatGPT -> image-to-video (93.8s)
+== rung marble
+   -> no: World Labs Marble not set up (marble_on is off) (0.0s)
+== rung local_i2v_own_frame
+  parallax: rembg cut-out (8% of the frame is the subject) over a filled background
+   -> OK: local Python image-to-video of this video's clean frame at 49.0s (14.2s)
+== rung card
+   -> OK: headline card (2.2s)
+== full repair (ladder order)
+  QC repair: 1 span(s) in specimen_B_fix.mp4
+  QC repair span 51.5-58.5s (black): "Security researchers say attackers used AI tools to plan intrusions into water t"
+    stock px5115937: subject check failed ("Could not resolve authentication method. Expected one of ap)
+    stock px39554104: subject check failed ("Could not resolve authentication method. Expected one of ap)
+    stock px34909768: subject check failed ("Could not resolve authentication method. Expected one of ap)
+    stock: no - no usable stock (43 found, 3 checked)
+  hf skipped (cooling down until 21:24: Hugging Face quota (You have exceeded your free ZeroGPU quota (90s requested vs. 0s left). Try again)
+  chatgpt: asking for an image from the narration
+  chatgpt: 1 image(s) ready (69s)
+  parallax: rembg cut-out (29% of the frame is the subject) over a filled background
+    ai_image: OK - AI image (chatgpt) -> image-to-video
+  QC repair: 1 of 1 span(s) repaired
+   duration 178.00 -> 178.00s; audio identical: True
+   recheck: would_fix [] status complete
+ALL DONE

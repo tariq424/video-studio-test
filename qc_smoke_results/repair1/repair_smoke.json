@@ -1,0 +1,161 @@
+{
+ "started": "2026-10-26 18:18:05",
+ "specimen_B_sha": "5814dfbd2ef8e9c8aba278e6719023b5fcd59dfa4c833322b639633f78cc4d7a",
+ "narration": "Security researchers say attackers used AI tools to plan intrusions into water treatment systems, probing the control software that runs pumps and chemical dosing at municipal water plants.",
+ "rungs": [
+  {
+   "rung": "stock",
+   "ok": false,
+   "note": "no usable stock (50 found, 3 checked)",
+   "clip": "",
+   "secs": 33.9
+  },
+  {
+   "rung": "ai_image",
+   "ok": true,
+   "note": "AI image (chatgpt) -> image-to-video",
+   "clip": "F:\\code\\patches\\qc_smoke\\repair\\rung_ai_image\\qcfix_smoke_ai_image_chatgpt_i2v.mp4",
+   "secs": 140.0,
+   "clip_secs": 7.0
+  },
+  {
+   "rung": "chatgpt_chain",
+   "ok": true,
+   "note": "search -> prompt -> ChatGPT -> image-to-video",
+   "clip": "F:\\code\\patches\\qc_smoke\\repair\\rung_chatgpt_chain\\qcfix_smoke_chatgpt_chain_gpt_chatgpt_i2v.mp4",
+   "secs": 93.8,
+   "clip_secs": 7.0,
+   "research": {
+    "description": "A darkened municipal water treatment control room at night, illuminated only by the cool glow of multiple wall-mounted monitors showing abstract control interfaces. A silhouette of a person in an unmarked utility uniform stands before a central console, one hand touching a trackball, back to camera. Pipes and a large pressure gauge are dimly visible through a reinforced glass partition behind, with shallow depth of field. No readable text, no logos, no visible faces.",
+    "prompt": "Photorealistic documentary still: dark municipal water treatment control room at night, multiple monitors glow with abstract blue-green process graphics, a person in plain utility uniform seen from behind at a central console with trackball, reinforced glass partition reveals pipes and pressure gauge beyond, cool fluorescent and monitor light, shallow depth of field, no readable text, no logos, no identifiable face."
+   }
+  },
+  {
+   "rung": "marble",
+   "ok": false,
+   "note": "World Labs Marble not set up (marble_on is off)",
+   "clip": "",
+   "secs": 0.0
+  },
+  {
+   "rung": "local_i2v_own_frame",
+   "ok": true,
+   "note": "local Python image-to-video of this video's clean frame at 49.0s",
+   "clip": "F:\\code\\patches\\qc_smoke\\repair\\rung_local_i2v_own_frame\\own_smoke_local_i2v_own_frame_490_i2v.mp4",
+   "secs": 14.2,
+   "clip_secs": 7.0
+  },
+  {
+   "rung": "card",
+   "ok": true,
+   "note": "headline card",
+   "clip": "F:\\code\\patches\\qc_smoke\\repair\\rung_card\\card_smoke_card.mp4",
+   "secs": 2.2,
+   "clip_secs": 7.0
+  }
+ ],
+ "full": {
+  "video": "specimen_B_fix.mp4",
+  "started": "2026-10-26 18:22:59",
+  "spans": [
+   {
+    "span": [
+     51.5,
+     58.5
+    ],
+    "faults": [
+     "black"
+    ],
+    "narration": "Security researchers say attackers used AI tools to plan intrusions into water treatment systems, probing the control software that runs pumps and chemical dosing at municipal water plants.",
+    "attempts": [
+     {
+      "rung": "stock",
+      "ok": false,
+      "note": "no usable stock (43 found, 3 checked)",
+      "secs": 16.0
+     },
+     {
+      "rung": "ai_image",
+      "ok": true,
+      "note": "AI image (chatgpt) -> image-to-video",
+      "secs": 86.6
+     }
+    ],
+    "fixed_by": "ai_image",
+    "how": "AI image (chatgpt) -> image-to-video",
+    "clip": "F:\\code\\patches\\qc_smoke\\repair\\job\\qc\\repair\\specimen_B_fix\\qcfix_specimen_B_fix_0_chatgpt_i2v.mp4",
+    "clip_secs": 7.0,
+    "held_still_secs": 0.0
+   }
+  ],
+  "status": "1 of 1 span(s) repaired",
+  "original": "F:\\code\\patches\\qc_smoke\\repair\\job\\qc\\specimen_B_fix_preqc.mp4",
+  "finished": "2026-10-26 18:25:32"
+ },
+ "recheck": {
+  "status": "complete",
+  "unchecked": 0,
+  "would_fix": [],
+  "soft": [
+   [
+    1.0,
+    "blurry"
+   ],
+   [
+    13.0,
+    "sideways"
+   ],
+   [
+    19.0,
+    "sideways"
+   ],
+   [
+    37.0,
+    "face_closeup"
+   ],
+   [
+    43.0,
+    "face_closeup"
+   ],
+   [
+    73.0,
+    "blurry"
+   ],
+   [
+    79.0,
+    "blurry"
+   ],
+   [
+    115.0,
+    "sideways"
+   ],
+   [
+    121.0,
+    "face_closeup"
+   ],
+   [
+    169.0,
+    "blurry"
+   ],
+   [
+    175.0,
+    "blurry"
+   ]
+  ]
+ },
+ "markers": [
+  [
+   51.5,
+   58.5,
+   [
+    "black"
+   ]
+  ]
+ ],
+ "full_checks": {
+  "dur_before": 178.0,
+  "dur_after": 178.0,
+  "audio_identical": true
+ },
+ "finished": "2026-10-26 18:27:19"
+}

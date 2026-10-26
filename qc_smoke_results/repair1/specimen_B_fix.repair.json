@@ -1,0 +1,38 @@
+{
+ "video": "specimen_B_fix.mp4",
+ "started": "2026-10-26 18:22:59",
+ "spans": [
+  {
+   "span": [
+    51.5,
+    58.5
+   ],
+   "faults": [
+    "black"
+   ],
+   "narration": "Security researchers say attackers used AI tools to plan intrusions into water treatment systems, probing the control software that runs pumps and chemical dosing at municipal water plants.",
+   "attempts": [
+    {
+     "rung": "stock",
+     "ok": false,
+     "note": "no usable stock (43 found, 3 checked)",
+     "secs": 16.0
+    },
+    {
+     "rung": "ai_image",
+     "ok": true,
+     "note": "AI image (chatgpt) -> image-to-video",
+     "secs": 86.6
+    }
+   ],
+   "fixed_by": "ai_image",
+   "how": "AI image (chatgpt) -> image-to-video",
+   "clip": "F:\\code\\patches\\qc_smoke\\repair\\job\\qc\\repair\\specimen_B_fix\\qcfix_specimen_B_fix_0_chatgpt_i2v.mp4",
+   "clip_secs": 7.0,
+   "held_still_secs": 0.0
+  }
+ ],
+ "status": "1 of 1 span(s) repaired",
+ "original": "F:\\code\\patches\\qc_smoke\\repair\\job\\qc\\specimen_B_fix_preqc.mp4",
+ "finished": "2026-10-26 18:25:32"
+}
