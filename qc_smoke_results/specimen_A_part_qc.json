@@ -1,0 +1,42 @@
+{
+ "qcver": 2,
+ "mode": "report",
+ "size": 164968649,
+ "checked": 30,
+ "unchecked": 0,
+ "status": "complete",
+ "fixed": [],
+ "would_fix": [],
+ "soft": [
+  [
+   1.0,
+   "blurry"
+  ],
+  [
+   25.0,
+   "blurry"
+  ],
+  [
+   43.0,
+   "face_closeup"
+  ],
+  [
+   169.0,
+   "blurry"
+  ],
+  [
+   175.0,
+   "blurry"
+  ]
+ ],
+ "ignored_single": [
+  [
+   127.0,
+   "finger"
+  ],
+  [
+   157.0,
+   "sideways"
+  ]
+ ]
+}

@@ -2,11 +2,10 @@
 ## QC STATUS
 
 - **Job:** frame QC recalibration. Apply the prepared patch, then run the report-mode smoke test. Nothing gets enabled in this job.
-- **Steps done:** 1 (apply), 2 (smoke specimens).
-- **Next step (exact):** STEP 3.
-  1. Confirm the vision model is reachable: hook `qc-avail` writes `F:\code\patches\qc_smoke\avail.txt`.
-  2. Run the QC: hook `qc-smoke` runs `scripts\qc_videos.py` on `F:\code\patches\qc_smoke\list.json` (the two specimen paths), with backups in `F:\code\patches\qc_smoke\backup`.
-  3. Copy the sheets and json to `qc_smoke_results/` and write the verdict here.
+- **Steps done:** 1 (apply), 2 (smoke specimens, commit 36271ea), 3 (run, report mode). The job is stopped here, awaiting Tariq's review.
+- **Next step (exact):** none in this job. Tariq reviews the smoke result.
+  - Do NOT enable `qc_on` or `interview_qc`, set `qc_mode`, or run QC on existing videos without his approval.
+  - Since B failed, the likely next work is fixing detection; he decides.
 - **Flags, unchanged in every commit:**
   - `qc_on` = False. Code default; set nowhere in `config.py`, `settings.json` or any job cfg.
   - `interview_qc` = False. Code default; set nowhere.
@@ -37,7 +36,33 @@
     - black 50-60: **only 55**;
     - blur 70-80: 73 and 79.
   - So the black window can't meet the persistence rule unless a neighbouring sample is also flagged black.
-- **Verdict:** not run yet.
+- **Step 3 run (2026-10-26, 10:20-10:23 local, report mode):**
+  - `qc.available` was True at 10:19:57; Ollama tags include `qwen2.5vl:7b`.
+  - Hook `qc-smoke` ran `scripts\qc_videos.py` on `F:\code\patches\qc_smoke\list.json`, with backups in `F:\code\patches\qc_smoke\backup`.
+  - SHA-256 of both specimens is unchanged after the run, so report mode modified nothing.
+  - Results are in `qc_smoke_results/`:
+    - `*_part_qc.json`: `qc_part`, every 6 s, 30 samples.
+    - `*_final_qc.json` and `*_sheet_qc.jpg`: `qc_final`, every 30 s, 6 samples.
+    - `B_fault_samples.png`: the frames QC actually saw inside the fault windows. Each one clearly shows its fault.
+- **Verdict:**
+  - **A: zero hard-fault flags. PASS.**
+    - Hard faults: none confirmed and persistent.
+    - Two single-sample hard hits were ignored: 127 s finger, 157 s sideways.
+    - Soft flags: blurry at 1, 25, 169 and 175 s; face_closeup at 43 s.
+    - Unchecked: 0/30 in `qc_part`, 0/6 in `qc_final`.
+  - **B: injected hard faults caught. FAIL.**
+    - Sideways 10-20 s: samples at 13 and 19 s show it clearly. Nothing was flagged.
+    - Upside down 30-40 s: samples at 31 and 37 s. 31 s was not flagged; 37 s came back as `face_closeup` (soft), not upside_down.
+    - Black 50-60 s: the only sample, 55 s, was not flagged.
+  - **B: nothing else hard-flagged. PASS.** The only hard hit was the 127 s finger, single-sample and ignored, the same as in A.
+  - **B: blur segment reported as soft and not counted as hard. PASS.** It was reported as blurry at 73 and 79 s.
+  - **Both: QC status complete. PASS.** Unchecked is 0% for both: 0/30 in `qc_part` and 0/6 in `qc_final`.
+  - **Overall: FAIL**, because none of the 3 injected hard faults was detected.
+- **Gaps found:**
+  - `qc_part` does not keep each sample's first-check answer, so this run can't tell whether `qwen2.5vl:7b` missed the faults on the first check or the strict confirmation dropped them.
+  - `qc_final`, at a 30 s spacing with the 2-neighbouring-samples rule, can only ever confirm a hard fault that lasts about 30 s or more.
+  - At a 6 s spacing, a 10 s fault holds only one sample about 1/3 of the time (the black window here), so it can never meet the persistence rule.
+
 
 ---
 

@@ -1,0 +1,8 @@
+== patches specimen_A.mp4
+    QC specimen_A: 127.0s finger ignored (single sample, not persistent)
+    QC specimen_A: 157.0s sideways ignored (single sample, not persistent)
+  final QC: 6 frames checked, 0 flagged
+== patches specimen_B.mp4
+    QC specimen_B: 127.0s finger ignored (single sample, not persistent)
+  final QC: 6 frames checked, 0 flagged
+ALL DONE
