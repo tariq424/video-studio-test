@@ -1,0 +1,85 @@
+{
+ "qcver": 5,
+ "status": "complete",
+ "unchecked": 0,
+ "frames": [
+  {
+   "t": 2.0,
+   "ok": true,
+   "problem": "none",
+   "raw": "sideways",
+   "first": "finger",
+   "confirm": "none",
+   "via": "orient",
+   "orient": "180:none;90ccw:right",
+   "rescued": false,
+   "unchecked": false,
+   "soft": ""
+  },
+  {
+   "t": 32.0,
+   "ok": false,
+   "problem": "upside_down",
+   "raw": "upside_down",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": true,
+   "unchecked": false,
+   "soft": ""
+  },
+  {
+   "t": 62.0,
+   "ok": false,
+   "problem": "sideways",
+   "raw": "sideways",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:none;90ccw:right",
+   "rescued": false,
+   "unchecked": false,
+   "soft": ""
+  },
+  {
+   "t": 92.0,
+   "ok": false,
+   "problem": "sideways",
+   "raw": "sideways",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:left;90ccw:right",
+   "rescued": false,
+   "unchecked": false,
+   "soft": ""
+  },
+  {
+   "t": 122.0,
+   "ok": false,
+   "problem": "upside_down",
+   "raw": "upside_down",
+   "first": "face_closeup",
+   "confirm": "face_closeup",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false,
+   "unchecked": false,
+   "soft": ""
+  },
+  {
+   "t": 152.0,
+   "ok": false,
+   "problem": "upside_down",
+   "raw": "upside_down",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false,
+   "unchecked": false,
+   "soft": ""
+  }
+ ]
+}

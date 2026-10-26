@@ -1,0 +1,354 @@
+{
+ "qcver": 5,
+ "mode": "report",
+ "size": 164968649,
+ "checked": 30,
+ "unchecked": 1,
+ "status": "complete",
+ "fixed": [],
+ "would_fix": [
+  [
+   0.0,
+   94.5,
+   [
+    "sideways",
+    "upside_down"
+   ]
+  ],
+  [
+   99.5,
+   106.5,
+   [
+    "sideways"
+   ]
+  ],
+  [
+   111.5,
+   160.5,
+   [
+    "sideways",
+    "upside_down"
+   ]
+  ],
+  [
+   165.5,
+   178.0,
+   [
+    "upside_down"
+   ]
+  ]
+ ],
+ "soft": [],
+ "ignored_single": [
+  [
+   97.0,
+   "upside_down"
+  ],
+  [
+   163.0,
+   "sideways"
+  ]
+ ],
+ "samples": [
+  {
+   "t": 1.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": true
+  },
+  {
+   "t": 7.0,
+   "state": "bad",
+   "prob": "sideways",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:none;90ccw:right",
+   "rescued": true
+  },
+  {
+   "t": 13.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  },
+  {
+   "t": 19.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  },
+  {
+   "t": 25.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  },
+  {
+   "t": 31.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  },
+  {
+   "t": 37.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "face_closeup",
+   "confirm": "face_closeup",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  },
+  {
+   "t": 43.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "face_closeup",
+   "confirm": "face_closeup",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  },
+  {
+   "t": 49.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  },
+  {
+   "t": 55.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  },
+  {
+   "t": 61.0,
+   "state": "bad",
+   "prob": "sideways",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:left;90ccw:right",
+   "rescued": true
+  },
+  {
+   "t": 67.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  },
+  {
+   "t": 73.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  },
+  {
+   "t": 79.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  },
+  {
+   "t": 85.0,
+   "state": "bad",
+   "prob": "sideways",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:left;90ccw:right",
+   "rescued": false
+  },
+  {
+   "t": 91.0,
+   "state": "bad",
+   "prob": "sideways",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:left;90ccw:right",
+   "rescued": false
+  },
+  {
+   "t": 97.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  },
+  {
+   "t": 103.0,
+   "state": "bad",
+   "prob": "sideways",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "orient",
+   "orient": "180:left;90ccw:right",
+   "rescued": true
+  },
+  {
+   "t": 109.0,
+   "state": "unchecked",
+   "prob": "unchecked",
+   "first": "error",
+   "confirm": "",
+   "via": "model",
+   "orient": "",
+   "rescued": false
+  },
+  {
+   "t": 115.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "finger",
+   "confirm": "none",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  },
+  {
+   "t": 121.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "face_closeup",
+   "confirm": "face_closeup",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  },
+  {
+   "t": 127.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  },
+  {
+   "t": 133.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  },
+  {
+   "t": 139.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  },
+  {
+   "t": 145.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "sideways",
+   "confirm": "sideways",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  },
+  {
+   "t": 151.0,
+   "state": "bad",
+   "prob": "sideways",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:left;90ccw:right",
+   "rescued": true
+  },
+  {
+   "t": 157.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": true
+  },
+  {
+   "t": 163.0,
+   "state": "bad",
+   "prob": "sideways",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "180:left;90ccw:right",
+   "rescued": false
+  },
+  {
+   "t": 169.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  },
+  {
+   "t": 175.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "orient",
+   "orient": "180:right",
+   "rescued": false
+  }
+ ]
+}

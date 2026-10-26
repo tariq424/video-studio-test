@@ -7,15 +7,27 @@
   - Round 2: step 4 (apply v3, 1980d64) and step 5 (re-run, report mode; FAIL, 9acc260/4727f5f).
   - Round 3: step 6, part 1 (apply v4, 83ee757) and part 2 (run; FAIL; fb8e8b2).
   - Since 2026-10-26 3:55 PM the loop runs through the Claude-Koda exchange doc (Google Doc 1GV6ZvXQJwyyiNfy1ZM1FT22Jo-xGKCPpW5FAgQIViE4). Tariq overrode the stop rule: no round cap; it runs until a full PASS or a genuine WALL.
-  - Round 4: v5 applied; run in progress.
-- **Next step (exact):** round 4 run (hook `qc-smoke`, started 3:59:56 PM).
-  1. Post the RESULT with first/confirm/via/orient traces in the exchange doc.
-  2. Commit results to `qc_smoke_results/round4/`.
-  3. Then wait for Koda's next MSG.
+  - Round 4: v5 applied (2e2cee6); run 3:59-4:12 PM; FAIL; RESULT posted in the exchange doc.
+- **Next step (exact):** wait for Koda's next MSG (v6) in the exchange doc, then apply it and run round 5.
 - **Flags, unchanged in every commit:**
   - `qc_on` = False. Code default; set nowhere in `config.py`, `settings.json` or any job cfg.
   - `interview_qc` = False. Code default; set nowhere.
   - `qc_mode`: set nowhere, so the patched code defaults to "report".
+- **Round 4 verdict (v5, report mode, specimens unchanged): FAIL.**
+  - Results: `qc_smoke_results/round4/`.
+  - **Pairwise orientation has a "right" bias:**
+    - Every checked sample of A (29/29) and of B (29/29) took an orientation flag.
+    - 180:right answers: 22/29 on A, 23/29 on B. 90ccw:right: 7 on A, 6 on B.
+    - The 90cw pair was never even reached.
+  - **A zero hard flags: FAIL.** Every sample is flagged upside_down or sideways via orient. `qc_final` flags 6/6. 109 s was unchecked (vision error).
+  - **B sideways caught as sideways: FAIL.** 13 s and 19 s answered 180:right, so they were labelled upside_down.
+  - **B upside down caught as upside_down: label correct, but not meaningful.** 31 s and 37 s answered 180:right, exactly as A's upright frames did.
+  - **B black caught: PASS.** 55 s via pixel.
+  - **B nothing else hard-flagged: FAIL.** Everything is flagged.
+  - **B blur soft only: FAIL as reported.** 73 and 79 s are blurry/blurry by the model, but orient overrode them to hard flags (73 s upside_down, 79 s sideways).
+  - **Status complete: PASS.** A 1/30 unchecked, B 0/30; both 0/6 in `qc_final`.
+  - The finger fix worked: no confirmed finger on either specimen. First looks still said finger at A 115 s and B 13, 25 and 115 s, but every confirm said none.
+
 - **Round 4 setup (2026-10-26, from MSG 002 in the exchange doc):**
   - qc.py v5 came from Drive (`qc_v5.py`, id 10wvOhwheH3YI6FE5_aI3EEvAvP5H44Nd). It is 22,880 bytes, has SHA-256 `8683fcfa413029913ba5b0f991b1ec071072ea6443a7164192931ce74abb4a78` and contains `QCVER = 5`.
   - v4 was backed up to `F:\code\patches\qc_v4.py`. v5 is applied on F: and in the repo; hash matched, compiles.
