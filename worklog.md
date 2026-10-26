@@ -4,16 +4,40 @@
 - **Job:** frame QC recalibration. Apply the prepared patch, then run the report-mode smoke test. Nothing gets enabled in this job.
 - **Steps done:**
   - Round 1: steps 1 (apply v2, bc521cd), 2 (smoke specimens, 36271ea) and 3 (run, 2dc347b; B FAIL).
-  - Round 2: step 4 (apply v3).
-- **Next step (exact):** round 2, step 5. Re-run on the SAME specimens; do not rebuild them.
-  1. Delete the `*.qc.json` files next to the specimens.
-  2. Hook `qc-smoke` runs `scripts\qc_videos.py` on `F:\code\patches\qc_smoke\list.json`, with backups in `F:\code\patches\qc_smoke\backup`.
-  3. Put the sheets and json in `qc_smoke_results/round2/` and write the verdict here, with the "first" and "confirm" verdicts for any missed fault.
-  4. Then stop.
+  - Round 2: step 4 (apply v3, 1980d64) and step 5 (re-run, report mode; FAIL). The job is stopped here, awaiting Tariq's review.
+- **Next step (exact):** none. Tariq reviews round 2.
+  - Do NOT enable `qc_on` or `interview_qc`, set `qc_mode`, or run QC on existing videos without his approval.
 - **Flags, unchanged in every commit:**
   - `qc_on` = False. Code default; set nowhere in `config.py`, `settings.json` or any job cfg.
   - `interview_qc` = False. Code default; set nowhere.
   - `qc_mode`: set nowhere, so the patched code defaults to "report".
+- **Step 5, round 2 run (2026-10-26, 12:54-12:58 local, v3, report mode, same specimens, not rebuilt):**
+  - The old `specimen_A.qc.json` and `specimen_B.qc.json` were moved to `F:\code\patches\qc_smoke\_to_delete\round1_qcjson\`, since rm isn't permitted from my side, so every frame was judged fresh.
+  - `qc.available` was True at 12:54:43 (`qwen2.5vl:7b`).
+  - Specimen SHA-256s are unchanged after the run.
+  - Results are in `qc_smoke_results/round2/`. `A_round2_false_sideways.png` shows upright frames of A that both checks called sideways.
+- **Round 2 verdict:**
+  - **A: zero hard-fault flags. FAIL.**
+    - Hard faults: `qc_part` would cover 6 spans as "sideways": 15.5-28.5, 33.5-46.5, 51.5-70.5, 75.5-82.5, 87.5-94.5 and 123.5-178.0 s.
+    - `qc_final` flags 32, 92 and 152 s as sideways. All of these frames are upright.
+    - first/confirm verdicts: 20 of 30 samples came back "sideways" on the first look; 16 of those 20 confirmed. Two single-sample hard hits were ignored (103 s sideways, 115 s finger).
+    - Soft flags: 85 s blurry, 121 s face_closeup.
+  - **B: sideways 10-20 s caught. PASS.**
+    - 13 s and 19 s were both sideways/sideways (first/confirm).
+    - Caveat: A's upright frames get the same verdict, so this detection is not meaningful on its own.
+  - **B: upside down 30-40 s caught as upside_down. FAIL.**
+    - 31 s and 37 s were both sideways/sideways, so a hard flag, but the wrong fault.
+  - **B: black 50-60 s caught. FAIL.**
+    - 55 s: first "black", confirm "black", state ok, so dropped. Both stages named black, but the confirm reply evidently had `"ok": true`, which the two-agree rule treats as "not confirmed".
+    - The pixel check did not fire: the frame's mean luminance is **16.0**, which is video black in limited range (Y=16), against a threshold under 6.
+  - **B: nothing else hard-flagged. FAIL.**
+    - Sideways spans also cover 41-52.5, 57.5-64.5, 87.5-94.5, 99.5-106.5, 123.5-148.5 and 153.5-178 s.
+  - **B: blur reported as soft, not hard. PASS.** 73 and 79 s were blurry/blurry, soft.
+  - **Both: status complete. PASS.** Unchecked is 0% for both: 0/30 in `qc_part` and 0/6 in `qc_final`.
+  - **Overall round 2: FAIL.**
+    - v3's orientation-first prompt makes `qwen2.5vl:7b` call ordinary upright frames sideways, and the strict confirmation agrees.
+    - The black threshold of 6 can't catch limited-range black (16).
+    - A confirm reply of "black" with `"ok": true` is discarded.
 - **Step 4 verified (2026-10-26, round 2):**
   - The v3 patch `F:\code\patches\qc.py` is 15,975 bytes, has SHA-256 `572c7f299b3fee43bb4c66c0fa0d083f039be918b32826d6f47a85342ee5c4e6` and contains `QCVER = 3`.
   - The v2 file in the repo was backed up to `F:\code\patches\qc_v2.py` (SHA-256 `7d7ed591...6177`). The v1 original stays at `qc_v1_original.py`.

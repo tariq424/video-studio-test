@@ -1,0 +1,73 @@
+{
+ "qcver": 3,
+ "status": "complete",
+ "unchecked": 0,
+ "frames": [
+  {
+   "t": 2.0,
+   "ok": true,
+   "problem": "none",
+   "raw": "sideways",
+   "first": "sideways",
+   "confirm": "none",
+   "rescued": false,
+   "unchecked": false,
+   "soft": ""
+  },
+  {
+   "t": 32.0,
+   "ok": false,
+   "problem": "sideways",
+   "raw": "sideways",
+   "first": "sideways",
+   "confirm": "sideways",
+   "rescued": true,
+   "unchecked": false,
+   "soft": ""
+  },
+  {
+   "t": 62.0,
+   "ok": true,
+   "problem": "none",
+   "raw": "sideways",
+   "first": "sideways",
+   "confirm": "none",
+   "rescued": false,
+   "unchecked": false,
+   "soft": ""
+  },
+  {
+   "t": 92.0,
+   "ok": false,
+   "problem": "sideways",
+   "raw": "sideways",
+   "first": "sideways",
+   "confirm": "sideways",
+   "rescued": true,
+   "unchecked": false,
+   "soft": ""
+  },
+  {
+   "t": 122.0,
+   "ok": true,
+   "problem": "none",
+   "raw": "face_closeup",
+   "first": "face_closeup",
+   "confirm": "face_closeup",
+   "rescued": false,
+   "unchecked": false,
+   "soft": "face_closeup"
+  },
+  {
+   "t": 152.0,
+   "ok": false,
+   "problem": "sideways",
+   "raw": "sideways",
+   "first": "sideways",
+   "confirm": "sideways",
+   "rescued": true,
+   "unchecked": false,
+   "soft": ""
+  }
+ ]
+}

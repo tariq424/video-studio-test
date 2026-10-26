@@ -1,0 +1,19 @@
+== patches specimen_A.mp4
+    QC specimen_A: 103.0s sideways ignored (single sample, not persistent)
+    QC specimen_A: 115.0s finger ignored (single sample, not persistent)
+    QC specimen_A: REPORT ONLY 15.5-28.5s sideways - would be covered by a still in fix mode
+    QC specimen_A: REPORT ONLY 33.5-46.5s sideways - would be covered by a still in fix mode
+    QC specimen_A: REPORT ONLY 51.5-70.5s sideways - would be covered by a still in fix mode
+    QC specimen_A: REPORT ONLY 75.5-82.5s sideways - would be covered by a still in fix mode
+    QC specimen_A: REPORT ONLY 87.5-94.5s sideways - would be covered by a still in fix mode
+    QC specimen_A: REPORT ONLY 123.5-178.0s sideways - would be covered by a still in fix mode
+  final QC: 6 frames checked, 3 flagged: 32s sideways, 92s sideways, 152s sideways
+== patches specimen_B.mp4
+    QC specimen_B: REPORT ONLY 9.5-52.5s sideways - would be covered by a still in fix mode
+    QC specimen_B: REPORT ONLY 57.5-64.5s sideways - would be covered by a still in fix mode
+    QC specimen_B: REPORT ONLY 87.5-94.5s sideways - would be covered by a still in fix mode
+    QC specimen_B: REPORT ONLY 99.5-106.5s sideways - would be covered by a still in fix mode
+    QC specimen_B: REPORT ONLY 123.5-148.5s sideways - would be covered by a still in fix mode
+    QC specimen_B: REPORT ONLY 153.5-178.0s sideways - would be covered by a still in fix mode
+  final QC: 6 frames checked, 1 flagged: 32s sideways
+ALL DONE
