@@ -65,6 +65,27 @@ cannot be trusted from this model: the answer follows the side, not the picture)
     frame cannot flag anything, because the as-is yes short-circuits first.
   - everything else from v5 stands: pairwise code is gone, but the strict finger definition, the flat-black
     pixel test, orientation running on confirmed-SOFT frames, and the per-sample orient log all stay.
+
+v7 (2026-10-26, after smoke round 5: single-image orientation passed EVERYTHING except B's upside-down
+segment (30-40 s) - both samples, 31 s and 37 s, answered asis:yes on genuinely upside-down frames, so the
+180 test never ran. Both frames carry upside-down caption text and an "AI SECURITY - CONDENSED" label at
+the bottom: the generic "is this upright?" question never surfaced the text cue. The as-is yes can no longer
+short-circuit on its own):
+  - an as-is yes is now seconded by a TEXT-ANCHORED probe before it counts: the model must quote the
+    clearest readable text in the frame and judge whether that text reads upright, upside down, or on its
+    side. Probe upright or none (no readable text) accepts the as-is yes and the check ends, as before.
+    Probe upside_down or sideways does NOT flag anything by itself - it only reopens the rotation tests
+    (180, then 90 CCW, then 90 CW, each alone), and a fault still counts ONLY on the old discordant pair:
+    as-is not accepted AND exactly one rotation upright (180 -> upside_down, either 90 -> sideways). If no
+    rotation reads upright, nothing is flagged, so the probe cannot create a false flag on its own.
+    The probe answer (and the quoted text, truncated) is logged in the orient field, e.g.
+    asis:yes;text:upside_down("AI SECURITY");180:yes.
+  - KNOWN RESIDUAL GAP, stated plainly: a textless upside-down frame still answers asis:yes + text:none
+    and is accepted upright. The probe closes exactly the evidenced miss (text-carrying upside-down
+    frames, which is what the smoke specimen's upside-down segment is); it does not claim to catch
+    textless inversions. If round 6 shows one, that is a different, separately evidenced failure.
+  - everything else from v6 stands: single-image tests, strict finger definition, flat-black pixel test,
+    orientation on confirmed-SOFT frames, per-sample orient log.
 """
 import json
 import shutil
@@ -74,7 +95,7 @@ from . import media
 
 ENC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-profile:v", "high"]
 
-QCVER = 6
+QCVER = 7
 HARD = ("sideways", "upside_down", "black", "finger", "smudge")
 SOFT = ("blurry", "face_closeup", "clothing_closeup")
 
@@ -113,6 +134,15 @@ viewed - or is it rotated? Reply with JSON only:
 {{"upright": true}} if the picture looks upright and readable,
 {{"upright": false}} if the picture looks rotated (on its side or upside down),
 {{"upright": "unknown"}} if you cannot tell."""
+
+ORIENT2 = """This is a single picture, shown on its own. Ignore everything except the TEXT in it - captions,
+subtitles, labels, signs, on-screen graphics. Quote the clearest words you can actually read, if any.
+Then say whether that text reads upright (normal reading direction), upside down, or on its side.
+Reply with JSON only:
+{{"text": "<the clearest words you read, or empty string if no text is readable>",
+  "text_orientation": "upright"|"upside_down"|"sideways"|"none"}}
+where "none" means no readable text is visible or you cannot tell which way the text reads. Do not guess
+words that are not there: an empty text with "none" is a correct answer for a textless picture."""
 
 
 def _pixel_flat_black(img):
@@ -173,22 +203,49 @@ def _orient_single(cfg, im, img, tag, rot):
     return "error:answer:" + str(a)[:20]
 
 
+def _orient_text(cfg, img):
+    """Text-anchored second opinion on the as-is frame -> "upright" | "upside_down" | "sideways" | "none" |
+    "error:<why>", logged as text:<verdict>("<quoted text, truncated>"). Round 5 proved the generic
+    upright question can answer yes on a genuinely upside-down frame that carries upside-down captions;
+    this probe asks a different, narrower question (which way does the readable text read?) so a second
+    yes-bias would have to survive two different wordings. It never flags anything on its own: it only
+    reopens the rotation tests when it disagrees with the as-is yes."""
+    from . import footage
+    from .llm import parse_json
+    try: raw = footage._vision(dict(cfg, vet_provider="local"), Path(img), ORIENT2)
+    except Exception: return "error:vision"
+    try:
+        j = parse_json(raw)
+        v = str((j or {}).get("text_orientation") or "").strip().lower()
+        q = str((j or {}).get("text") or "").strip()
+    except Exception: return "error:parse:" + str(raw)[:60].replace("\n", " ")
+    if v not in ("upright", "upside_down", "sideways", "none"): return "error:answer:" + v[:20]
+    if q: return f'{v}("{q[:30]}")'
+    return v
+
+
 def _orientation(cfg, img):
-    """Orientation by single-image upright tests -> (fault | None, log). The frame as-is is judged alone
-    first: if it reads upright, the check ends there - no rotation can flag an already-upright frame, and
-    no further vision call is spent. Only when the as-is answer is NOT yes are the rotations judged alone,
-    one at a time (180, then 90 CCW, then 90 CW): a rotation fault counts ONLY on a discordant pair, as-is
-    not-upright AND that rotation upright (180 -> upside_down, either 90 -> sideways). If no rotation reads
-    upright, nothing is flagged. Every answer is logged, so the next miss is attributable: as-is yes on a
-    rotated segment is a yes-bias; as-is no with all rotations no is a cannot-read in this format; the
-    round-4 right-side bias has no side to attach to here, by construction."""
+    """Orientation by single-image upright tests, with a text-anchored second opinion -> (fault | None, log).
+    The frame as-is is judged alone first. If it reads upright, the text probe must second it: probe
+    upright or none (no readable text) accepts the frame and the check ends; probe upside_down or sideways
+    reopens the rotation tests instead of accepting. Only when the as-is answer is NOT accepted are the
+    rotations judged alone, one at a time (180, then 90 CCW, then 90 CW): a rotation fault counts ONLY on
+    a discordant pair, as-is not accepted AND that rotation upright (180 -> upside_down, either 90 ->
+    sideways). If no rotation reads upright, nothing is flagged - so neither the as-is yes nor the probe
+    can create a flag by itself. Every answer is logged, so the next miss is attributable: as-is yes +
+    text upright on a rotated segment means both wordings share the yes-bias; as-is yes + text none on a
+    textless rotated segment is the known residual gap; as-is no with all rotations no means the model
+    cannot read orientation in this format either."""
     try:
         from PIL import Image
         im = Image.open(img).convert("RGB")
     except Exception: return None, "open-error"
     log = []
     a = _orient_single(cfg, im, img, "asis", None); log.append(f"asis:{a}")
-    if a == "yes": return None, ";".join(log)
+    if a == "yes":
+        t = _orient_text(cfg, img); log.append(f"text:{t}")
+        if t.startswith("upside_down") or t.startswith("sideways"): pass  # reopen rotations below
+        else: return None, ";".join(log)
     a = _orient_single(cfg, im, img, "180", Image.ROTATE_180); log.append(f"180:{a}")
     if a == "yes": return "upside_down", ";".join(log)
     a = _orient_single(cfg, im, img, "90ccw", Image.ROTATE_90); log.append(f"90ccw:{a}")

@@ -8,12 +8,20 @@
   - Round 3: step 6, part 1 (apply v4, 83ee757) and part 2 (run; FAIL; fb8e8b2).
   - Since 2026-10-26 3:55 PM the loop runs through the Claude-Koda exchange doc (Google Doc 1GV6ZvXQJwyyiNfy1ZM1FT22Jo-xGKCPpW5FAgQIViE4). Tariq overrode the stop rule: no round cap; it runs until a full PASS or a genuine WALL.
   - Round 4: v5 applied (2e2cee6); run 3:59-4:12 PM; FAIL (6c25cd5).
-  - Round 5: v6 applied (8010bd3); run 4:25-4:32 PM. Everything PASS except the upside-down segment.
-- **Next step (exact):** wait for MSG 004 (v7) in the exchange doc, then round 6.
+  - Round 5: v6 applied (8010bd3); run 4:25-4:32 PM. Everything PASS except the upside-down segment (4967fe3).
+  - Round 6: v7 applied (MSG 004); run started 4:48 PM.
+- **Next step (exact):** round 6 run (started 4:48 PM).
+  1. Collect results into `qc_smoke_results/round6/`.
+  2. Post the RESULT in the exchange doc.
+  3. Wait for MSG 005.
 - **Flags, unchanged in every commit:**
   - `qc_on` = False. Code default; set nowhere in `config.py`, `settings.json` or any job cfg.
   - `interview_qc` = False. Code default; set nowhere.
   - `qc_mode`: set nowhere, so the patched code defaults to "report".
+- **Round 6 setup (MSG 004):**
+  - qc_v7.py from Drive (id 1YZELkOs1lXQ3wWjWhsqDjoC6r-J2b2CD): 28,887 bytes, SHA-256 `1e0a785d...98d6`, `QCVER = 7`.
+  - v6 was backed up to `F:\code\patches\qc_v6.py`. v7 applied; hash matches; compiles.
+  - The round-5 qc.json files were moved to `_to_delete\round5_qcjson`.
 - **Round 5 verdict (v6, single-image upright tests): FAIL on 1 criterion only.**
   - Results: `qc_smoke_results/round5/`.
   - **A zero hard flags: PASS.**
