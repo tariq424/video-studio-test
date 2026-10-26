@@ -488,7 +488,12 @@ class Studio:
                         if stop(): break
                         vert = "short" in mp4.stem.lower() or "9_16" in mp4.stem
                         log(f"Quality check: {mp4.name}")
-                        qc.qc_part(mp4, cfg, log, every=4.0 if vert else 6.0, label=mp4.stem[:30], kind="short" if vert else "documentary")
+                        fix = str(cfg.get("qc_mode", "report")).strip().lower() == "fix"
+                        # fix: qc.py only marks (report mode); qc_repair replaces each marked span from the ladder (MSG 007)
+                        qc.qc_part(mp4, dict(cfg, qc_mode="report") if fix else cfg, log, every=4.0 if vert else 6.0, label=mp4.stem[:30], kind="short" if vert else "documentary")
+                        if fix:
+                            from . import qc_repair
+                            qc_repair.repair(mp4, cfg, j.dir, log, stop, vert=vert)
                         qc.qc_final(mp4, cfg, j.dir / "qc", log, every=10.0 if vert else 30.0)
                 else: log("Quality check skipped (the local vision model isn't running)")
             except Exception as e:
