@@ -13,7 +13,8 @@ from studio import config, imagegen  # noqa: E402
 
 def main():
     out = Path(sys.argv[1]); out.mkdir(parents=True, exist_ok=True)
-    url = sys.argv[2] if len(sys.argv) > 2 else "https://marble.worldlabs.ai/"
+    uf = out / "url.txt"   # a page to look at instead of the home page (written before the run)
+    url = sys.argv[2] if len(sys.argv) > 2 else (uf.read_text(encoding="utf-8").strip() if uf.exists() and uf.read_text(encoding="utf-8").strip() else "https://marble.worldlabs.ai/")
     cfg = dict(config.load(), imagegen_headless=False)
     from playwright.sync_api import sync_playwright
     res = {"url": url, "at": time.strftime("%Y-%m-%d %H:%M:%S")}
