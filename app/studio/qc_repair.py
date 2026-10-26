@@ -207,7 +207,7 @@ def _rung_stock(ctx):
         media.ff("-ss", f"{min(2.0, media.dur(out) / 2):.2f}", "-i", out, "-frames:v", 1, "-vf", "scale=768:-2", mid, check=False, timeout=120)
         try:
             from .llm import parse_json
-            m = parse_json(footage._vision(cfg, mid, 'Narration: "' + vo[:400].replace('"', "'") + '"\nDoes this frame plainly show what the narration '
+            m = parse_json(footage._vision(dict(cfg, vet_provider="local"), mid, 'Narration: "' + vo[:400].replace('"', "'") + '"\nDoes this frame plainly show what the narration '
                                            'is talking about (same kind of thing, nothing contradicting it)? Reply with JSON only: {"match": true|false}'))
             if not (m or {}).get("match"): _log(log, f"    stock {c['id']} ({c.get('query')}): off-subject"); continue
         except Exception as e:
