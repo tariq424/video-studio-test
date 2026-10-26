@@ -2,7 +2,19 @@
 clothing or giant-face close-ups, black frames. Uses this PC's local vision model (Ollama); without it the check is skipped.
   qc_part   a frame every few seconds; a failing stretch is covered, under the same sound, by a still (turned upright when it
             was upside down, else the nearest clean frame, else blurred)
-  qc_final  a frame every 10-30 s of the finished video -> <video>_qc.jpg (failures red) + <video>_qc.json"""
+  qc_final  a frame every 10-30 s of the finished video -> <video>_qc.jpg (failures red) + <video>_qc.json
+
+Recalibration (v2, 2026-10-26, after the first run flagged most frames of the news Shorts and the videos had to be
+restored from preqc):
+  - two-agree: a flagged frame is re-checked with a strict confirmation prompt; the fault counts only if both agree.
+  - persistence: a hard fault counts only when the SAME problem appears in at least 2 consecutive samples;
+    a single-sample hit (transition, cut) is recorded as ignored and never fixed.
+  - hard / soft split: HARD faults (sideways, upside_down, black, finger, smudge) may be covered by a still;
+    SOFT faults (blurry, face_closeup, clothing_closeup) are reported only, never auto-fixed.
+  - qc_mode: cfg "qc_mode" = "report" (default) only reports - it never modifies the video; "fix" covers hard spans.
+  - unchecked frames (vision model error) are counted, never silently passed: if more than 10% of a video's
+    samples are unchecked, its QC status in the report is "incomplete", not "passed".
+"""
 import json
 import shutil
 from pathlib import Path
@@ -10,6 +22,10 @@ from pathlib import Path
 from . import media
 
 ENC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-profile:v", "high"]
+
+QCVER = 2
+HARD = ("sideways", "upside_down", "black", "finger", "smudge")
+SOFT = ("blurry", "face_closeup", "clothing_closeup")
 
 
 def _log(log, m):
@@ -30,43 +46,86 @@ QC = """Quality check of one frame from a finished travel documentary. Reply wit
 Not ok: a finger or hand over the lens, a smudge or fog on the lens, a picture lying on its side or upside down, a blurry smear,
 a close-up of clothing filling the frame, one person's face filling most of the frame, or a black / empty frame."""
 
+CONFIRM = """A first quality check of this single frame claimed the problem: "{problem}".
+Be strict: confirm ONLY if that exact fault is obvious in this frame. A normal shot - including a person's face
+in a talking-head shot, a dark but visible scene, or a frame caught mid-transition - is NOT a fault.
+Reply with JSON only: {{"ok": true|false, "problem": "none|finger|smudge|sideways|upside_down|blurry|clothing_closeup|face_closeup|black"}}"""
 
-def _qc_frame(cfg, img):
+
+def _judge(cfg, img):
+    """-> {"state": "ok"|"bad"|"unchecked", "prob": <problem or "none">, "raw": <first check's problem>}.
+    A first-check flag stands only when a second, strict check agrees on the same problem (two-agree rule)."""
     from . import footage
     from .llm import parse_json
     try: j = parse_json(footage._vision(dict(cfg, vet_provider="local"), img, QC))
-    except Exception: return True, "unchecked"
+    except Exception: return {"state": "unchecked", "prob": "unchecked", "raw": ""}
     prob = str(j.get("problem") or "none").strip().lower()
-    return (bool(j.get("ok", True)) and prob in ("none", "")), prob
+    if bool(j.get("ok", True)) or prob in ("none", ""): return {"state": "ok", "prob": "none", "raw": prob}
+    try: j2 = parse_json(footage._vision(dict(cfg, vet_provider="local"), img, CONFIRM.format(problem=prob)))
+    except Exception: return {"state": "unchecked", "prob": prob, "raw": prob}
+    prob2 = str(j2.get("problem") or "none").strip().lower()
+    if not bool(j2.get("ok", True)) and prob2 == prob: return {"state": "bad", "prob": prob, "raw": prob}
+    return {"state": "ok", "prob": "none", "raw": prob}   # unconfirmed flag: dropped, kept in "raw" for the report
+
+
+def _persistent(samples):
+    """Mask over samples: True where a HARD fault is part of a run - the same problem in a neighbouring sample too."""
+    flags = [(s["state"] == "bad" and s["prob"] in HARD) for s in samples]
+    out = []
+    for i, f in enumerate(flags):
+        if not f: out.append(False); continue
+        prev_ok = i > 0 and flags[i - 1] and samples[i - 1]["prob"] == samples[i]["prob"]
+        next_ok = i < len(samples) - 1 and flags[i + 1] and samples[i + 1]["prob"] == samples[i]["prob"]
+        out.append(bool(prev_ok or next_ok))
+    return out
+
+
+def _mode(cfg):
+    m = str(cfg.get("qc_mode", "report") or "report").strip().lower()
+    return m if m in ("report", "fix") else "report"
 
 
 def qc_part(path, cfg, log=print, every=4.0, label="", kind="documentary"):
     """Owner, 2026-10-24: check every piece before it is stitched in. A frame every `every` seconds goes to the local vision
-    model; a failing stretch (+/- 2 s) is replaced, under the same sound, by a still: the frame turned right side up when it
-    was upside down, else the nearest clean frame of the same piece, else that frame blurred. Cached: <piece>.qc.json."""
-    path = Path(path); rep = path.with_suffix(".qc.json")
+    model (twice, if the first check flags it); a confirmed HARD fault that persists across samples (+/- 2 s) is replaced,
+    under the same sound, by a still: the frame turned right side up when it was upside down, else the nearest clean frame
+    of the same piece, else that frame blurred. In report mode (default) nothing is replaced - the spans are only
+    logged and written to the report. Cached: <piece>.qc.json (keyed by size, QC version and mode)."""
+    path = Path(path); rep = path.with_suffix(".qc.json"); mode = _mode(cfg)
     if rep.exists():
         try:
-            if json.loads(rep.read_text(encoding="utf-8")).get("size") == path.stat().st_size: return path
+            old = json.loads(rep.read_text(encoding="utf-8"))
+            if old.get("size") == path.stat().st_size and old.get("qcver") == QCVER and old.get("mode") == mode: return path
         except Exception: pass
     d = media.dur(path)
     if d < 1.5: return path
     tmp = path.with_suffix(""); tmp.mkdir(exist_ok=True)
     times = [min(d - 0.3, 1.0 + k * every) for k in range(int(max(0.0, d - 1.0) // every) + 1)]
-    res = []
+    samples = []
     for k, t in enumerate(times):
         img = tmp / f"qc{k:03}.jpg"
         media.ff("-ss", f"{t:.2f}", "-i", path, "-frames:v", 1, "-vf", "scale=768:-2", img, timeout=120)
-        ok, prob = _qc_frame(cfg, img) if img.exists() else (True, "unchecked")
-        res.append((t, ok, prob, img))
-    bad = [(t, prob, img) for t, ok, prob, img in res if not ok]
-    if bad:
-        good = [(t, img) for t, ok, prob, img in res if ok]
-        spans = []
-        for t, prob, img in bad:
-            a, b = max(0.0, t - every / 2 - 0.5), min(d, t + every / 2 + 0.5)
-            if spans and a <= spans[-1][1]: spans[-1][1] = max(spans[-1][1], b); spans[-1][2].append((t, prob, img))
-            else: spans.append([a, b, [(t, prob, img)]])
+        v = _judge(cfg, img) if img.exists() else {"state": "unchecked", "prob": "unchecked", "raw": ""}
+        samples.append({"t": t, "img": img, **v})
+    nun = sum(1 for s in samples if s["state"] == "unchecked")
+    incomplete = bool(samples) and nun / len(samples) > 0.10
+    keep = _persistent(samples)
+    bad = [(s["t"], s["prob"], s["img"]) for s, k in zip(samples, keep) if k]
+    single = [(s["t"], s["prob"]) for s, k in zip(samples, keep)
+              if s["state"] == "bad" and s["prob"] in HARD and not k]
+    soft = [(s["t"], s["prob"]) for s in samples if s["state"] == "bad" and s["prob"] in SOFT]
+    for t, prob in single: _log(log, f"    QC {label}: {t:.1f}s {prob} ignored (single sample, not persistent)")
+    spans = []
+    for t, prob, img in bad:
+        a, b = max(0.0, t - every / 2 - 0.5), min(d, t + every / 2 + 0.5)
+        if spans and a <= spans[-1][1]: spans[-1][1] = max(spans[-1][1], b); spans[-1][2].append((t, prob, img))
+        else: spans.append([a, b, [(t, prob, img)]])
+    would = [(round(a, 1), round(b, 1), sorted({p for _, p, _ in items})) for a, b, items in spans]
+    fixed = []
+    if spans and mode == "report":
+        for a, b, probs in would: _log(log, f"    QC {label}: REPORT ONLY {a:.1f}-{b:.1f}s {', '.join(probs)} - would be covered by a still in fix mode")
+    elif spans:
+        good = [(s["t"], s["img"]) for s in samples if s["state"] == "ok"]
         ins, flt, n = ["-i", str(path)], [], 1
         chain = "[0:v]"
         for a, b, items in spans:
@@ -85,33 +144,53 @@ def qc_part(path, cfg, log=print, every=4.0, label="", kind="documentary"):
             flt.append(f"{chain}[s{n}]overlay=enable='between(t,{a:.2f},{b:.2f})'[o{n}]")
             chain = f"[o{n}]"; n += 1
             _log(log, f"    QC {label}: {a:.1f}-{b:.1f}s {', '.join(sorted({p for _, p, _ in items}))} -> still ({how})")
-        fixed = path.with_name(path.stem + "_qc.mp4")
-        media.ff(*ins, "-filter_complex", ";".join(flt), "-map", chain, "-map", "0:a?", "-t", f"{d:.2f}", *ENC, "-c:a", "copy", fixed, timeout=1800)
-        fixed.replace(path)
-    rep.write_text(json.dumps({"size": path.stat().st_size, "checked": len(res), "fixed": [(t, p) for t, p, _ in bad]}), encoding="utf-8")
+        fixed_mp4 = path.with_name(path.stem + "_qc.mp4")
+        media.ff(*ins, "-filter_complex", ";".join(flt), "-map", chain, "-map", "0:a?", "-t", f"{d:.2f}", *ENC, "-c:a", "copy", fixed_mp4, timeout=1800)
+        fixed_mp4.replace(path)
+        fixed = [(t, p) for t, p, _ in bad]
+    if incomplete: _log(log, f"    QC {label}: INCOMPLETE - {nun}/{len(samples)} frames unchecked (vision model)")
+    rep.write_text(json.dumps({"qcver": QCVER, "mode": mode, "size": path.stat().st_size, "checked": len(samples),
+                               "unchecked": nun, "status": "incomplete" if incomplete else "complete",
+                               "fixed": fixed, "would_fix": would if mode == "report" else [],
+                               "soft": soft, "ignored_single": single}, indent=1), encoding="utf-8")
     return path
 
 
 def qc_final(out, cfg, work, log=print, every=30.0):
-    """Pre-release check of the finished video: a frame every 30 s; a contact sheet with failures marked red and a report
-    (qc_report.json) beside the video."""
+    """Pre-release check of the finished video: a frame every 30 s; a contact sheet with confirmed persistent
+    HARD failures marked red and a report (qc report json) beside the video. Report-only by design."""
     from PIL import Image, ImageDraw
-    out = Path(out); d = media.dur(out); tmp = Path(work) / "qc_final"; tmp.mkdir(exist_ok=True)
-    rows, ims = [], []
+    out = Path(out); d = media.dur(out); tmp = Path(work) / "qc_final"; tmp.mkdir(exist_ok=True, parents=True)
+    samples, ims = [], []
     for k in range(int(d // every) + 1):
         t = min(d - 1.0, 2.0 + k * every); img = tmp / f"f{k:03}.jpg"
         media.ff("-ss", f"{t:.2f}", "-i", out, "-frames:v", 1, "-vf", "scale=480:-2", img, timeout=120)
         if not img.exists(): continue
-        ok, prob = _qc_frame(cfg, img); rows.append({"t": round(t, 1), "ok": ok, "problem": prob}); ims.append((t, ok, prob, Image.open(img)))
+        v = _judge(cfg, img)
+        samples.append({"t": round(t, 1), **v}); ims.append((t, img))
+    keep = _persistent(samples)
+    rows = []
+    for s, k in zip(samples, keep):
+        hard = k
+        rows.append({"t": s["t"], "ok": not hard,
+                     "problem": s["prob"] if hard else ("none" if s["state"] != "unchecked" else "unchecked"),
+                     "raw": s["raw"], "unchecked": s["state"] == "unchecked",
+                     "soft": s["prob"] if (s["state"] == "bad" and s["prob"] in SOFT) else ""})
     if ims:
-        w, h = ims[0][3].size; cols = 6; sheet = Image.new("RGB", (w * cols, h * ((len(ims) + cols - 1) // cols)))
+        first = Image.open(ims[0][1]); w, h = first.size; cols = 6
+        sheet = Image.new("RGB", (w * cols, h * ((len(ims) + cols - 1) // cols)))
         dr = ImageDraw.Draw(sheet)
-        for i, (t, ok, prob, im) in enumerate(ims):
-            x, y = (i % cols) * w, (i // cols) * h; sheet.paste(im, (x, y))
-            dr.rectangle([x, y, x + 150, y + 18], fill="black" if ok else "red"); dr.text((x + 3, y + 3), f"{int(t // 60)}:{int(t % 60):02d} {'' if ok else prob}", fill="yellow")
+        for i, ((t, img), r) in enumerate(zip(ims, rows)):
+            x, y = (i % cols) * w, (i // cols) * h; sheet.paste(Image.open(img), (x, y))
+            tag = "" if r["ok"] else r["problem"]
+            if r["soft"] and r["ok"]: tag = r["soft"] + " (soft)"
+            dr.rectangle([x, y, x + 170, y + 18], fill="black" if r["ok"] else "red"); dr.text((x + 3, y + 3), f"{int(t // 60)}:{int(t % 60):02d} {tag}", fill="yellow")
         sheet.save(tmp / (out.stem + "_qc.jpg"), quality=85)   # in the work folder: the output folder stays clean for the Publisher
-    (tmp / (out.stem + "_qc.json")).write_text(json.dumps(rows, indent=1), encoding="utf-8")
+    nun = sum(1 for r in rows if r["unchecked"])
+    incomplete = bool(rows) and nun / len(rows) > 0.10
+    (tmp / (out.stem + "_qc.json")).write_text(json.dumps(
+        {"qcver": QCVER, "status": "incomplete" if incomplete else "complete", "unchecked": nun, "frames": rows}, indent=1), encoding="utf-8")
     nbad = sum(1 for r in rows if not r["ok"])
-    _log(log, f"  final QC: {len(rows)} frames checked, {nbad} flagged" + (": " + ", ".join(f"{r['t']:.0f}s {r['problem']}" for r in rows if not r['ok']) if nbad else ""))
-
-
+    _log(log, f"  final QC: {len(rows)} frames checked, {nbad} flagged"
+         + (": " + ", ".join(f"{r['t']:.0f}s {r['problem']}" for r in rows if not r["ok"]) if nbad else "")
+         + (f"; INCOMPLETE ({nun} unchecked)" if incomplete else ""))

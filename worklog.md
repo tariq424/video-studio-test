@@ -1,3 +1,27 @@
+<!-- QC STATUS (frame QC recalibration job; keep this block at the top, update at every commit) -->
+## QC STATUS
+
+- **Job:** frame QC recalibration. Apply the prepared patch, then run the report-mode smoke test. Nothing gets enabled in this job.
+- **Steps done:** 1 (apply).
+- **Next step (exact):** STEP 2. Make the smoke specimens in `F:\code\patches\qc_smoke\`.
+  - `specimen_A.mp4`: a copy of the source below.
+  - `specimen_B.mp4`: A with 4 injected faults, 10 s each. Then verify B plays end to end with audio.
+- **Flags, unchanged in every commit:**
+  - `qc_on` = False. Code default; set nowhere in `config.py`, `settings.json` or any job cfg.
+  - `interview_qc` = False. Code default; set nowhere.
+  - `qc_mode`: set nowhere, so the patched code defaults to "report".
+- **Step 1 verified (2026-10-26):**
+  - The patch `F:\code\patches\qc.py` is 12,311 bytes, has SHA-256 `7d7ed59145f4d6c143b174589374d6a9d2093480f4b26103f5a38381ccda6177` and contains `QCVER = 2`.
+  - Original backed up to `F:\code\patches\qc_v1_original.py` (SHA-256 `9f2bc68a5ee0af4257fe9bb09c60364af97af30980bc486a6bbb35c646d9dd1f`).
+  - The patch was copied over `app/studio/qc.py` on F: and in the repo. The SHA-256 of both copies matches the pickup hash, and py_compile is OK on both. No other code file was changed.
+- **Specimen A source (chosen, copy not made yet):** `F:\newsroom\staging\20261023_032233\output\AI_Just_Learned_to_Hack_Power_and_Water_Systems_short.mp4`.
+  - 178.0 s, 1080x1920. Published (approved by Tariq), item 907bb4a591d1.
+  - File dated 2026-10-23, before the v1 QC run, so it was never QC-modified.
+- **Injected timestamps:** none yet.
+- **Verdict:** not run yet.
+
+---
+
 # Worklog — God's Eye View + Video Studio ladder v2
 
 Newest entries at the top of each log. Status snapshot first.
