@@ -10,7 +10,15 @@
   - Round 4: v5 applied (2e2cee6); run 3:59-4:12 PM; FAIL (6c25cd5).
   - Round 5: v6 applied (8010bd3); run 4:25-4:32 PM. Everything PASS except the upside-down segment (4967fe3).
   - Round 6: v7 applied (69da7a4); run 4:48-4:55 PM. FAIL: upside-down still missed, plus one false sideways flag in B's qc_final at 2 s.
-- **Next step (exact):** wait for MSG 005 (v8) in the exchange doc, then round 7.
+- **Next step (exact):** none. LOOP CLOSED by Tariq (MSG 005, 5:00 PM: "stop this madness"). No v8 will be written.
+  - Applied file stays qc.py v7. QC stays OFF.
+  - Enabling QC, and whether orientation is dropped as a blocking fault, is a separate decision for Tariq.
+  - Final tally:
+    - black solved (pixel test);
+    - finger solved;
+    - sideways solved in `qc_part`;
+    - soft classes fine;
+    - upside down not solvable with `qwen2.5vl:7b` (the model reads inverted text and calls it upright).
 - **Flags, unchanged in every commit:**
   - `qc_on` = False. Code default; set nowhere in `config.py`, `settings.json` or any job cfg.
   - `interview_qc` = False. Code default; set nowhere.
