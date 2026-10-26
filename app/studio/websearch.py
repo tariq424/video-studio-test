@@ -37,11 +37,37 @@ def _clean(parts, n=8):
     return [s for s in out if len(s.split()) > 4][:n]
 
 
+STOP = set("the and for with from that this into over what when where which while about their there have has had were was are been "
+           "used using tools plan plans planned".split())
+
+
+def relevant(snips, q, need=2):
+    """Keep snippets that share at least `need` content words with the query (block pages and ad filler share none)."""
+    qw = {w for w in re.findall(r"[a-z]{4,}", q.lower()) if w not in STOP}
+    return [s for s in snips if len(qw & set(re.findall(r"[a-z]{4,}", s.lower()))) >= min(need, len(qw))]
+
+
+def _browser(cfg, headless=None):
+    from .imagegen import profile_dir
+    prof = profile_dir(cfg, "m365")
+    if not prof.exists() or not any(prof.iterdir()): raise RuntimeError(f"no signed-in m365 profile at {prof}")
+    return dict(user_data_dir=str(prof), headless=bool(cfg.get("imagegen_headless", True)) if headless is None else headless,
+                channel="chrome", viewport={"width": 1280, "height": 900}, args=["--disable-blink-features=AutomationControlled"])
+
+
+def _evidence(cfg, page, name):
+    try:
+        from . import config
+        d = config.ROOT.parent / "patches" / "search_fail"; d.mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=str(d / f"{name}.png")); (d / f"{name}.html").write_text(page.content(), encoding="utf-8")
+    except Exception: pass
+
+
 def _ddg(cfg, q):
     import requests
     r = requests.get("https://html.duckduckgo.com/html/", params={"q": q}, headers=UA, timeout=20)
     if r.status_code != 200: raise RuntimeError(f"HTTP {r.status_code}")
-    return _clean(re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', r.text, re.S))
+    return relevant(_clean(re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', r.text, re.S)), q)
 
 
 def _bing(cfg, q):
@@ -50,28 +76,36 @@ def _bing(cfg, q):
     if r.status_code != 200: raise RuntimeError(f"HTTP {r.status_code}")
     if "captcha" in r.text.lower()[:20000] and "b_algo" not in r.text: raise RuntimeError("block page")
     items = re.findall(r'<li class="b_algo".*?</li>', r.text, re.S)
-    return _clean([" ".join(re.findall(r"<p[^>]*>(.*?)</p>", it, re.S)) or it for it in items])
+    got = relevant(_clean([" ".join(re.findall(r"<p[^>]*>(.*?)</p>", it, re.S)) or it for it in items]), q)
+    if got: return got
+    from playwright.sync_api import sync_playwright   # plain request got filler: the signed-in Microsoft profile
+    with sync_playwright() as pw:
+        ctx = pw.chromium.launch_persistent_context(**_browser(cfg)); page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        try:
+            page.goto("https://www.bing.com/search?setlang=en&q=" + __import__("urllib.parse").parse.quote(q), wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(3000)
+            snips = page.eval_on_selector_all("li.b_algo", "els => els.map(e => e.innerText)")
+            got = relevant(_clean(snips), q)
+            if not got: _evidence(cfg, page, "bing")
+            return got
+        finally:
+            ctx.close()
 
 
 def _google(cfg, q):
     import requests
     r = requests.get("https://www.google.com/search", params={"q": q, "hl": "en", "num": 8}, headers=UA, timeout=20)
     if r.status_code != 200 or "unusual traffic" in r.text or "/sorry/" in r.url: raise RuntimeError("block page")
-    return _clean(re.findall(r'<div[^>]*class="[^"]*(?:VwiC3b|BNeawe s3v9rd)[^"]*"[^>]*>(.*?)</div>', r.text, re.S))
+    return relevant(_clean(re.findall(r'<div[^>]*class="[^"]*(?:VwiC3b|BNeawe s3v9rd)[^"]*"[^>]*>(.*?)</div>', r.text, re.S)), q)
 
 
 def _copilot(cfg, q, timeout=90):
     """Ask Copilot in the signed-in Microsoft 365 profile for a short factual description; its answer is the snippet."""
     from playwright.sync_api import sync_playwright
-    from .imagegen import profile_dir
-    prof = profile_dir(cfg, "m365")
-    if not prof.exists() or not any(prof.iterdir()): raise RuntimeError(f"no signed-in m365 profile at {prof}")
     ask = ("In 3-4 plain sentences, describe what the following looks like in real life (places, equipment, setting), "
            "for a documentary photographer: " + q)
     with sync_playwright() as pw:
-        ctx = pw.chromium.launch_persistent_context(user_data_dir=str(prof), headless=bool(cfg.get("imagegen_headless", True)),
-                                                    channel="chrome", viewport={"width": 1280, "height": 900},
-                                                    user_agent=UA["User-Agent"], args=["--disable-blink-features=AutomationControlled"])
+        ctx = pw.chromium.launch_persistent_context(**_browser(cfg, headless=False))
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         try:
             page.goto("https://copilot.microsoft.com/", wait_until="domcontentloaded", timeout=60000); page.wait_for_timeout(5000)
@@ -79,7 +113,7 @@ def _copilot(cfg, q, timeout=90):
             for sel in ["textarea#userInput", "textarea[placeholder]", "textarea", "div[contenteditable=true]"]:
                 loc = page.locator(sel)
                 if loc.count(): box = loc.first; break
-            if box is None: raise RuntimeError("Copilot's message box was not found")
+            if box is None: _evidence(cfg, page, "copilot"); raise RuntimeError("Copilot's message box was not found (screenshot in search_fail)")
             before = page.inner_text("body")
             box.click(); page.keyboard.insert_text(ask); page.wait_for_timeout(500); page.keyboard.press("Enter")
             t0, last, stable = time.time(), "", 0
@@ -92,7 +126,7 @@ def _copilot(cfg, q, timeout=90):
             new = last.replace(before, " ") if last.startswith(before[:200]) else last
             new = new.replace(ask, " ")
             parts = [p.strip() for p in re.split(r"\n+", new) if len(p.split()) > 6]
-            if not parts: raise RuntimeError("Copilot gave no readable answer")
+            if not parts: _evidence(cfg, page, "copilot"); raise RuntimeError("Copilot gave no readable answer")
             return parts[:6]
         finally:
             ctx.close()

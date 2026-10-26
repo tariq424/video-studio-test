@@ -192,8 +192,10 @@ def _rung_stock(ctx):
         media.ff("-ss", f"{min(2.0, media.dur(out) / 2):.2f}", "-i", out, "-frames:v", 1, "-vf", "scale=768:-2", mid, check=False, timeout=120)
         try:
             from .llm import parse_json
-            m = parse_json(footage._vision(dict(cfg, vet_provider="local"), mid, 'Narration: "' + vo[:400].replace('"', "'") + '"\nDoes this frame plainly show what the narration '
-                                           'is talking about (same kind of thing, nothing contradicting it)? Reply with JSON only: {"match": true|false}'))
+            m = parse_json(footage._vision(dict(cfg, vet_provider="local"), mid, 'This frame comes from a stock clip found by searching "' + str(c.get("query"))
+                                           + '". The video\'s narration here: "' + vo[:300].replace('"', "'") + '"\nDoes the frame really show '
+                                           + str(c.get("query")) + ' (the place or thing itself, not something unrelated), with nothing that contradicts the narration? '
+                                           'Reply with JSON only: {"match": true|false}'))
             if not (m or {}).get("match"): _log(log, f"    stock {c['id']} ({c.get('query')}): off-subject"); continue
         except Exception as e:
             _log(log, f"    stock {c['id']}: subject check failed ({str(e)[:60]})"); continue
