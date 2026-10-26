@@ -20,7 +20,7 @@
   - **A: zero hard-fault flags. FAIL.**
     - Hard faults: `qc_part` would cover 6 spans as "sideways": 15.5-28.5, 33.5-46.5, 51.5-70.5, 75.5-82.5, 87.5-94.5 and 123.5-178.0 s.
     - `qc_final` flags 32, 92 and 152 s as sideways. All of these frames are upright.
-    - first/confirm verdicts: 20 of 30 samples came back "sideways" on the first look; 16 of those 20 confirmed. Two single-sample hard hits were ignored (103 s sideways, 115 s finger).
+    - first/confirm verdicts: 24 of 30 samples came back "sideways" on the first look; 19 of those 24 confirmed. Two single-sample hard hits were ignored (103 s sideways, 115 s finger).
     - Soft flags: 85 s blurry, 121 s face_closeup.
   - **B: sideways 10-20 s caught. PASS.**
     - 13 s and 19 s were both sideways/sideways (first/confirm).
