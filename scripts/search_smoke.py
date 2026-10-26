@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 from studio import config, websearch  # noqa: E402
 
-Q = "attackers used AI tools to plan intrusions into municipal water treatment control systems"
+Q = "AI-assisted cyberattack on municipal water treatment plant"
 
 
 def log(m): print(m, flush=True)

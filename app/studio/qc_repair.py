@@ -147,11 +147,19 @@ def research(cfg, text, log):
     """Narration -> (visual description, image prompt). Public search results (websearch: DuckDuckGo / Bing / Copilot in turn,
     Google rarely and last), then the script model turns the snippets + narration into one concrete, photographable scene."""
     from . import websearch
-    q = " ".join(text.split()[:18])
-    snippets, src = websearch.search(cfg, q, log)
     from .llm import LLM
     c = dict(cfg)
     if c.get("script_provider") == "claude" and not c.get("anthropic_api_key"): c["script_provider"] = "deepseek" if c.get("deepseek_api_key") else "local"
+    try:   # a short, specific web query (the raw narration matches junk: "attackers" alone finds adult-video studios)
+        with LLM(c, log, lambda: False) as llm:
+            q = str(llm.chat_json("You write web search queries. Reply with JSON only.", "Narration:\n" + text[:700]
+                                  + '\n\nOne web search query (4-8 words, the specific subject, no quotes) that finds what this is about.\n{"query": "..."}',
+                                  max_tokens=100).get("query") or "").strip()
+    except Exception:
+        q = ""
+    q = q or " ".join(text.split()[:12])
+    _log(log, f"    search query: {q}")
+    snippets, src = websearch.search(cfg, q, log)
     with LLM(c, log, lambda: False) as llm:
         j = llm.chat_json("You plan one photorealistic picture for a documentary shot. Reply with JSON only.",
                           "Narration of the shot:\n" + text[:900] + "\n\nWhat a web search says about it:\n" + "\n".join("- " + s[:300] for s in snippets)

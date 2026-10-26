@@ -110,7 +110,7 @@ def _copilot(cfg, q, timeout=90):
         try:
             page.goto("https://copilot.microsoft.com/", wait_until="domcontentloaded", timeout=60000); page.wait_for_timeout(5000)
             box = None
-            for sel in ["textarea#userInput", "textarea[placeholder]", "textarea", "div[contenteditable=true]"]:
+            for sel in ["#m365-chat-editor-target-element", "[aria-label='Message Copilot']", "textarea#userInput", "textarea", "[contenteditable=true]"]:
                 loc = page.locator(sel)
                 if loc.count(): box = loc.first; break
             if box is None: _evidence(cfg, page, "copilot"); raise RuntimeError("Copilot's message box was not found (screenshot in search_fail)")
