@@ -49,6 +49,22 @@ footage of hands typing / pointing):
     an unchecked frame skips it.
   - "finger" is defined strictly in both prompts: a finger or thumb pressed against the lens, blocking the
     view. Hands visible IN the scene (typing, pointing, holding objects) are normal footage, not a fault.
+
+v6 (2026-10-26, after smoke round 4: pairwise orientation FAILED the other way - the model answered "right"
+on 22 of 29 upright A samples and 23 of 29 B samples, so every upright frame was flagged upside_down and B's
+sideways segment was mislabelled upside_down; the 90-CW pair was never even reached. A left/right question
+cannot be trusted from this model: the answer follows the side, not the picture):
+  - orientation is now SINGLE-IMAGE upright tests, with no left/right choice anywhere: the frame as-is is
+    shown alone and asked "is this picture upright?" (yes/no/unknown). Only when the as-is answer is NOT
+    yes are the rotations shown alone, one at a time (180, then 90 CCW, then 90 CW), each asked the same
+    question. A rotation fault counts ONLY on a discordant pair: as-is not-upright AND exactly one rotation
+    upright (180 -> upside_down, either 90 -> sideways). If the as-is frame already reads upright, or no
+    rotation reads upright, nothing is flagged. Every answer is recorded per sample (the "orient" field),
+    so the next failure is attributable: as-is yes on a rotated segment means a yes-bias; as-is no with all
+    rotations no means the model cannot read orientation in this format either; a rotated yes on an upright
+    frame cannot flag anything, because the as-is yes short-circuits first.
+  - everything else from v5 stands: pairwise code is gone, but the strict finger definition, the flat-black
+    pixel test, orientation running on confirmed-SOFT frames, and the per-sample orient log all stay.
 """
 import json
 import shutil
@@ -58,7 +74,7 @@ from . import media
 
 ENC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-profile:v", "high"]
 
-QCVER = 5
+QCVER = 6
 HARD = ("sideways", "upside_down", "black", "finger", "smudge")
 SOFT = ("blurry", "face_closeup", "clothing_closeup")
 
@@ -91,11 +107,12 @@ If the claimed problem is "finger": confirm ONLY when a finger or thumb is press
 camera's view. Hands visible in the scene - typing, pointing, holding objects - are NOT a finger fault.
 Reply with JSON only: {{"ok": true|false, "problem": "none|finger|smudge|sideways|upside_down|blurry|clothing_closeup|face_closeup|black"}}"""
 
-ORIENT2 = """Two versions of one picture side by side. LEFT is the picture as-is; RIGHT is the same picture
-rotated {deg}. Look at any text or captions, at faces, and at which way is up in the scene. Reply with JSON only:
-{{"upright": "left"}} if the LEFT version looks upright and readable,
-{{"upright": "right"}} if the RIGHT version looks upright and readable,
-{{"upright": "none"}} if neither version looks clearly upright, or you cannot tell."""
+ORIENT1 = """This is a single picture, shown on its own. Look at any text or captions, at faces, and at which way
+is up in the scene (sky, ground, people standing). Is this picture upright - the way it would normally be
+viewed - or is it rotated? Reply with JSON only:
+{{"upright": true}} if the picture looks upright and readable,
+{{"upright": false}} if the picture looks rotated (on its side or upside down),
+{{"upright": "unknown"}} if you cannot tell."""
 
 
 def _pixel_flat_black(img):
@@ -113,7 +130,7 @@ def _judge(cfg, img):
     Black is decided from pixels. Anything else: a flag is the problem FIELD of the first check; it stands
     only when the confirmation check names the SAME problem (the ok fields are ignored - the model pairs
     ok:true with a named problem too often to trust them). Direct sideways / upside_down verdicts are
-    recorded but never acted on: orientation is decided separately, by rotate-and-compare."""
+    recorded but never acted on: orientation is decided separately, by single-image upright tests."""
     if _pixel_flat_black(img): return {"state": "bad", "prob": "black", "raw": "black", "first": "pixel", "confirm": "pixel", "via": "pixel"}
     from . import footage
     from .llm import parse_json
@@ -130,54 +147,59 @@ def _judge(cfg, img):
     return {"state": "bad", "prob": prob, "raw": prob, "first": prob, "confirm": prob2, "via": "model"}
 
 
-def _orient_pair(cfg, im, img, tag, deg_text, rot):
-    """Build one LEFT (as-is) / RIGHT (rotated) pair image at readable size and ask which side is upright.
-    -> "left" | "right" | "none" | "error:<why>" (an unparseable reply keeps its first 60 chars as evidence)."""
+def _orient_single(cfg, im, img, tag, rot):
+    """Show ONE version of the frame on its own (as-is when rot is None, else rotated) and ask whether it
+    is upright. -> "yes" | "no" | "none" | "error:<why>" (an unparseable reply keeps its first 60 chars
+    as evidence). There is no left/right choice in this question: round 4 proved the model answers "right"
+    to a side-by-side pair almost regardless of the picture, so the pair format is retired entirely."""
     try:
-        from PIL import Image
-        H = 768
-        left = im.resize((max(1, int(im.width * H / im.height)), H))
-        r = im.transpose(rot)
-        right = r.resize((max(1, int(r.width * H / r.height)), H))
-        pair = Image.new("RGB", (left.width + right.width, H))
-        pair.paste(left, (0, 0)); pair.paste(right, (left.width, 0))
-        sp = Path(img).with_name(Path(img).stem + f"_o2_{tag}.jpg"); pair.save(sp, quality=85)
+        if rot is None: sp = Path(img)
+        else:
+            from PIL import Image
+            sp = Path(img).with_name(Path(img).stem + f"_o1_{tag}.jpg")
+            im.transpose(rot).save(sp, quality=85)
     except Exception: return "error:build"
     from . import footage
     from .llm import parse_json
-    try: raw = footage._vision(dict(cfg, vet_provider="local"), sp, ORIENT2.format(deg=deg_text))
+    try: raw = footage._vision(dict(cfg, vet_provider="local"), sp, ORIENT1)
     except Exception: return "error:vision"
     try:
         j = parse_json(raw)
-        a = str((j or {}).get("upright") or "none").strip().lower()
+        a = (j or {}).get("upright")
     except Exception: return "error:parse:" + str(raw)[:60].replace("\n", " ")
-    return a if a in ("left", "right", "none") else "error:answer:" + a[:20]
+    if a is True: return "yes"
+    if a is False: return "no"
+    if isinstance(a, str) and a.strip().lower() in ("unknown", "none", "cannot tell"): return "none"
+    return "error:answer:" + str(a)[:20]
 
 
 def _orientation(cfg, img):
-    """Orientation by pairwise rotate-and-compare -> (fault | None, log). The frame as-is is compared against
-    its 180, 90-CCW and 90-CW rotations, one pair at a time, each side at readable height - round 3's single
-    4-panel strip produced no catches and no evidence: its panels were too small to read after the vision
-    model's own downscale, and the answer was never recorded. Every pair's answer is logged here, so the next
-    miss is attributable: the model picked the as-is side, answered "none", or its reply failed to parse.
-    The 180 pair runs first and a "right" there ends the check (upside-down); a sideways frame is caught by
-    whichever 90 pair turns it upright."""
+    """Orientation by single-image upright tests -> (fault | None, log). The frame as-is is judged alone
+    first: if it reads upright, the check ends there - no rotation can flag an already-upright frame, and
+    no further vision call is spent. Only when the as-is answer is NOT yes are the rotations judged alone,
+    one at a time (180, then 90 CCW, then 90 CW): a rotation fault counts ONLY on a discordant pair, as-is
+    not-upright AND that rotation upright (180 -> upside_down, either 90 -> sideways). If no rotation reads
+    upright, nothing is flagged. Every answer is logged, so the next miss is attributable: as-is yes on a
+    rotated segment is a yes-bias; as-is no with all rotations no is a cannot-read in this format; the
+    round-4 right-side bias has no side to attach to here, by construction."""
     try:
         from PIL import Image
         im = Image.open(img).convert("RGB")
     except Exception: return None, "open-error"
     log = []
-    a = _orient_pair(cfg, im, img, "180", "180 degrees", Image.ROTATE_180); log.append(f"180:{a}")
-    if a == "right": return "upside_down", ";".join(log)
-    a = _orient_pair(cfg, im, img, "90ccw", "90 degrees counterclockwise", Image.ROTATE_90); log.append(f"90ccw:{a}")
-    if a == "right": return "sideways", ";".join(log)
-    a = _orient_pair(cfg, im, img, "90cw", "90 degrees clockwise", Image.ROTATE_270); log.append(f"90cw:{a}")
-    if a == "right": return "sideways", ";".join(log)
+    a = _orient_single(cfg, im, img, "asis", None); log.append(f"asis:{a}")
+    if a == "yes": return None, ";".join(log)
+    a = _orient_single(cfg, im, img, "180", Image.ROTATE_180); log.append(f"180:{a}")
+    if a == "yes": return "upside_down", ";".join(log)
+    a = _orient_single(cfg, im, img, "90ccw", Image.ROTATE_90); log.append(f"90ccw:{a}")
+    if a == "yes": return "sideways", ";".join(log)
+    a = _orient_single(cfg, im, img, "90cw", Image.ROTATE_270); log.append(f"90cw:{a}")
+    if a == "yes": return "sideways", ";".join(log)
     return None, ";".join(log)
 
 
 def _judge_frame(cfg, img):
-    """Full per-frame verdict: the model/pixel judge, plus rotate-and-compare orientation. Orientation runs on
+    """Full per-frame verdict: the model/pixel judge, plus single-image orientation tests. Orientation runs on
     every frame that is not already a confirmed HARD fault or unchecked - INCLUDING frames with a confirmed
     SOFT fault: round 3's B 37 s sample was an upside-down face confirmed as face_closeup (soft), and the old
     order never orientation-tested it, so the rotation fault escaped both checks."""
