@@ -8,15 +8,25 @@
   - Round 3: step 6, part 1 (apply v4, 83ee757) and part 2 (run; FAIL; fb8e8b2).
   - Since 2026-10-26 3:55 PM the loop runs through the Claude-Koda exchange doc (Google Doc 1GV6ZvXQJwyyiNfy1ZM1FT22Jo-xGKCPpW5FAgQIViE4). Tariq overrode the stop rule: no round cap; it runs until a full PASS or a genuine WALL.
   - Round 4: v5 applied (2e2cee6); run 3:59-4:12 PM; FAIL (6c25cd5).
-  - Round 5: v6 applied (MSG 003); run started 4:25 PM.
-- **Next step (exact):** round 5 run (hook `qc-smoke`, started 4:25 PM).
-  1. Collect results into `qc_smoke_results/round5/`.
-  2. Post the RESULT in the exchange doc.
-  3. Wait for MSG 004.
+  - Round 5: v6 applied (8010bd3); run 4:25-4:32 PM. Everything PASS except the upside-down segment.
+- **Next step (exact):** wait for MSG 004 (v7) in the exchange doc, then round 6.
 - **Flags, unchanged in every commit:**
   - `qc_on` = False. Code default; set nowhere in `config.py`, `settings.json` or any job cfg.
   - `interview_qc` = False. Code default; set nowhere.
   - `qc_mode`: set nowhere, so the patched code defaults to "report".
+- **Round 5 verdict (v6, single-image upright tests): FAIL on 1 criterion only.**
+  - Results: `qc_smoke_results/round5/`.
+  - **A zero hard flags: PASS.**
+    - `would_fix` is empty; `qc_final` 0/6.
+    - 115 s: sideways via orient (asis:no;180:no;90ccw:yes). It was single, ignored and not rescued.
+    - 145 s: asis:no and every rotation no, so nothing was flagged.
+  - **B sideways 10-20 s caught as sideways: PASS.** 13 s and 19 s: asis:no;180:no;90ccw:yes. `qc_part` span 9.5-22.5 s, sideways.
+  - **B upside down 30-40 s caught as upside_down: FAIL.** 31 s and 37 s: asis:yes, a yes-bias on the upside-down frames.
+  - **B black: PASS.** 55 s via pixel, rescued; span 51.5-58.5 s.
+  - **B nothing else hard: PASS.** `would_fix` holds only the sideways and black spans.
+  - **B blur soft only: PASS.** 73 and 79 s are blurry/blurry soft. Orient answered no to as-is and to every rotation, so it flagged nothing.
+  - **Complete: PASS.** 0/30 and 0/6 unchecked for both specimens.
+
 - **Round 5 setup (MSG 003):**
   - qc_v6.py from Drive (id 1sXfmWFBuszwf0RvSxjt0GSWXbmlLvyhG): 24,661 bytes, SHA-256 `37cb34c2...72d4`, `QCVER = 6`.
   - v5 was backed up to `F:\code\patches\qc_v5.py`. v6 applied; hash matches; compiles.

@@ -1,0 +1,8 @@
+== patches specimen_A.mp4
+    QC specimen_A: 115.0s sideways ignored (single sample, not persistent)
+  final QC: 6 frames checked, 0 flagged
+== patches specimen_B.mp4
+    QC specimen_B: REPORT ONLY 9.5-22.5s sideways - would be covered by a still in fix mode
+    QC specimen_B: REPORT ONLY 51.5-58.5s black - would be covered by a still in fix mode
+  final QC: 6 frames checked, 0 flagged
+ALL DONE
