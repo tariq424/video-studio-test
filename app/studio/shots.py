@@ -46,8 +46,13 @@ def is_guest(f):
     return not is_self(f) and f[2] * f[3] >= GUEST_MIN_AREA
 
 
+BACK_CAMERA = {"on": False}   # owner, 2026-10-27: a back-camera interview (Nea Dixon) - the holder is behind the lens, so every
+                              # face on screen is the guest; a big close face is the guest's close-up, never the holder
+
+
 def split(faces):
     """-> (guest faces, holder faces). A close two-shot selfie has two big faces: the biggest is the holder, the other the guest."""
+    if BACK_CAMERA["on"]: return [f for f in faces if f[2] * f[3] >= GUEST_MIN_AREA], []
     selfs = [f for f in faces if is_self(f)]
     guests = [f for f in faces if is_guest(f)]
     if not guests and len(selfs) >= 2:

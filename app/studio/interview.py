@@ -1189,6 +1189,8 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
     pl = plan(cfg, segs, context, broll, work, log, notes=notes)
     bdir = src.parent
     from . import shots
+    shots.BACK_CAMERA["on"] = bool(cfg.get("interview_back_camera", False))   # back camera: big close faces are the guest, not the holder
+    if shots.BACK_CAMERA["on"]: _log(log, "Interview: back-camera footage - every face on screen is the guest")
     an = shots.analyze(src, root, flip, log)
     if cfg.get("interview_vision_check", True): an = shots.vision_check(an, root, cfg, log)
     # more clips of the same conversation (owner, 2026-10-24: "use all the clips that can be used"): each transcribed and
