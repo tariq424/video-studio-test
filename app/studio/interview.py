@@ -1013,7 +1013,7 @@ def clip_part(clip, wav, out, kind, root, log=print, start=0.0, flip=False):
     return out
 
 
-from .qc import qc_part, qc_final, _qc_frame  # noqa: E402,F401  (the check lives in qc.py, shared with every video)
+from .qc import qc_part, qc_final  # noqa: E402,F401  (the check lives in qc.py, shared with every video; _qc_frame left qc.py in v2+)
 
 
 def card_part(text_bg, d, out, kind, cfg=None):
