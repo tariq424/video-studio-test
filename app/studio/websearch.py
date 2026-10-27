@@ -145,7 +145,7 @@ def _wikipedia(cfg, q):
     r = requests.get("https://en.wikipedia.org/w/api.php", params={"action": "query", "prop": "extracts", "exintro": 1, "explaintext": 1,
                      "exsentences": 4, "titles": "|".join(titles), "format": "json"}, headers=h, timeout=20)
     pages = (r.json().get("query", {}).get("pages", {}) or {}).values()
-    return [" ".join((p.get("title", "") + ": " + p.get("extract", "")).split()) for p in pages if p.get("extract")][:4]
+    return relevant([" ".join((p.get("title", "") + ": " + p.get("extract", "")).split()) for p in pages if p.get("extract")], q)[:4]
 
 
 def _copilot(cfg, q, timeout=90):
