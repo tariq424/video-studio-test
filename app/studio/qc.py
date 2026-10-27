@@ -104,6 +104,31 @@ enabling QC: it must not fail videos over orientation.
   - nothing else changes: prompts, two-agree, the pixel black test, the finger definition, the orientation
     machinery and its logging are v7's, untouched. This file does not set qc_on / interview_qc - enabling
     QC at all stays Tariq's separate decision, made in config, not here.
+
+v9 (2026-10-27, at Claude's request after the MSG 011 standalone repair was NOT run: every marked HARD
+span on the SpaceX / Moonshots EP #305 explainer proved to be a false positive):
+  - the explainer's 7 model-"black" spans are its own designed cards on a dark navy background (the title
+    card and the big-number stat cards: "15 GW", "10x", "70%", "$2T", "318K", "2 tons"). Their pixel stats
+    at 768 px: mean luminance 21-29, stddev 30-46 - dark, but nowhere near flat black, and the pixel test
+    correctly says NOT black. Under v8 a model "black" verdict still counted as HARD once both looks
+    agreed, so the two-agree rule did not protect dark designed cards. v9: BLACK IS DECIDED BY THE PIXEL
+    TEST ONLY. A model "black" verdict (even two-agree) on a frame that fails the flat-black pixel test
+    is vetoed - the sample is recorded ok with via "pixel-veto", and the model's claim stays visible in
+    the sample's first / confirm fields.
+  - the explainer's 1 model-"finger" span (495.5-502.5 s) is a whiteboard shot of a hand placing sticky
+    notes - a hand IN the scene, confirmed "finger" by both looks despite the strict prompt. v9 applies
+    the same idea with the matching measurement: a two-agree "finger" verdict is vetoed (recorded ok,
+    via "detail-veto") when the frame carries real scene texture - luminance stddev at least
+    FINGER_DETAIL_MIN (30) at the sample's own scale. A finger pressed on the lens is one blurry
+    skin-coloured shape with nothing recognisable behind it - near-textureless by the fault's own
+    definition - so a detailed frame cannot be that fault. CALIBRATION NOTE, stated plainly: the 30
+    threshold is set from Claude's measured false positives (the dark cards' stddev ran 30-46); no
+    measured true-finger sample exists yet, so if a future round produces one, re-check this number
+    against it.
+  - nothing else changes: the pixel test itself, the prompts, two-agree, persistence and the 4 s probe
+    cap, the orientation machinery (report-only) and its logging are v8's, untouched. HARD stays black,
+    finger, smudge. This file does not set qc_on / qc_mode - Claude returned qc_mode to "report" as a
+    safety action on 2026-10-27, and any return to "fix" stays Tariq's separate decision, in config.
 """
 import json
 import shutil
@@ -113,9 +138,11 @@ from . import media
 
 ENC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-profile:v", "high"]
 
-QCVER = 8
+QCVER = 9
 HARD = ("black", "finger", "smudge")
 SOFT = ("blurry", "face_closeup", "clothing_closeup", "sideways", "upside_down")
+FINGER_DETAIL_MIN = 30.0   # v9: a two-agree "finger" verdict on a frame whose luminance stddev reaches this
+                           # is a hand in a textured scene, not a finger on the lens - see the v9 header note.
 
 
 def _log(log, m):
@@ -173,12 +200,27 @@ def _pixel_flat_black(img):
     except Exception: return False
 
 
+def _scene_detail(img):
+    """Luminance stddev of the frame at its own scale - a texture measurement, companion to the flat-black
+    test (v9). A finger pressed on the lens is a single blurry shape with nothing recognisable behind it,
+    so its frame has little texture; a real scene (a whiteboard, a desk, a street) has plenty. Returns 0.0
+    when the frame cannot be read, which never vetoes anything."""
+    try:
+        from PIL import Image, ImageStat
+        return ImageStat.Stat(Image.open(img).convert("L")).stddev[0]
+    except Exception: return 0.0
+
+
 def _judge(cfg, img):
     """-> {"state": "ok"|"bad"|"unchecked", "prob", "raw", "first", "confirm", "via"}.
-    Black is decided from pixels. Anything else: a flag is the problem FIELD of the first check; it stands
-    only when the confirmation check names the SAME problem (the ok fields are ignored - the model pairs
-    ok:true with a named problem too often to trust them). Direct sideways / upside_down verdicts are
-    recorded but never acted on: orientation is decided separately, by single-image upright tests."""
+    Black is decided from pixels ONLY (v9): a model "black" verdict - even two-agree - on a frame that
+    fails the flat-black pixel test is vetoed to ok (via "pixel-veto"); the pixel test is the only road
+    to a black verdict. A two-agree "finger" verdict is likewise vetoed (via "detail-veto") when the
+    frame carries real scene texture (see _scene_detail). Anything else: a flag is the problem FIELD of
+    the first check; it stands only when the confirmation check names the SAME problem (the ok fields are
+    ignored - the model pairs ok:true with a named problem too often to trust them). Direct sideways /
+    upside_down verdicts are recorded but never acted on: orientation is decided separately, by
+    single-image upright tests."""
     if _pixel_flat_black(img): return {"state": "bad", "prob": "black", "raw": "black", "first": "pixel", "confirm": "pixel", "via": "pixel"}
     from . import footage
     from .llm import parse_json
@@ -192,6 +234,12 @@ def _judge(cfg, img):
     if prob2 != prob: return {"state": "ok", "prob": "none", "raw": prob, "first": prob, "confirm": prob2, "via": "model"}
     if prob in ("sideways", "upside_down"):   # both checks agree, and it still doesn't count: see _orientation
         return {"state": "ok", "prob": "none", "raw": prob, "first": prob, "confirm": prob2, "via": "model"}
+    if prob == "black":   # v9: reachable only when the flat-black pixel test already failed (it runs first,
+        # above) - a model "black" here is an opinion about a dark frame, and opinions no longer count.
+        return {"state": "ok", "prob": "none", "raw": prob, "first": prob, "confirm": prob2, "via": "pixel-veto"}
+    if prob == "finger" and _scene_detail(img) >= FINGER_DETAIL_MIN:   # v9: a frame with real scene texture
+        # is a scene with a hand in it, not a finger on the lens - the pixel evidence vetoes the two-agree.
+        return {"state": "ok", "prob": "none", "raw": prob, "first": prob, "confirm": prob2, "via": "detail-veto"}
     return {"state": "bad", "prob": prob, "raw": prob, "first": prob, "confirm": prob2, "via": "model"}
 
 
