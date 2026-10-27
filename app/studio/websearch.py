@@ -10,8 +10,8 @@ from pathlib import Path
 
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
       "Accept-Language": "en-US,en;q=0.9"}
-ROTATION = ("duckduckgo", "bing", "copilot")
-REST = {"duckduckgo": 1800, "bing": 1800, "copilot": 3600, "google": 6 * 3600}
+ROTATION = ("wikipedia", "duckduckgo", "bing", "copilot")
+REST = {"wikipedia": 600, "duckduckgo": 1800, "bing": 1800, "copilot": 3600, "google": 6 * 3600}
 GOOGLE_MIN_GAP = 3600
 
 
@@ -124,6 +124,30 @@ def _clear_prompts(page, log=None, rounds=4):
         if not clicked: return
 
 
+def _human_check(cfg, page):
+    """A "verify you are human" check is never clicked or solved (bot-detection is not bypassed): stop and rest the route."""
+    try: body = page.inner_text("body")
+    except Exception: return
+    if re.search(r"verify you are human|verification required|are you a robot|captcha", body, re.I):
+        _evidence(cfg, page, "copilot_verify")
+        raise RuntimeError("human verification required")
+
+
+def _wikipedia(cfg, q):
+    """Wikipedia's public API (no key, no bot check): the lead text of the best-matching articles."""
+    import requests
+    h = {"User-Agent": "VideoStudio/1.0 (personal documentary research tool)"}
+    r = requests.get("https://en.wikipedia.org/w/api.php", params={"action": "query", "list": "search", "srsearch": q, "srlimit": 4,
+                     "format": "json"}, headers=h, timeout=20)
+    if r.status_code != 200: raise RuntimeError(f"HTTP {r.status_code}")
+    titles = [x["title"] for x in r.json().get("query", {}).get("search", [])]
+    if not titles: return []
+    r = requests.get("https://en.wikipedia.org/w/api.php", params={"action": "query", "prop": "extracts", "exintro": 1, "explaintext": 1,
+                     "exsentences": 4, "titles": "|".join(titles), "format": "json"}, headers=h, timeout=20)
+    pages = (r.json().get("query", {}).get("pages", {}) or {}).values()
+    return [" ".join((p.get("title", "") + ": " + p.get("extract", "")).split()) for p in pages if p.get("extract")][:4]
+
+
 def _copilot(cfg, q, timeout=90):
     """Ask Copilot in the signed-in Microsoft 365 profile for a short factual description; its answer is the snippet."""
     from playwright.sync_api import sync_playwright
@@ -135,6 +159,7 @@ def _copilot(cfg, q, timeout=90):
         try:
             page.goto("https://copilot.microsoft.com/", wait_until="domcontentloaded", timeout=60000); page.wait_for_timeout(5000)
             _clear_prompts(page)
+            _human_check(cfg, page)
             box = None
             for sel in ["#m365-chat-editor-target-element", "[aria-label='Message Copilot']", "textarea#userInput", "textarea", "[contenteditable=true]"]:
                 loc = page.locator(sel)
@@ -149,7 +174,7 @@ def _copilot(cfg, q, timeout=90):
                 if body == last: stable += 1
                 else: stable, last = 0, body
                 if stable >= 2 and len(body) > len(before) + 80: break
-                if stable == 1: _clear_prompts(page, rounds=1)
+                if stable == 1: _clear_prompts(page, rounds=1); _human_check(cfg, page)
             k = last.rfind(ask[:60])   # the answer is the text after our own question (the sidebar comes before it)
             new = last[k + len(ask):] if k >= 0 else ""
             parts = [p.strip() for p in re.split(r"\n+", new) if len(p.split()) > 6 and not re.search(r"Press Tab|Message Copilot|Copilot may make mistakes", p)]
@@ -163,7 +188,7 @@ def _copilot(cfg, q, timeout=90):
             ctx.close()
 
 
-ROUTES = {"duckduckgo": _ddg, "bing": _bing, "copilot": _copilot, "google": _google}
+ROUTES = {"wikipedia": _wikipedia, "duckduckgo": _ddg, "bing": _bing, "copilot": _copilot, "google": _google}
 
 
 def search(cfg, query, log=None):
@@ -188,7 +213,7 @@ def search(cfg, query, log=None):
             rec["empty"] = rec.get("empty", 0) + 1
             _log(log, f"    search {name}: no results; next route")
         except Exception as e:
-            rest = 6 * 3600 if "daily limit" in str(e) else REST[name]
+            rest = 24 * 3600 if "human verification" in str(e) else 6 * 3600 if "daily limit" in str(e) else REST[name]
             rec.update(fail=rec.get("fail", 0) + 1, rest_until=now + rest, why=str(e)[:160])
             _log(log, f"    search {name}: {str(e)[:100]}; rested {rest // 60} min; next route")
     _save(cfg, st)
