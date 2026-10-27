@@ -357,6 +357,46 @@ def _is_own(bg):
     """A timeline background that is your own footage (clips.py): media/stock/own<N>_<beat>.mp4, own/own<N>.mp4, broll/own/..."""
     return bool(re.search(r"(^|/)own\d+(_|\.)|/own/", str(bg.get("src") or "")))
 
+def _vis_source(v):
+    """Editor-only note: where a long/explainer slot's picture came from (type, prompt, file, credit)."""
+    if not v:
+        return ""
+    t = str(v.get("type") or v.get("kind") or "")
+    lab = {"photo": "Photo", "image": "Image", "video": "Video", "chart": "Chart", "graphic": "Graphic",
+           "generated": "AI image", "still": "AI image", "layers": "Layered image"}.get(t, t or "Picture")
+    bits = [lab]
+    if v.get("prompt"):
+        bits.append("prompt: " + str(v["prompt"])[:120])
+    src = v.get("src") or v.get("file") or v.get("img") or ""
+    if src:
+        bits.append(Path(str(src)).name)
+    if v.get("credit"):
+        bits.append(str(v["credit"]))
+    return " · ".join(bits)
+
+
+def _bg_source(bgs, sec):
+    """Editor-only note for a Short beat: its timeline backgrounds (type, tag/credit, file), plus the
+    plan section's AI-image prompt when the picture was generated."""
+    notes = []
+    for bg in bgs or []:
+        it = _bg_item(bg)
+        if not it:
+            continue
+        lab = {"video": "Video", "image": "Image", "layers": "Layered image", "graphic": "Graphic"}.get(it["type"], it["type"])
+        det = it.get("tag") or it.get("short_credit") or ""
+        src = it.get("src") or (it.get("layers") or [""])[0]
+        n = lab + (f" · {det}" if det else "") + (f" · {Path(src).name}" if src else "")
+        if n not in notes:
+            notes.append(n)
+    for v in (sec or {}).get("visuals") or []:
+        if v.get("prompt"):
+            n = "AI image · prompt: " + str(v["prompt"])[:120]
+            if n not in notes:
+                notes.append(n)
+    return "; ".join(notes)
+
+
 def beats(job):
     """The timeline for the job page: {kind, beats: [{id, start, dur, label, editable}]}."""
     if _iv(job): return _ie().beats(job)
@@ -366,8 +406,10 @@ def beats(job):
         from .pipeline import Job
         plan = Job(job).short_plan() or {"sections": []}
         vo = {s["id"]: s["vo"] for s in plan["sections"]}; cta = {s["id"] for s in plan["sections"] if s.get("cta")}
+        secs = {s["id"]: s for s in plan["sections"]}
         return {"kind": "short", "beats": [{"id": b["id"], "start": b["start"], "dur": b["dur"], "label": f"Beat {i + 1}", "vo": vo.get(b["id"], ""),
-                                             "editable": b["id"] not in cta, "own": any(_is_own(g) for g in b["bgs"])} for i, b in enumerate(tz["beats"])]}
+                                             "editable": b["id"] not in cta, "own": any(_is_own(g) for g in b["bgs"]),
+                                             "source": _bg_source(b["bgs"], secs.get(b["id"]))} for i, b in enumerate(tz["beats"])]}
     if k in ("long", "explainer"):
         tz = _tl_json(job, "explainer") if k == "explainer" else None
         def own(b):
@@ -376,7 +418,7 @@ def beats(job):
             tb = next((x for x in tz["beats"] if x["id"] == b.get("beat")), None)
             idx = next((ix for sl, ix in _slots(tb) if sl == b["vi"]), []) if tb else []
             return any(_is_own(tb["bgs"][i]) for i in idx)
-        return {"kind": k, "beats": [dict({k2: b[k2] for k2 in ("id", "start", "dur", "label", "vo", "editable")}, own=own(b)) for b in long_layout(job)]}
+        return {"kind": k, "beats": [dict({k2: b[k2] for k2 in ("id", "start", "dur", "label", "vo", "editable")}, own=own(b), source=_vis_source(b.get("visual"))) for b in long_layout(job)]}
     return {"kind": None, "beats": []}
 
 # ---------------------------------------------------------------- workspaces (where a beat's candidates live)

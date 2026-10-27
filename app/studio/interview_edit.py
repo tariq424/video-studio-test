@@ -80,12 +80,46 @@ def _vo(p):
     return m.get("text") or " ".join(w[0] for w in (p.get("words") or []))
 
 
+def _pic_source(p):
+    """Editor-only note (owner, 2026-10-27): where this piece's picture came from - the ladder rung that
+    supplied it (read from the sibling <k>_insert.json the build wrote), a photo credit, or the footage
+    file. Shown in the editor only; never rendered into the video."""
+    m = p.get("m") or {}
+    t = m.get("type", "")
+    f = Path(p.get("file") or "")
+    try:
+        if t == "bite":
+            return "Your footage · " + Path(m.get("src") or f).name
+        if t == "narr":
+            if m.get("src"):
+                return "Your footage · " + Path(m["src"]).name
+            return "Picture · " + f.name if f.name else ""
+        if t == "fact":
+            rung = credit = ""
+            try:
+                ins = json.loads(f.with_suffix(".json").read_text(encoding="utf-8"))
+                rung, credit = str(ins.get("rung") or ""), str(ins.get("credit") or "")
+            except Exception:
+                pass
+            credit = credit or str(p.get("credit") or "")
+            if rung:
+                return f"Ladder · {rung} · {f.name}"
+            if credit:
+                return f"Photo · {credit} · {f.name}"
+            return f"Insert · {f.name} (over blurred footage)"
+        if t == "card":
+            return "Card · " + f.name
+    except Exception:
+        pass
+    return f.name
+
+
 def beats(job):
     k = _k(job); m = _man(job, k); out, t = [], 0.0
     for i, p in enumerate(m["parts"]):
         d = float(p.get("dur") or media.dur(p["file"]))
         out.append({"id": f"p{i:02}", "start": round(t, 3), "dur": round(d, 3), "label": _label(p, i), "vo": _vo(p)[:600],
-                    "editable": (p.get("m") or {}).get("type") in ("bite", "fact", "narr"), "own": True})
+                    "editable": (p.get("m") or {}).get("type") in ("bite", "fact", "narr"), "own": True, "source": _pic_source(p)})
         t += d
     return {"kind": "short" if k == "short" else "long", "beats": out}
 
