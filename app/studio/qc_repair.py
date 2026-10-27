@@ -261,6 +261,9 @@ def _rung_marble(ctx):
 
 def _rung_ownframe(ctx):
     ts = [t for t in _clean_times(ctx["mp4"]) if not (ctx["a"] - 0.5 <= t <= ctx["b"] + 0.5)]
+    if not ts and Path(ctx["mp4"]).exists():   # no QC report for this source (a raw clip): evenly spaced frames, each frame-checked
+        try: dd = media.dur(ctx["mp4"]); ts = [dd * (i + 1) / 6 for i in range(5)]
+        except Exception: ts = []
     if not ts: return None, None, "no clean frame recorded in this video"
     ts.sort(key=lambda t: min(abs(t - ctx["a"]), abs(t - ctx["b"])))
     for t in ts[:3]:
@@ -371,3 +374,34 @@ def repair(mp4, cfg, job_dir, log=print, stop=lambda: False, vert=False, narrati
     try: rpath.write_text(json.dumps(rep, indent=1), encoding="utf-8")
     except OSError: pass
     return rep
+
+
+def ladder_clip(cfg, text, visual, secs, kind, work, job_dir, src=None, log=print,
+                rungs=("stock", "ai_image", "chatgpt_chain", "marble", "local_i2v_own_frame", "static_image")):
+    """The repair ladder for a picture that isn't replacing a fault (owner, 2026-10-27: an interview fact's outside media goes
+    through the rungs as a QC proof of concept). -> (clip, rung) or (None, ""). Each rung once; every candidate frame-checked;
+    attempts logged to <work>/ladder.json. The card rung is left out: the interview has its own fallback under a fact."""
+    work = Path(work); work.mkdir(parents=True, exist_ok=True)
+    W, H = (1080, 1920) if kind == "short" else (1920, 1080)
+    vo = (visual + ". " if visual else "") + text
+    ctx = {"cfg": cfg, "log": log, "mp4": Path(src) if src else work / "none.mp4", "job": Path(job_dir), "vert": kind == "short",
+           "W": W, "H": H, "a": -1e9, "b": -1e9, "need": float(secs), "key": f"fact_{work.name}_{kind}", "work": work, "images": [], "vo": vo}
+    rec = {"text": text, "visual": visual, "secs": round(secs, 2), "attempts": [], "fixed_by": None}
+    try:
+        for name, fn in [r for r in RUNGS if r[0] in rungs]:
+            t0 = time.time()
+            try: clip, img, why = fn(ctx)
+            except Exception as e:
+                if str(e) == "cancelled" or type(e).__name__ == "Paused": raise
+                clip, img, why = None, None, f"error: {type(e).__name__}: {str(e)[:160]}"
+            rec["attempts"].append({"rung": name, "ok": bool(clip), "note": why, "secs": round(time.time() - t0, 1)})
+            _log(log, f"      ladder {name}: {'OK - ' if clip else 'no - '}{why}")
+            if clip:
+                rec["fixed_by"] = name
+                out = fit(clip, secs, W, H, 30.0, work / "fit.mp4")
+                return out, f"{name}: {why}"
+        return None, ""
+    finally:
+        if ctx.get("research"): rec["research"] = ctx["research"]
+        try: (work / "ladder.json").write_text(json.dumps(rec, indent=1), encoding="utf-8")
+        except OSError: pass

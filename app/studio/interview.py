@@ -1337,6 +1337,21 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                         scene_part(sources[si][0], sources[si][1], sources[si][2], st, wav, f, kind, log)
                         _log(log, f"    fact over the scene: clip {si} at {st:.0f}s")
                     (kd / f"{k:02}_insert.json").write_text(json.dumps({"credit": ""}), encoding="utf-8")
+                if not media.ok(f, 0.5) and cfg.get("interview_fact_ladder", False):   # owner, 2026-10-27: outside media through the QC repair ladder
+                    try:
+                        from . import qc_repair
+                        d = media.dur(wav) + 0.35
+                        clip, rung = qc_repair.ladder_clip(cfg, it["insert"], str(it.get("visual") or ""), d, kind, kd / "ladder" / f"{k:02}", root,
+                                                           src=sources[0][0], log=log)
+                        if clip:
+                            media.ff("-i", clip, "-i", wav, "-t", f"{d:.2f}", "-map", "0:v:0", "-map", "1:a:0",
+                                     "-vf", f"fade=t=in:st=0:d=0.3,fade=t=out:st={d - 0.3:.2f}:d=0.3", "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,apad",
+                                     *ENC, "-shortest", f, timeout=900)
+                            credit = ""; _log(log, f"    fact picture from the repair ladder: {rung}")
+                            (kd / f"{k:02}_insert.json").write_text(json.dumps({"credit": "", "rung": rung}), encoding="utf-8")
+                    except Exception as e:
+                        if str(e) == "cancelled": raise
+                        _log(log, f"    fact ladder skipped ({type(e).__name__}: {str(e)[:150]}); the usual photo / stock path")
                 if not media.ok(f, 0.5):
                     img, credit = commons_photo(str(it.get("visual") or it["insert"])[:80], kd / f"{k:02}_photo.jpg", log, cfg=cfg, line=it["insert"])
                     st_ = None if img else ladder._stock(str(it.get("visual") or "")[:80], it["insert"]) if it.get("visual") else None
@@ -1371,7 +1386,7 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                 _log(log, f"  {kind} {k:02}: context \"{it['insert'][:60]}\"" + (f" [{credit}]" if credit else " (over blurred footage)"))
         ec = kd / "end.mp4"   # end card: thanks + subscribe, music carries it out
         if not media.ok(ec, 0.5): card_part(card_bg, 6.0 if kind == "documentary" else 4.0, ec, kind)
-        parts.append({"file": ec, "words": [], "titles": [("Thank you, Mr. Clinton", "Title", -90), (str(cfg.get("interview_thanks_sub") or "and the Islamic Center of Bermuda"), "Sub", 20),
+        parts.append({"file": ec, "words": [], "titles": [(str(cfg.get("interview_thanks") or "Thank you, Mr. Clinton"), "Title", -90), (str(cfg.get("interview_thanks_sub") or "and the Islamic Center of Bermuda"), "Sub", 20),
                                                           ("Subscribe for more journeys", "Sub", 120)], "m": {"type": "card"}})
         man = {"kind": kind, "out": str(work / f"{name}_{kind}.mp4"), "title": vtitle, "gps": gps_of(src), "parts": parts,
                "sources": [[str(p_), fl_, str(root if i_ == 0 else root / "extra" / Path(p_).stem.rstrip("."))] for i_, (p_, fl_, _a) in enumerate(sources)],
