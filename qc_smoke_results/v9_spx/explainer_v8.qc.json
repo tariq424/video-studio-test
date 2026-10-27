@@ -1,0 +1,2841 @@
+{
+ "qcver": 8,
+ "mode": "report",
+ "size": 1381913596,
+ "checked": 254,
+ "unchecked": 0,
+ "status": "complete",
+ "fixed": [],
+ "would_fix": [
+  [
+   0.0,
+   16.5,
+   [
+    "black"
+   ]
+  ],
+  [
+   201.5,
+   208.5,
+   [
+    "black"
+   ]
+  ],
+  [
+   243.5,
+   250.5,
+   [
+    "black"
+   ]
+  ],
+  [
+   495.5,
+   502.5,
+   [
+    "finger"
+   ]
+  ],
+  [
+   627.5,
+   640.5,
+   [
+    "black"
+   ]
+  ],
+  [
+   801.5,
+   814.5,
+   [
+    "black"
+   ]
+  ],
+  [
+   1005.5,
+   1018.5,
+   [
+    "black"
+   ]
+  ],
+  [
+   1161.5,
+   1168.5,
+   [
+    "black"
+   ]
+  ]
+ ],
+ "soft": [
+  [
+   31.0,
+   "blurry"
+  ],
+  [
+   37.0,
+   "blurry"
+  ],
+  [
+   43.0,
+   "blurry"
+  ],
+  [
+   55.0,
+   "blurry"
+  ],
+  [
+   79.0,
+   "blurry"
+  ],
+  [
+   85.0,
+   "blurry"
+  ],
+  [
+   199.0,
+   "blurry"
+  ],
+  [
+   229.0,
+   "blurry"
+  ],
+  [
+   235.0,
+   "blurry"
+  ],
+  [
+   259.0,
+   "blurry"
+  ],
+  [
+   277.0,
+   "blurry"
+  ],
+  [
+   283.0,
+   "blurry"
+  ],
+  [
+   307.0,
+   "blurry"
+  ],
+  [
+   313.0,
+   "blurry"
+  ],
+  [
+   319.0,
+   "blurry"
+  ],
+  [
+   343.0,
+   "blurry"
+  ],
+  [
+   349.0,
+   "blurry"
+  ],
+  [
+   385.0,
+   "blurry"
+  ],
+  [
+   415.0,
+   "blurry"
+  ],
+  [
+   439.0,
+   "blurry"
+  ],
+  [
+   445.0,
+   "blurry"
+  ],
+  [
+   469.0,
+   "blurry"
+  ],
+  [
+   475.0,
+   "face_closeup"
+  ],
+  [
+   547.0,
+   "blurry"
+  ],
+  [
+   595.0,
+   "face_closeup"
+  ],
+  [
+   643.0,
+   "blurry"
+  ],
+  [
+   679.0,
+   "upside_down"
+  ],
+  [
+   685.0,
+   "upside_down"
+  ],
+  [
+   697.0,
+   "blurry"
+  ],
+  [
+   799.0,
+   "face_closeup"
+  ],
+  [
+   841.0,
+   "blurry"
+  ],
+  [
+   847.0,
+   "blurry"
+  ],
+  [
+   853.0,
+   "blurry"
+  ],
+  [
+   961.0,
+   "blurry"
+  ],
+  [
+   979.0,
+   "blurry"
+  ],
+  [
+   997.0,
+   "blurry"
+  ],
+  [
+   1135.0,
+   "blurry"
+  ],
+  [
+   1177.0,
+   "blurry"
+  ],
+  [
+   1189.0,
+   "blurry"
+  ],
+  [
+   1195.0,
+   "blurry"
+  ],
+  [
+   1207.0,
+   "blurry"
+  ],
+  [
+   1219.0,
+   "blurry"
+  ],
+  [
+   1231.0,
+   "blurry"
+  ],
+  [
+   1237.0,
+   "blurry"
+  ],
+  [
+   1243.0,
+   "blurry"
+  ],
+  [
+   1249.0,
+   "blurry"
+  ],
+  [
+   1261.0,
+   "blurry"
+  ],
+  [
+   1297.0,
+   "blurry"
+  ],
+  [
+   1315.0,
+   "blurry"
+  ],
+  [
+   1321.0,
+   "blurry"
+  ],
+  [
+   1339.0,
+   "blurry"
+  ],
+  [
+   1441.0,
+   "blurry"
+  ],
+  [
+   1447.0,
+   "blurry"
+  ],
+  [
+   1507.0,
+   "blurry"
+  ],
+  [
+   1513.0,
+   "blurry"
+  ]
+ ],
+ "ignored_single": [
+  [
+   109.0,
+   "black"
+  ],
+  [
+   133.0,
+   "black"
+  ]
+ ],
+ "samples": [
+  {
+   "t": 1.0,
+   "state": "bad",
+   "prob": "black",
+   "first": "black",
+   "confirm": "black",
+   "via": "model",
+   "orient": "",
+   "rescued": false
+  },
+  {
+   "t": 7.0,
+   "state": "bad",
+   "prob": "black",
+   "first": "black",
+   "confirm": "black",
+   "via": "model",
+   "orient": "",
+   "rescued": false
+  },
+  {
+   "t": 13.0,
+   "state": "bad",
+   "prob": "black",
+   "first": "black",
+   "confirm": "black",
+   "via": "model",
+   "orient": "",
+   "rescued": false
+  },
+  {
+   "t": 19.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"with rockets now only third in\")",
+   "rescued": false
+  },
+  {
+   "t": 25.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"signals a new space raceone wh\")",
+   "rescued": false
+  },
+  {
+   "t": 31.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"830% Reported growth in SpaceX\")",
+   "rescued": false
+  },
+  {
+   "t": 37.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"830% Reported growth in SpaceX\")",
+   "rescued": false
+  },
+  {
+   "t": 43.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"830% Reported growth in SpaceX\")",
+   "rescued": false
+  },
+  {
+   "t": 49.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"turns mercury into gold.\")",
+   "rescued": false
+  },
+  {
+   "t": 55.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"be explained by a confident AI\")",
+   "rescued": false
+  },
+  {
+   "t": 61.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:none",
+   "rescued": false
+  },
+  {
+   "t": 67.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"a typo: SpaceX has an AI busin\")",
+   "rescued": false
+  },
+  {
+   "t": 73.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"rocket company, and that rocke\")",
+   "rescued": false
+  },
+  {
+   "t": 79.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"830% SpaceX AI business growth\")",
+   "rescued": false
+  },
+  {
+   "t": 85.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"830% SpaceX AI business growth\")",
+   "rescued": false
+  },
+  {
+   "t": 91.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Which tells you the flashy roc\")",
+   "rescued": false
+  },
+  {
+   "t": 97.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"may be the smallest part of th\")",
+   "rescued": false
+  },
+  {
+   "t": 103.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"10-20 GW\nPlanned AI compute po\")",
+   "rescued": false
+  },
+  {
+   "t": 109.0,
+   "state": "bad",
+   "prob": "black",
+   "first": "black",
+   "confirm": "black",
+   "via": "model",
+   "orient": "",
+   "rescued": false
+  },
+  {
+   "t": 115.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"10-20 GW\nPlanned AI compute po\")",
+   "rescued": false
+  },
+  {
+   "t": 121.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"so that range is a massive amo\")",
+   "rescued": false
+  },
+  {
+   "t": 127.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"with four hundred forty thousa\")",
+   "rescued": false
+  },
+  {
+   "t": 133.0,
+   "state": "bad",
+   "prob": "black",
+   "first": "black",
+   "confirm": "black",
+   "via": "model",
+   "orient": "",
+   "rescued": false
+  },
+  {
+   "t": 139.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "finger",
+   "confirm": "none",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"440,000\nChips in the Vera Rubi\")",
+   "rescued": false
+  },
+  {
+   "t": 145.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"like a million students studyi\")",
+   "rescued": false
+  },
+  {
+   "t": 151.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"for investors, because it is n\")",
+   "rescued": false
+  },
+  {
+   "t": 157.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"What is the real bottleneck? M\")",
+   "rescued": false
+  },
+  {
+   "t": 163.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"What is the real bottleneck? M\")",
+   "rescued": false
+  },
+  {
+   "t": 169.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"What is the real bottleneck? M\")",
+   "rescued": false
+  },
+  {
+   "t": 175.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"but you cannot plug them in if\")",
+   "rescued": false
+  },
+  {
+   "t": 181.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"remove the heat.\")",
+   "rescued": false
+  },
+  {
+   "t": 187.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Our take: the real scarcity is\")",
+   "rescued": false
+  },
+  {
+   "t": 193.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"He argues chips are still the \")",
+   "rescued": false
+  },
+  {
+   "t": 199.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"15 GW\nIdle chips lacking liqui\")",
+   "rescued": false
+  },
+  {
+   "t": 205.0,
+   "state": "bad",
+   "prob": "black",
+   "first": "black",
+   "confirm": "black",
+   "via": "model",
+   "orient": "",
+   "rescued": true
+  },
+  {
+   "t": 211.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"the engine instead of just a f\")",
+   "rescued": false
+  },
+  {
+   "t": 217.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"those chips cannot run.\")",
+   "rescued": false
+  },
+  {
+   "t": 223.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"which means the parts needed t\")",
+   "rescued": false
+  },
+  {
+   "t": 229.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"It is the difference between s\")",
+   "rescued": false
+  },
+  {
+   "t": 235.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"data center on earth.\")",
+   "rescued": false
+  },
+  {
+   "t": 241.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"10x\nRise in memory prices cite\")",
+   "rescued": false
+  },
+  {
+   "t": 247.0,
+   "state": "bad",
+   "prob": "black",
+   "first": "black",
+   "confirm": "black",
+   "via": "model",
+   "orient": "",
+   "rescued": true
+  },
+  {
+   "t": 253.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"That is a deeply unglamorous b\")",
+   "rescued": false
+  },
+  {
+   "t": 259.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Nothing says 'future of AI' li\")",
+   "rescued": false
+  },
+  {
+   "t": 265.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:none",
+   "rescued": false
+  },
+  {
+   "t": 271.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"of corporate governance by tre\")",
+   "rescued": false
+  },
+  {
+   "t": 277.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Odds of SpaceX-Tesla Deal by Y\")",
+   "rescued": false
+  },
+  {
+   "t": 283.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Odds of SpaceX-Tesla Deal by Y\")",
+   "rescued": false
+  },
+  {
+   "t": 289.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"like a thousand calculators bo\")",
+   "rescued": false
+  },
+  {
+   "t": 295.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"XFCE\")",
+   "rescued": false
+  },
+  {
+   "t": 301.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"got rerouted into xAI\")",
+   "rescued": false
+  },
+  {
+   "t": 307.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Nothing says 'two distinct com\")",
+   "rescued": false
+  },
+  {
+   "t": 313.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Those chips then rolled into C\")",
+   "rescued": false
+  },
+  {
+   "t": 319.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"How the Governance Rewrite Unf\")",
+   "rescued": false
+  },
+  {
+   "t": 325.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"How the Governance Rewrite Unf\")",
+   "rescued": false
+  },
+  {
+   "t": 331.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"The prediction markets noticed\")",
+   "rescued": false
+  },
+  {
+   "t": 337.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"like a stock market but for gu\")",
+   "rescued": false
+  },
+  {
+   "t": 343.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Our take: Musk isn't just merg\")",
+   "rescued": false
+  },
+  {
+   "t": 349.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"blur to protect his own power.\")",
+   "rescued": false
+  },
+  {
+   "t": 355.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"56% Prediction market odds of \")",
+   "rescued": false
+  },
+  {
+   "t": 361.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"GOOD VIBES ONLY\")",
+   "rescued": false
+  },
+  {
+   "t": 367.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"GOOD VIBES ONLY plus approval \")",
+   "rescued": false
+  },
+  {
+   "t": 373.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"A premium is the extra money a\")",
+   "rescued": false
+  },
+  {
+   "t": 379.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"2020 sell, like offering above\")",
+   "rescued": false
+  },
+  {
+   "t": 385.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Ives' Deal Math\nWhat SpaceX pa\")",
+   "rescued": false
+  },
+  {
+   "t": 391.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "finger",
+   "confirm": "none",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Ives' Deal Math\nWhat SpaceX pa\")",
+   "rescued": false
+  },
+  {
+   "t": 397.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"that his absence would crater \")",
+   "rescued": false
+  },
+  {
+   "t": 403.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "finger",
+   "confirm": "none",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Key Man Risk\nWhat it is\nWho it\")",
+   "rescued": false
+  },
+  {
+   "t": 409.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "finger",
+   "confirm": "none",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Key Man Risk\nWhat it is\nCompan\")",
+   "rescued": false
+  },
+  {
+   "t": 415.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Here is where the story gets g\")",
+   "rescued": false
+  },
+  {
+   "t": 421.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"OpenAI, the company behind Cha\")",
+   "rescued": false
+  },
+  {
+   "t": 427.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"A coding agent is an AI helper\")",
+   "rescued": false
+  },
+  {
+   "t": 433.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"like a very fast junior progra\")",
+   "rescued": false
+  },
+  {
+   "t": 439.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"safety monitors and then lied \")",
+   "rescued": false
+  },
+  {
+   "t": 445.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"speed limiter, then telling th\")",
+   "rescued": false
+  },
+  {
+   "t": 451.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Alexander Wissner-Gross, a tec\")",
+   "rescued": false
+  },
+  {
+   "t": 457.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"show, calls this disclosure a \")",
+   "rescued": false
+  },
+  {
+   "t": 463.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"an arrangement where AI compan\")",
+   "rescued": false
+  },
+  {
+   "t": 469.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"His argument is that admitting\")",
+   "rescued": false
+  },
+  {
+   "t": 475.0,
+   "state": "bad",
+   "prob": "face_closeup",
+   "first": "face_closeup",
+   "confirm": "face_closeup",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Great, the AI learned to lie\")",
+   "rescued": false
+  },
+  {
+   "t": 481.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"docs nobody reads.\")",
+   "rescued": false
+  },
+  {
+   "t": 487.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Dave Blundin, an investor and \")",
+   "rescued": false
+  },
+  {
+   "t": 493.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"into an AI, like the order you\")",
+   "rescued": false
+  },
+  {
+   "t": 499.0,
+   "state": "bad",
+   "prob": "finger",
+   "first": "finger",
+   "confirm": "finger",
+   "via": "model",
+   "orient": "",
+   "rescued": true
+  },
+  {
+   "t": 505.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"He argues the lying is less ab\")",
+   "rescued": false
+  },
+  {
+   "t": 511.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Salim Ismail, a technology ent\")",
+   "rescued": false
+  },
+  {
+   "t": 517.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"but he says the scariest part \")",
+   "rescued": false
+  },
+  {
+   "t": 523.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"He proposes boring but practic\")",
+   "rescued": false
+  },
+  {
+   "t": 529.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"which is a standardized set of\")",
+   "rescued": false
+  },
+  {
+   "t": 535.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"like a driving exam but for so\")",
+   "rescued": false
+  },
+  {
+   "t": 541.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"behavior; confessing an AI lie\")",
+   "rescued": false
+  },
+  {
+   "t": 547.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"is risk management, not accoun\")",
+   "rescued": false
+  },
+  {
+   "t": 553.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"like a flight recorder in a pl\")",
+   "rescued": false
+  },
+  {
+   "t": 559.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "finger",
+   "confirm": "none",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"like an undo button for the wh\")",
+   "rescued": false
+  },
+  {
+   "t": 565.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"where a person checks importan\")",
+   "rescued": false
+  },
+  {
+   "t": 571.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Wissner-Gross pushes back on t\")",
+   "rescued": false
+  },
+  {
+   "t": 577.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"He argues for defensive co-sca\")",
+   "rescued": false
+  },
+  {
+   "t": 583.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"systems.\")",
+   "rescued": false
+  },
+  {
+   "t": 589.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"own traders.\")",
+   "rescued": false
+  },
+  {
+   "t": 595.0,
+   "state": "bad",
+   "prob": "face_closeup",
+   "first": "face_closeup",
+   "confirm": "face_closeup",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Our honest reaction is that se\")",
+   "rescued": false
+  },
+  {
+   "t": 601.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"A company that admits its AI l\")",
+   "rescued": false
+  },
+  {
+   "t": 607.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"keeps selling that AI is not b\")",
+   "rescued": false
+  },
+  {
+   "t": 613.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"We're proud to announce our mo\")",
+   "rescued": false
+  },
+  {
+   "t": 619.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"30% pathological liars.\")",
+   "rescued": false
+  },
+  {
+   "t": 625.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"OpenAI reported that its codin\")",
+   "rescued": false
+  },
+  {
+   "t": 631.0,
+   "state": "bad",
+   "prob": "black",
+   "first": "black",
+   "confirm": "black",
+   "via": "model",
+   "orient": "",
+   "rescued": false
+  },
+  {
+   "t": 637.0,
+   "state": "bad",
+   "prob": "black",
+   "first": "black",
+   "confirm": "black",
+   "via": "model",
+   "orient": "",
+   "rescued": false
+  },
+  {
+   "t": 643.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"These were not fresh mistakes;\")",
+   "rescued": false
+  },
+  {
+   "t": 649.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "finger",
+   "confirm": "none",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"That matters because PHP is so\")",
+   "rescued": false
+  },
+  {
+   "t": 655.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"on the internet.\")",
+   "rescued": false
+  },
+  {
+   "t": 661.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"So somewhere in PHP,\")",
+   "rescued": false
+  },
+  {
+   "t": 667.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Now imagine you have a machine\")",
+   "rescued": false
+  },
+  {
+   "t": 673.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"That is the leap one of the gu\")",
+   "rescued": false
+  },
+  {
+   "t": 679.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "none",
+   "confirm": "",
+   "via": "orient",
+   "orient": "asis:no;180:yes",
+   "rescued": false
+  },
+  {
+   "t": 685.0,
+   "state": "bad",
+   "prob": "upside_down",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "orient",
+   "orient": "asis:no;180:yes",
+   "rescued": false
+  },
+  {
+   "t": 691.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Programming singularity\nOld PH\")",
+   "rescued": false
+  },
+  {
+   "t": 697.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"he expects all existing human-\")",
+   "rescued": false
+  },
+  {
+   "t": 703.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"the economics are already chan\")",
+   "rescued": false
+  },
+  {
+   "t": 709.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "finger",
+   "confirm": "none",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Accounting rebuild cost\nBefore\")",
+   "rescued": false
+  },
+  {
+   "t": 715.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "finger",
+   "confirm": "none",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Accounting rebuild cost\nBefore\")",
+   "rescued": false
+  },
+  {
+   "t": 721.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"They used to spend a billion d\")",
+   "rescued": false
+  },
+  {
+   "t": 727.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"of the cost, which is pocket c\")",
+   "rescued": false
+  },
+  {
+   "t": 733.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"we pay for software.\")",
+   "rescued": false
+  },
+  {
+   "t": 739.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"covers not just the original p\")",
+   "rescued": false
+  },
+  {
+   "t": 745.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Weekly LocalBitcoins Volume\")",
+   "rescued": false
+  },
+  {
+   "t": 751.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"it is constantly analyzed and \")",
+   "rescued": false
+  },
+  {
+   "t": 757.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"of that maintenance never goes\")",
+   "rescued": false
+  },
+  {
+   "t": 763.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"selling the patching service.\")",
+   "rescued": false
+  },
+  {
+   "t": 769.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"every software budget needed.\")",
+   "rescued": false
+  },
+  {
+   "t": 775.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Next up, Claude's parent compa\")",
+   "rescued": false
+  },
+  {
+   "t": 781.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Anthropic, the AI lab behind t\")",
+   "rescued": false
+  },
+  {
+   "t": 787.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"asked.\")",
+   "rescued": false
+  },
+  {
+   "t": 793.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"the background, like a persona\")",
+   "rescued": false
+  },
+  {
+   "t": 799.0,
+   "state": "bad",
+   "prob": "face_closeup",
+   "first": "face_closeup",
+   "confirm": "face_closeup",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"$2T\nAnthropic's IPO goal Alex \")",
+   "rescued": false
+  },
+  {
+   "t": 805.0,
+   "state": "bad",
+   "prob": "black",
+   "first": "black",
+   "confirm": "black",
+   "via": "model",
+   "orient": "",
+   "rescued": false
+  },
+  {
+   "t": 811.0,
+   "state": "bad",
+   "prob": "black",
+   "first": "black",
+   "confirm": "black",
+   "via": "model",
+   "orient": "",
+   "rescued": false
+  },
+  {
+   "t": 817.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Silicon Valley invents the cow\")",
+   "rescued": false
+  },
+  {
+   "t": 823.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"And he ties that to a truly en\")",
+   "rescued": false
+  },
+  {
+   "t": 829.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"or IPO, which is when a privat\")",
+   "rescued": false
+  },
+  {
+   "t": 835.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"valued at around two trillion \")",
+   "rescued": false
+  },
+  {
+   "t": 841.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"like a placeholder for 'we pla\")",
+   "rescued": false
+  },
+  {
+   "t": 847.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"worker-bee software is worth f\")",
+   "rescued": false
+  },
+  {
+   "t": 853.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"He argues that negotiating age\")",
+   "rescued": false
+  },
+  {
+   "t": 859.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"meaning AI systems that can ba\")",
+   "rescued": false
+  },
+  {
+   "t": 865.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"manager, will dissolve the tra\")",
+   "rescued": false
+  },
+  {
+   "t": 871.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"of a company with lots of huma\")",
+   "rescued": false
+  },
+  {
+   "t": 877.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Our take: Anthropic's $2 trill\")",
+   "rescued": false
+  },
+  {
+   "t": 883.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"values invisible, obedient lab\")",
+   "rescued": false
+  },
+  {
+   "t": 889.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"betting that enterprise reliab\")",
+   "rescued": false
+  },
+  {
+   "t": 895.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"A mandate here means a strict,\")",
+   "rescued": false
+  },
+  {
+   "t": 901.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"do, how much money it can spen\")",
+   "rescued": false
+  },
+  {
+   "t": 907.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"It is like giving a teenager a\")",
+   "rescued": false
+  },
+  {
+   "t": 913.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Without those guardrails, you'\")",
+   "rescued": false
+  },
+  {
+   "t": 919.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"which is exactly how you end u\")",
+   "rescued": false
+  },
+  {
+   "t": 925.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"called it a negotiation win.\")",
+   "rescued": false
+  },
+  {
+   "t": 931.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"He notes that most compute,\")",
+   "rescued": false
+  },
+  {
+   "t": 937.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"AI, now goes to post-training.\")",
+   "rescued": false
+  },
+  {
+   "t": 943.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"from the messy open internet\")",
+   "rescued": false
+  },
+  {
+   "t": 949.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "finger",
+   "confirm": "none",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Two paths for AI work\nChatty d\")",
+   "rescued": false
+  },
+  {
+   "t": 955.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "finger",
+   "confirm": "none",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Two paths for AI work\nChatty d\")",
+   "rescued": false
+  },
+  {
+   "t": 961.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"the serious money is moving aw\")",
+   "rescued": false
+  },
+  {
+   "t": 967.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"So the future of AI is basical\")",
+   "rescued": false
+  },
+  {
+   "t": 973.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"tutors to undo the internet's \")",
+   "rescued": false
+  },
+  {
+   "t": 979.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Diamandis and his guests argue\")",
+   "rescued": false
+  },
+  {
+   "t": 985.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"becoming programmable, like a \")",
+   "rescued": false
+  },
+  {
+   "t": 991.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"DNA to RNA to protein is disso\")",
+   "rescued": false
+  },
+  {
+   "t": 997.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"DNA, the instruction library i\")",
+   "rescued": false
+  },
+  {
+   "t": 1003.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"RNA, the working copies of tho\")",
+   "rescued": false
+  },
+  {
+   "t": 1009.0,
+   "state": "bad",
+   "prob": "black",
+   "first": "black",
+   "confirm": "black",
+   "via": "model",
+   "orient": "",
+   "rescued": false
+  },
+  {
+   "t": 1015.0,
+   "state": "bad",
+   "prob": "black",
+   "first": "black",
+   "confirm": "black",
+   "via": "model",
+   "orient": "",
+   "rescued": false
+  },
+  {
+   "t": 1021.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Claude can design, they cite o\")",
+   "rescued": false
+  },
+  {
+   "t": 1027.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"in sixty-four hours.\")",
+   "rescued": false
+  },
+  {
+   "t": 1033.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"seventeen worked, with two bin\")",
+   "rescued": false
+  },
+  {
+   "t": 1039.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Antivenom proteins are molecul\")",
+   "rescued": false
+  },
+  {
+   "t": 1045.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"and neutralize it, like a targ\")",
+   "rescued": false
+  },
+  {
+   "t": 1051.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "finger",
+   "confirm": "none",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"not a long weekend of compute.\")",
+   "rescued": false
+  },
+  {
+   "t": 1057.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"where iteration speed and scal\")",
+   "rescued": false
+  },
+  {
+   "t": 1063.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Radical Numeric, a startup,\")",
+   "rescued": false
+  },
+  {
+   "t": 1069.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"like a tiny guided missile tha\")",
+   "rescued": false
+  },
+  {
+   "t": 1075.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"antibiotic-resistant infection\")",
+   "rescued": false
+  },
+  {
+   "t": 1081.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Protease speed\nBefore AI desig\")",
+   "rescued": false
+  },
+  {
+   "t": 1087.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "finger",
+   "confirm": "none",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Protease speed\nBefore AI desig\")",
+   "rescued": false
+  },
+  {
+   "t": 1093.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"published AI-designed protease\")",
+   "rescued": false
+  },
+  {
+   "t": 1099.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"work thirty million times fast\")",
+   "rescued": false
+  },
+  {
+   "t": 1105.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Their speed matters because cu\")",
+   "rescued": false
+  },
+  {
+   "t": 1111.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"and getting that done millions\")",
+   "rescued": false
+  },
+  {
+   "t": 1117.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Honestly, biology is moving fr\")",
+   "rescued": false
+  },
+  {
+   "t": 1123.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"and the writing tools are gett\")",
+   "rescued": false
+  },
+  {
+   "t": 1129.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"even my salad's dressing has m\")",
+   "rescued": false
+  },
+  {
+   "t": 1135.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Now for the strangest idea in \")",
+   "rescued": false
+  },
+  {
+   "t": 1141.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"mercury into gold.\")",
+   "rescued": false
+  },
+  {
+   "t": 1147.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"tons of gold every year.\")",
+   "rescued": false
+  },
+  {
+   "t": 1153.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"A neutron is a tiny particle i\")",
+   "rescued": false
+  },
+  {
+   "t": 1159.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"2 tons\nGold per gigawatt plant\")",
+   "rescued": false
+  },
+  {
+   "t": 1165.0,
+   "state": "bad",
+   "prob": "black",
+   "first": "black",
+   "confirm": "black",
+   "via": "model",
+   "orient": "",
+   "rescued": true
+  },
+  {
+   "t": 1171.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"and with the right neutron tre\")",
+   "rescued": false
+  },
+  {
+   "t": 1177.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"radioactive.\")",
+   "rescued": false
+  },
+  {
+   "t": 1183.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Alex explains that most of Ear\")",
+   "rescued": false
+  },
+  {
+   "t": 1189.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Alex explains that most of Ear\")",
+   "rescued": false
+  },
+  {
+   "t": 1195.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Alex explains that most of Ear\")",
+   "rescued": false
+  },
+  {
+   "t": 1201.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Alex explains that most of Ear\")",
+   "rescued": false
+  },
+  {
+   "t": 1207.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Alex explains that most of Ear\")",
+   "rescued": false
+  },
+  {
+   "t": 1213.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"from neutron stars colliding.\")",
+   "rescued": false
+  },
+  {
+   "t": 1219.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Scarcity means something is ra\")",
+   "rescued": false
+  },
+  {
+   "t": 1225.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"like a limited-edition sneaker\")",
+   "rescued": false
+  },
+  {
+   "t": 1231.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:no;180:no;90ccw:no;90cw:no",
+   "rescued": false
+  },
+  {
+   "t": 1237.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:no;180:no;90ccw:no;90cw:no",
+   "rescued": false
+  },
+  {
+   "t": 1243.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Our host argues this is the pa\")",
+   "rescued": false
+  },
+  {
+   "t": 1249.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"If it scales, it changes what \")",
+   "rescued": false
+  },
+  {
+   "t": 1255.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "sideways",
+   "confirm": "sideways",
+   "via": "model",
+   "orient": "asis:no;180:no;90ccw:no;90cw:no",
+   "rescued": false
+  },
+  {
+   "t": 1261.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Honestly, if alchemy arrives\")",
+   "rescued": false
+  },
+  {
+   "t": 1267.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "finger",
+   "confirm": "none",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"not the people panning for gol\")",
+   "rescued": false
+  },
+  {
+   "t": 1273.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "sideways",
+   "confirm": "sideways",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"the real losers are the weddin\")",
+   "rescued": false
+  },
+  {
+   "t": 1279.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"He argues that algorithms will\")",
+   "rescued": false
+  },
+  {
+   "t": 1285.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"2000 and computers will move b\")",
+   "rescued": false
+  },
+  {
+   "t": 1291.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Predicting the AI power jump\nT\")",
+   "rescued": false
+  },
+  {
+   "t": 1297.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Predicting the AI power jump\nT\")",
+   "rescued": false
+  },
+  {
+   "t": 1303.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"centers, and he predicts the a\")",
+   "rescued": false
+  },
+  {
+   "t": 1309.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"raw gigawatt figure implies.\")",
+   "rescued": false
+  },
+  {
+   "t": 1315.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"54M\nliters of water saved dail\")",
+   "rescued": false
+  },
+  {
+   "t": 1321.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"54M\nliters of water saved dail\")",
+   "rescued": false
+  },
+  {
+   "t": 1327.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"And a hundred times more intel\")",
+   "rescued": false
+  },
+  {
+   "t": 1333.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"down.\")",
+   "rescued": false
+  },
+  {
+   "t": 1339.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Cost of a containerized AI uni\")",
+   "rescued": false
+  },
+  {
+   "t": 1345.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "finger",
+   "confirm": "none",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Cost of a containerized AI uni\")",
+   "rescued": false
+  },
+  {
+   "t": 1351.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"with fresh air.\")",
+   "rescued": false
+  },
+  {
+   "t": 1357.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"biggest sites.\")",
+   "rescued": false
+  },
+  {
+   "t": 1363.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"cool the building, so a radiat\")",
+   "rescued": false
+  },
+  {
+   "t": 1369.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"system, the cheapest container\")",
+   "rescued": false
+  },
+  {
+   "t": 1375.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "finger",
+   "confirm": "none",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"What communities could demand\n\")",
+   "rescued": false
+  },
+  {
+   "t": 1381.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "finger",
+   "confirm": "none",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"What communities could demand\n\")",
+   "rescued": false
+  },
+  {
+   "t": 1387.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Our take: The scale of predict\")",
+   "rescued": false
+  },
+  {
+   "t": 1393.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"while community demands signal\")",
+   "rescued": false
+  },
+  {
+   "t": 1399.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"runs between five and thirty f\")",
+   "rescued": false
+  },
+  {
+   "t": 1405.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"but it is a repeatable,\")",
+   "rescued": false
+  },
+  {
+   "t": 1411.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "sideways",
+   "confirm": "sideways",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"That portability is why some l\")",
+   "rescued": false
+  },
+  {
+   "t": 1417.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"An executive at Nevis,\")",
+   "rescued": false
+  },
+  {
+   "t": 1423.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"receive what are called data d\")",
+   "rescued": false
+  },
+  {
+   "t": 1429.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Data dividends are regular pay\")",
+   "rescued": false
+  },
+  {
+   "t": 1435.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"of just using its roads and wa\")",
+   "rescued": false
+  },
+  {
+   "t": 1441.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"He advises locals to demand th\")",
+   "rescued": false
+  },
+  {
+   "t": 1447.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"In other words, if a data cent\")",
+   "rescued": false
+  },
+  {
+   "t": 1453.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"in return, not just a promise \")",
+   "rescued": false
+  },
+  {
+   "t": 1459.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"but with better branding.\")",
+   "rescued": false
+  },
+  {
+   "t": 1465.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"One Story, Three Ways\nCompute\n\")",
+   "rescued": false
+  },
+  {
+   "t": 1471.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"One Story, Three Ways\nCompute\n\")",
+   "rescued": false
+  },
+  {
+   "t": 1477.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"milestone, a recorded moment s\")",
+   "rescued": false
+  },
+  {
+   "t": 1483.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Our take: It frames AI-driven \")",
+   "rescued": false
+  },
+  {
+   "t": 1489.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"glossing over who controls tha\")",
+   "rescued": false
+  },
+  {
+   "t": 1495.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"And biology, software, and mat\")",
+   "rescued": false
+  },
+  {
+   "t": 1501.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"where things that were scarce \")",
+   "rescued": false
+  },
+  {
+   "t": 1507.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"And nothing says 'abundance' l\")",
+   "rescued": false
+  },
+  {
+   "t": 1513.0,
+   "state": "bad",
+   "prob": "blurry",
+   "first": "blurry",
+   "confirm": "blurry",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"been automated into a pricing \")",
+   "rescued": false
+  },
+  {
+   "t": 1519.0,
+   "state": "ok",
+   "prob": "none",
+   "first": "none",
+   "confirm": "",
+   "via": "model",
+   "orient": "asis:yes;text:upright(\"Thanks for watching\nBased on \"\")",
+   "rescued": false
+  }
+ ]
+}
