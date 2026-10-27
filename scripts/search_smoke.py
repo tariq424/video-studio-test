@@ -17,7 +17,7 @@ def log(m): print(m, flush=True)
 def main():
     out = Path(sys.argv[1]); out.mkdir(parents=True, exist_ok=True)
     cfg = config.load(); res = {"query": Q, "routes": {}, "rotation": []}
-    names = ["duckduckgo", "bing", "copilot"] + (["google"] if "--google" in sys.argv else [])
+    names = ["wikipedia", "duckduckgo", "bing"]   # copilot not poked directly: it showed a human-verification check + (["google"] if "--google" in sys.argv else [])
     for n in names:
         t0 = time.time()
         try:
