@@ -1,3 +1,28 @@
+<!-- PICKUP (read first) -->
+## PICKUP — 2026-10-26 8:10 PM EDT (QC repair-by-ladder go-live, exchange doc MSG 009)
+
+- **Live settings (PC F:\code\video-studio-test\settings.json):**
+  - `qc_on` = true; `qc_mode` = "fix"; `marble_on` unset (the Marble rung skips itself); `interview_qc` unset.
+  - Backups: `F:\code\patches\settings_before_qc_on.json` and `settings_before_qc_fix.json`.
+- **Pending:**
+  - The Video Studio restart is queued through the `vs-restart-idle` hook (`scripts/restart_when_idle.py`; args in `F:\bermuda\_work\restart_idle_args.txt`). It waits for job 20261026_151034 (a 25-minute explainer render) to finish.
+  - Check `F:\bermuda\_work\restart_idle_log.txt`. After the restart, post a RESULT to the exchange doc: the live state, and the first `*.repair.json` in a live job's `output/`, or "none yet".
+- **Code:**
+  - `app/studio/qc_repair.py`: ladder per HARD span = stock -> AI image (never Gemini) -> search + ChatGPT -> Marble -> local Python image-to-video of the video's own clean frame -> static image -> card. One try per rung; fail-open.
+  - `app/studio/websearch.py`: research search round-robin over DuckDuckGo / Bing / Copilot (`m365_profile`); Google last, at most once an hour.
+  - `app/studio/marble.py`: World Labs Marble driver (`marble_profile`); recording uses screenshot capture.
+  - `pipeline.py`: in fix mode, `qc_part` runs in report mode and then `qc_repair.repair()`.
+  - qc.py v8 is untouched (Koda's).
+- **Smoke results:**
+  - `qc_smoke_results/repair1/`: B's black span was repaired by the AI-image rung; length and audio unchanged; the recheck was clean.
+  - Stock rung retest: PASS.
+- **Known limits:**
+  - DuckDuckGo answers HTTP 202 (bot check).
+  - Bing gives automated sessions generic or junk results; the relevance filter drops them.
+  - Copilot's free daily limit was hit today; the route rests 6 h after that and never upgrades.
+  - Marble: not run yet (Playwright video needed its own ffmpeg; fixed by switching to screenshots). 0 of 4 free generations used. The free record test waits on Tariq's go-ahead #2.
+- **Hooks (F:\code\.restart-only):** `qc-repair`, `stock-retest`, `search-smoke`, `marble-probe`, `marble-smoke` (`patches\marble_smoke\job.txt`), `login-marble`, `login-m365`, `vs-restart-idle`.
+
 <!-- QC STATUS (frame QC recalibration job; keep this block at the top, update at every commit) -->
 ## QC STATUS
 
