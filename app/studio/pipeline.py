@@ -1,7 +1,7 @@
 """Job queue: one job renders at a time (single GPU). Each stage is resumable."""
 import json, os, threading, time, traceback, re, shutil, datetime, queue
 from pathlib import Path
-from . import config, transcript, writer, render, assemble, media, sources, short, debug
+from . import config, transcript, writer, render, assemble, media, sources, short, debug, gpu_lock
 from .wangp import WanGP
 
 STAGES = ["transcript", "script", "short_script", "review", "short_stock", "short_voice", "short_fallback", "short_review", "short_render",
@@ -11,6 +11,29 @@ SHORT = {"short_script", "short_stock", "short_voice", "short_fallback", "short_
 def stages_for(mode): return [s for s in STAGES if not ((mode == "short" and s in LONG) or (mode == "long" and s in SHORT))]
 
 SMOKE_SECS = 30.0   # "smoke test" Shorts: about 75 words of narration including the closing line
+
+GPU_STAGES = {"charts", "voice", "captions", "presenter", "motion", "stills", "assemble", "broll",
+              "short_stock", "short_voice", "short_fallback", "short_review", "short_render"}   # every render stage (Claude: the draft left out short_render/assemble/charts)
+
+
+class _StudioQueue:
+    """Priority queue: editor-owned work, then Newsroom jobs, then hand jobs.
+
+    Existing `Studio.q.put(jid)` call sites stay unchanged.
+    """
+    def __init__(self, studio):
+        self._q = queue.PriorityQueue()
+        self._studio = studio
+        self._seq = 0
+        self._lk = threading.Lock()
+
+    def put(self, jid):
+        with self._lk:
+            self._seq += 1
+            self._q.put((self._studio._prio(jid), self._seq, jid))
+
+    def get(self):
+        return self._q.get()[2]
 
 
 LENGTH_TOL = 0.10   # a finished video more than 10% off the requested length is flagged (never rejected)
@@ -83,8 +106,15 @@ class Job:
         (self.dir / "short").mkdir(exist_ok=True); (self.dir / "short" / "plan.json").write_text(json.dumps(plan, indent=1), encoding="utf-8")
 
 class Studio:
-    def __init__(self):
-        self.q = queue.Queue(); self.current = None; self.cancel = set()
+    def __init__(self, port=None):
+        self.port = port
+        self.live = port in (None, "42021", 42021)
+        self.q = _StudioQueue(self)
+        self.current = None; self.cancel = set()
+        self._editor_waits = {}
+        self._editor_waits_lk = threading.Lock()
+        if not self.live:
+            self._refuse_live_jobs_dir()
         try:   # jobs cut off by an app restart or PC reboot: show them as stopped (press Resume) instead of a stale "running"
             for d in self.jobs_dir().iterdir():
                 if d.is_dir() and (d / "state.json").exists():
@@ -92,6 +122,7 @@ class Studio:
                     if j.state.get("status") in ("running", "queued"):
                         j.save(status="stopped"); j.log("Interrupted (the app or PC restarted). Press Resume to continue; finished work is kept.")
         except Exception: pass
+        threading.Thread(target=self._editor_wait_watcher, daemon=True).start()
         threading.Thread(target=self._worker, daemon=True).start()
 
     def jobs_dir(self): d = Path(config.load()["jobs_dir"]); d.mkdir(parents=True, exist_ok=True); return d
@@ -102,9 +133,80 @@ class Studio:
             if d.is_dir() and (d / "state.json").exists(): s = Job(d).state; s["id"] = d.name; out.append(s)
         return out
 
+    def _prio(self, jid):
+        try:
+            s = self.job(jid).state
+        except Exception:
+            return 2
+        if s.get("editor_owned"):
+            return 0
+        if s.get("newsroom") or s.get("priority") == "newsroom":
+            return 1
+        return 2
+
+    def _enqueue(self, jid):
+        self.q.put(jid)
+
+    def _refuse_live_jobs_dir(self):
+        live_settings = Path(r"F:\code\video-studio-test\settings.json")
+        if not live_settings.exists():
+            return
+        try:
+            import json as _json
+            live_jobs = os.path.normpath(str(_json.loads(live_settings.read_text(encoding="utf-8")).get("jobs_dir", "")))
+            my_jobs = os.path.normpath(str(config.load().get("jobs_dir", "")))
+            if live_jobs and my_jobs == live_jobs:
+                raise RuntimeError(f"Refusing to start this copy: it points at the live jobs_dir ({live_jobs})")
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
+
+    def _wait_editor_reservation(self, j, s, log, jid):
+        from . import editor_session
+        res = editor_session.active()
+        if not res:
+            return False
+
+        label = f"Waiting: editor in use ({res.get('jid')})"
+        if s.get("status") != "paused" or (s.get("pause") or {}).get("label") != label:
+            j.save(status="paused", pause={"kind": "editor_wait", "label": label,
+                                          "stage": s.get("stage"), "where": s.get("stage")}, pause_req=False)
+            j.log(label + f" (holder pid {res.get('pid')}, port {res.get('port')}); it will continue automatically when the editor session releases.")
+            with self._editor_waits_lk:
+                self._editor_waits[jid] = time.time()
+        return True
+
+    def _requeue_editor_waits(self):
+        from . import editor_session
+        if editor_session.active():
+            return
+
+        with self._editor_waits_lk:
+            waits = list(self._editor_waits.items())
+            self._editor_waits.clear()
+
+        for jid, _ in waits:
+            try:
+                job = self.job(jid)
+            except Exception:
+                continue
+            if job.state.get("status") == "paused" and (job.state.get("pause") or {}).get("kind") == "editor_wait":
+                job.save(status="queued", pause=None, pause_req=False, cancel_req=False, cancelled=False)
+                job.log("Editor session released; continuing automatically.")
+                self._enqueue(jid)
+
+    def _editor_wait_watcher(self):
+        while True:
+            time.sleep(1.0)
+            try:
+                self._requeue_editor_waits()
+            except Exception:
+                pass
+
     def create(self, url, minutes, presenter=False, auto_approve=False, transcript_text="", provider="", captions=True,
                mode="both", short_secs=165, upload=None, upload_name="", src_title="", src_credit="", visual_review="auto", dbg_on=False, bps=None,
-               own_clips=None, tts_engine="", audience=""):
+               own_clips=None, tts_engine="", audience="", newsroom=False):
         smoke = mode == "smoke"   # pipeline check: a ~30-second Short (about 75 words); real Shorts keep the 2:00 minimum
         if smoke: mode, short_secs = "short", SMOKE_SECS
         jid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -117,6 +219,7 @@ class Studio:
         j.save(url=url, minutes=float(minutes), presenter=bool(presenter), captions=bool(captions), auto_approve=bool(auto_approve), provider=provider or "",
                mode=mode if mode in ("long", "short", "both") else "both", short_secs=SMOKE_SECS if smoke else max(120.0, min(176.0, float(short_secs))), smoke=smoke,
                upload=up, src_title=src_title, src_credit=src_credit, visual_review=visual_review if visual_review in ("auto", "every", "never") else "auto", status="queued", stage="transcript", done=[], title="", created=time.time(),
+               newsroom=bool(newsroom), priority=("newsroom" if newsroom else "normal"),
                debug={"on": bool(dbg_on), "bps": list(bps or []), "bps_off": False, "checked": [], "chat": []}, trace=bool(dbg_on))
         if dbg_on: debug.trace(j.dir, {"ev": "debug on", "at": "job start", "breakpoints": "; ".join(bps or []) or "none"})
         if own_clips:   # your footage + where it goes (clips.py places it after the script is written)
@@ -128,21 +231,21 @@ class Studio:
         if tts_engine in ("kokoro", "wanGP"): j.save(tts_engine=tts_engine)
         if audience in writer.AUDIENCE: j.save(audience=audience)
         what = url or (f"file {up}" if up else "pasted text")
-        j.log(f"Job created for {what} (output: {'SMOKE TEST, ' if smoke else ''}{mode}; long {minutes} min, short {short_secs:.0f}s)"); self.q.put(jid); return jid
+        j.log(f"Job created for {what} (output: {'SMOKE TEST, ' if smoke else ''}{mode}; long {minutes} min, short {short_secs:.0f}s)"); self._enqueue(jid); return jid
 
     def approve(self, jid):
         j = self.job(jid); s = j.state
         if s.get("status") == "awaiting_review":
-            d = s.get("done", []); d.append("review"); j.save(done=d, status="queued"); j.log("Script approved"); self.q.put(jid)
+            d = s.get("done", []); d.append("review"); j.save(done=d, status="queued"); j.log("Script approved"); self._enqueue(jid)
     def continue_visuals(self, jid):
         """Visual review finished (every beat decided): render."""
         from . import review
         j = self.job(jid); review.close(j.dir)
         d = j.state.get("done", [])
         if "short_review" not in d: d.append("short_review")
-        j.save(done=d, status="queued"); j.log("Visual review done; rendering"); self.q.put(jid)
+        j.save(done=d, status="queued"); j.log("Visual review done; rendering"); self._enqueue(jid)
 
-    def rerender(self, jid, target="", refresh_fallbacks=False):
+    def rerender(self, jid, target="", refresh_fallbacks=False, editor_owned=False):
         """Full re-render on request (post-render edits are kept: Shorts from the review decisions, long videos from edit_clip).
         A job with both outputs re-renders the one being edited (edit_target), or `target` ("short" | "long").
         refresh_fallbacks (explainer): shots that fell to a headline text card (e.g. the script AI was unreachable) go down the
@@ -156,12 +259,14 @@ class Studio:
             for p in (j.dir / "build").glob("sec_*.mp4"): p.unlink(missing_ok=True)
         d = [x for x in j.state.get("done", []) if x != st]
         shutil.rmtree(j.dir / "edit" / "history", ignore_errors=True)   # step-by-step undo can't cross a full re-render
-        j.save(done=d, status="queued"); j.log("Full re-render requested"); self.q.put(jid)
+        if editor_owned:
+            j.save(editor_owned=True)
+        j.save(done=d, status="queued"); j.log("Full re-render requested"); self._enqueue(jid)
 
     def resume(self, jid):
         j = self.job(jid); self.cancel.discard(jid)
         was = j.state.get("pause") if j.state.get("status") == "paused" else None
-        j.save(status="queued", error="", pause=None, pause_req=False, cancel_req=False, cancelled=False); j.log("Resumed"); self.q.put(jid)
+        j.save(status="queued", error="", pause=None, pause_req=False, cancel_req=False, cancelled=False); j.log("Resumed"); self._enqueue(jid)
         if was: debug.trace(j.dir, {"ev": "resume", "from": was.get("label", "")})
 
     def request_pause(self, jid):
@@ -217,7 +322,7 @@ class Studio:
                 elif rendering and n < 3 and jid not in self.cancel:
                     j.save(status="queued", error="", auto_retries=n + 1)
                     j.log(f"Retrying automatically in 60s (attempt {n + 1} of 3); finished work is kept")
-                    threading.Timer(60, lambda jid=jid: self.q.put(jid)).start()
+                    threading.Timer(60, lambda jid=jid: self._enqueue(jid)).start()
                 else:
                     j.save(status="error", error=str(e)[:500])
             finally:
@@ -225,6 +330,10 @@ class Studio:
                 try:   # a job never leaves an on-demand WanGP holding VRAM (error, cancel or success)
                     from . import wangp as _wangp; _wangp.release(print, "job ended")
                 except Exception: pass
+                try:
+                    gpu_lock.release()
+                except Exception:
+                    pass
 
     # ---- YouTube transcripts without hammering YouTube: reuse what we have, respect a cooldown after a block
     YT_COOLDOWN = 30 * 60
@@ -334,9 +443,33 @@ class Studio:
 
     def _stages(self, j, s, cfg, wg, log, stop, dbg, jid):
         mode = s.get("mode", "long")
+        gpu_held = False
+
+        def release_gpu():
+            nonlocal gpu_held
+            if gpu_held:
+                gpu_lock.release()
+                gpu_held = False
+
         for st in stages_for(mode):
             if st in j.state.get("done", []): continue
-            if stop(): j.save(status="stopped"); log("Stopped"); self.cancel.discard(jid); return
+
+            if gpu_held and st not in GPU_STAGES:
+                release_gpu()
+
+            if stop():
+                release_gpu()
+                j.save(status="stopped"); log("Stopped"); self.cancel.discard(jid); return
+
+            if st in GPU_STAGES:
+                if self.live and not j.state.get("editor_owned"):
+                    if self._wait_editor_reservation(j, s, log, jid):
+                        release_gpu()
+                        return
+                if not gpu_held:
+                    gpu_lock.acquire(desc=f"job:{jid}:{st}")
+                    gpu_held = True
+
             dbg.manual(st)
             j.save(prog={"out": output_of(st), "stage": st, "n": 0, "of": 0})
             j.save(stage=st); log(f"== {st} ==")
@@ -375,6 +508,7 @@ class Studio:
                     debug.trace(j.dir, {"ev": "pause", "label": "Paused: uncertain about this beat",
                                         "beats": ", ".join(f"Beat {int(b[1:]) + 1}" for b, x in rv["beats"].items() if x.get("uncertain") and not x.get("decision"))})
                     debug.render_md(j.dir)
+                    release_gpu()
                     log("Visual review: choose a treatment for each beat on the job page (or Approve all remaining)." if vm == "every" else
                         "Visual review: some beats are uncertain; check them on the job page (or Approve all remaining)."); return
                 if rv: review.close(j.dir)
@@ -426,8 +560,10 @@ class Studio:
             elif st == "review":
                 qs = [q for p in (j.plan(), j.short_plan()) if p for q in p.get("questions", [])]
                 if not s.get("auto_approve", True):
+                    release_gpu()
                     j.save(status="awaiting_review"); log("Script ready for review. Edit if you like, then press Approve."); return
                 if qs and cfg.get("pause_on_questions", False):
+                    release_gpu()
                     j.save(status="awaiting_review"); log(f"Fact-check raised {len(qs)} question(s); paused for review (setting: pause on fact-check questions)."); return
                 if qs: log(f"Fact-check raised {len(qs)} question(s); continuing (review is skipped by default):")
                 for q in qs[:8]: log("  ? " + q[:200])
@@ -478,8 +614,12 @@ class Studio:
                         from . import music
                         music.mix(final, cfg, log, float(cfg.get("music_long_hook_secs", 8)), seed=jid, text=plan.get("title", "") + ": " + " ".join(x["vo"] for x in plan["sections"])[:3000])
                     j.save(output=str(final)); _length_check(j, final, (s.get("minutes") or 0) * 60, "Long video", log)
-            if stop(): j.save(status="stopped"); log("Stopped"); self.cancel.discard(jid); return
+            if stop():
+                release_gpu()
+                j.save(status="stopped"); log("Stopped"); self.cancel.discard(jid); return
             d = j.state.get("done", []); d.append(st); j.save(done=d)
+        if cfg.get("qc_on", False) and not gpu_held:   # frame QC uses the GPU (vision model): keep/take the lock (Claude)
+            gpu_lock.acquire(desc=f"job:{jid}:qc"); gpu_held = True
         if cfg.get("qc_on", False):   # (off until calibrated: the first run flagged most news frames) owner, 2026-10-24: frame QC on every video (fingers, smudges, sideways, blur, giant faces)
             try:
                 from . import qc
@@ -499,6 +639,7 @@ class Studio:
             except Exception as e:
                 if str(e) == "cancelled" or type(e).__name__ == "Paused": raise
                 log(f"Quality check skipped ({type(e).__name__}: {str(e)[:200]})")
+        release_gpu()
         j.save(status="finished", stage="done"); log("Finished.")
         if j.state.get("trace"):
             debug.trace(j.dir, {"ev": "finished"}); p = debug.render_md(j.dir)

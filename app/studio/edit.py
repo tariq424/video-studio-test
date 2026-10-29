@@ -807,7 +807,12 @@ def start_apply(job, bid, cids, fit, cfg, log):
         _busy[key] = f"Applying the new visual to {bid}..."
     def run():
         from .pipeline import Job
-        try: apply(job, bid, cids, fit, cfg, log)
+        from . import gpu_lock, editor_session
+        jid = Path(job).name
+        editor_session.apply_started(jid)   # the 15-min idle release never fires mid-apply
+        try:
+            with gpu_lock.holder(desc=f"editor-apply:{jid}:{bid}"):
+                apply(job, bid, cids, fit, cfg, log)
         except Exception as e:
             import traceback
             msg = LOCKED_MSG if isinstance(e, FileLocked) or "WinError 5" in str(e) or "WinError 32" in str(e) else str(e)[:300]
@@ -823,7 +828,9 @@ def start_apply(job, bid, cids, fit, cfg, log):
                     rv = review.load(ws)
                     if rv and bid in rv.get("beats", {}): rv["beats"][bid]["msg"] = f"Not applied: {msg}"; review.save(ws, rv)
             except Exception: pass
-        finally: _busy[key] = ""
+        finally:
+            _busy[key] = ""
+            editor_session.apply_finished(jid)
     _busy.pop(key + ":err", None)
     threading.Thread(target=run, daemon=True).start(); return ""
 

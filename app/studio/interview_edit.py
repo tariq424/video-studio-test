@@ -327,7 +327,10 @@ def start_apply(job, bid, cids, fit, cfg, log):
         edit._busy.pop(key + ":err", None)
     def run():
         from .pipeline import Job
-        from . import review
+        from . import review, gpu_lock, editor_session
+        jid = Path(job).name
+        editor_session.apply_started(jid)   # the 15-min idle release never fires mid-apply
+        gpu_lock.acquire(desc=f"editor-apply:{jid}:{bid}")   # one GPU user machine-wide (released in finally)
         try:
             m, i, p = _part(job, bid, k)
             n = len(list((Path(job) / "iedit" / "parts").glob(f"{k}_{bid}_*.mp4"))) if (Path(job) / "iedit" / "parts").exists() else 0
@@ -346,6 +349,8 @@ def start_apply(job, bid, cids, fit, cfg, log):
             except Exception: pass
         finally:
             edit._busy.pop(key, None)
+            gpu_lock.release()
+            editor_session.apply_finished(jid)
     threading.Thread(target=run, daemon=True).start()
     return ""
 

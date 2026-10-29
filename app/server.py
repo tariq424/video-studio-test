@@ -7,7 +7,8 @@ from studio import config
 from studio.pipeline import Studio, STAGES, stages_for
 from studio.wangp import WanGP
 
-app = Flask(__name__, static_folder="static"); studio = Studio()
+VS_PORT = int(os.environ.get("PORT") or 42021)   # the launcher sets PORT; unset = live (42021) as before
+app = Flask(__name__, static_folder="static"); studio = Studio(port=VS_PORT)
 
 @app.get("/")
 def index(): return send_from_directory(app.static_folder, "index.html")
@@ -106,7 +107,8 @@ def create():
                             b.get("provider", ""), b.get("captions", True), b.get("mode", "both"), ssec,
                             f if (f and f.filename) else None, f.filename if f else "", b.get("src_title", ""), b.get("src_credit", ""),
                             b.get("visual_review") or config.load().get("visual_review_default", "never"), dbg_on=dbg_on, bps=bps, own_clips=own,
-                            tts_engine=b.get("tts_engine", ""), audience=str(b.get("audience") or "").lower())
+                            tts_engine=b.get("tts_engine", ""), audience=str(b.get("audience") or "").lower(),
+                            newsroom=str(b.get("newsroom", "")).lower() in ("1", "true", "yes", "on"))   # Newsroom jobs queue ahead of hand jobs
     except ValueError as e: return jsonify(error=str(e)[:300]), 400
     return jsonify(id=jid)
 
@@ -226,6 +228,18 @@ def edit_beats(jid):
                                  target=edit.kind(j.dir), last=j.state.get("edit_last"))
     return jsonify(out)
 
+def _editor_ns():
+    return None if VS_PORT == 42021 else str(VS_PORT)
+
+def _editor_owner(jid, sid):
+    from studio import editor_session
+    st = editor_session.state(namespace=_editor_ns())
+    if not st:
+        return False, "No editor session is open; open a beat first."
+    if st.get("jid") != jid or not editor_session.is_owner(jid, os.getpid(), VS_PORT, sid, namespace=_editor_ns()):
+        return False, f"Waiting: editor in use ({st.get('jid')})"
+    return True, st
+
 @app.post("/api/jobs/<jid>/edit/target")
 def edit_target(jid):
     """A job with a Short and an explainer: which one the timeline editor works on (short | long)."""
@@ -237,11 +251,17 @@ def edit_target(jid):
 
 @app.post("/api/jobs/<jid>/edit/open/<bid>")
 def edit_open(jid, bid):
-    from studio import edit
+    from studio import edit, editor_session
     j = studio.job(jid)
+    b = request.get_json(silent=True) or {}
+    sid = b.get("sid", "")
+    ed = editor_session.acquire(jid, pid=os.getpid(), port=VS_PORT, sid=sid, namespace=_editor_ns())
     try: rv = edit.open_beat(j.dir, bid, config.load(), j.log)
     except Exception as e: return jsonify(error=str(e)[:300]), 400
-    return jsonify(space="short" if edit.kind(j.dir) == "short" else "long", rv=rv)
+    return jsonify(space="short" if edit.kind(j.dir) == "short" else "long", rv=rv,
+                   editor={"ok": ed.get("ok", False), "waiting": ed.get("waiting", False),
+                           "holder_jid": ed.get("holder_jid"), "holder_port": ed.get("holder_port"),
+                           "age": ed.get("age", 0)})
 
 @app.post("/api/jobs/<jid>/edit/chat")
 def edit_chat(jid):
@@ -249,7 +269,6 @@ def edit_chat(jid):
     from studio import debug
     b = request.get_json(silent=True) or {}; text = (b.get("text") or "").strip()
     if not text or not b.get("beat"): return jsonify(error="type a message (and open a beat)"), 400
-    if studio.current: return jsonify(error="A job is rendering right now; edit when it has finished."), 409
     if _interview(jid):
         from studio import interview_edit
         try: return jsonify(interview_edit.chat(studio.job(jid).dir, b["beat"], text, config.load()))
@@ -264,26 +283,41 @@ def edit_chat_log(jid):
 
 @app.post("/api/jobs/<jid>/edit/<action>/<bid>")
 def edit_act(jid, action, bid):
-    from studio import edit
+    from studio import edit, gpu_lock
     j = studio.job(jid); b = request.get_json(silent=True) or {}; cfg = config.load()
-    if studio.current: return jsonify(error="A job is rendering right now; edit when it has finished."), 409
+    sid = b.get("sid", "")
+    ok, holder = _editor_owner(jid, sid)
+    if not ok:
+        return jsonify(error=holder), 409
     try:
-        if action == "preview": return jsonify(edit.preview(j.dir, bid, b.get("cands") or [], b.get("fit", "auto"), cfg, j.log))
+        if action == "preview":
+            with gpu_lock.holder(desc=f"editor-preview:{jid}:{bid}"):
+                return jsonify(edit.preview(j.dir, bid, b.get("cands") or [], b.get("fit", "auto"), cfg, j.log))
         if action == "apply":
             err = edit.start_apply(j.dir, bid, b.get("cands") or [], b.get("fit", "auto"), cfg, j.log)
             return (jsonify(error=err), 409) if err else jsonify(ok=True)
-    except Exception as e: return jsonify(error=str(e)[:300]), 400
+    except Exception as e:
+        return jsonify(error=str(e)[:300]), 400
     return jsonify(error="unknown action"), 400
 
 @app.post("/api/jobs/<jid>/edit_all/<action>")
 def edit_all(jid, action):
-    from studio import edit, review
+    from studio import edit, review, gpu_lock
     j = studio.job(jid)
+    b = request.get_json(silent=True) or {}
+    sid = b.get("sid", "")
     try:
-        if action == "undo": edit.undo(j.dir, j.log)
+        if action == "undo":
+            ok, holder = _editor_owner(jid, sid)
+            if not ok:
+                return jsonify(error=holder), 409
+            with gpu_lock.holder(desc=f"editor-undo:{jid}"):
+                edit.undo(j.dir, j.log)
         elif action == "rerender":
-            b = request.get_json(silent=True) or {}
-            studio.rerender(jid, str(b.get("target") or ""), bool(b.get("refresh_fallbacks")))
+            ok, holder = _editor_owner(jid, sid)
+            if not ok:
+                return jsonify(error=holder), 409
+            studio.rerender(jid, str(b.get("target") or ""), bool(b.get("refresh_fallbacks")), editor_owned=True)
         elif action == "cleanup":
             review.prune(j.dir, j.log, full=True)
             if (j.dir / "longedit").exists(): review.prune(j.dir / "longedit", j.log, full=True)
@@ -510,12 +544,50 @@ def make_shot(rid, name):
     if make.shots_root().resolve() not in d.parents: abort(404)
     return send_from_directory(d, name)
 
+@app.get("/api/jobs/<jid>/editor")
+def editor_status(jid):
+    from studio import editor_session, gpu_lock
+    sid = request.args.get("sid", "")
+    st = editor_session.state(namespace=_editor_ns())
+    return jsonify(
+        active=bool(st),
+        owner=bool(st and editor_session.is_owner(jid, os.getpid(), VS_PORT, sid, namespace=_editor_ns())),
+        holder_jid=st.get("jid") if st else None,
+        holder_port=st.get("port") if st else None,
+        age=st.get("age", 0) if st else 0,
+        active_applies=st.get("active_applies", 0) if st else 0,
+        lock=gpu_lock.status(),
+    )
+
+@app.post("/api/jobs/<jid>/editor/heartbeat")
+def editor_heartbeat(jid):
+    from studio import editor_session
+    b = request.get_json(silent=True) or {}
+    rv = editor_session.heartbeat(
+        jid, os.getpid(), VS_PORT, b.get("sid", ""),
+        b.get("active_applies"), namespace=_editor_ns(),
+    )
+    return jsonify(ok=rv.get("ok", False), error=rv.get("error"))
+
+@app.post("/api/jobs/<jid>/editor/close")
+def editor_close(jid):
+    from studio import editor_session
+    b = request.get_json(silent=True) or {}
+    editor_session.release(
+        jid, pid=os.getpid(), port=VS_PORT,
+        sid=b.get("sid", ""), namespace=_editor_ns(),
+    )
+    return jsonify(ok=True)
+
 @app.post("/make/edit")
 def make_edit():
     from studio import edit
     b = request.get_json(silent=True) or {}; j = studio.job(b.get("job", ""))
     if not j.dir.exists(): return jsonify(error="no such job"), 404
-    if studio.current: return jsonify(error="A job is rendering right now; edit when it has finished."), 409
+    sid = b.get("sid", "")
+    ok, holder = _editor_owner(b.get("job", ""), sid)
+    if not ok:
+        return jsonify(error=holder), 409
     err = edit.start_apply(j.dir, b.get("beat", ""), b.get("cands") or [], b.get("fit", "auto"), config.load(), j.log)
     return (jsonify(error=err), 409) if err else jsonify(ok=True)
 
