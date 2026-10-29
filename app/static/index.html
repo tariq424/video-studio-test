@@ -308,6 +308,96 @@ let ED={beats:[],kind:null,cur:null,open:null,space:'short',rv:null,sel:[],fit:'
 const FITS=[['auto','Auto'],['freeze','Freeze'],['slow','Slow down'],['loop','Loop'],['trim','Trim'],['speed','Speed up'],['still','Add still']];   // + Segment for your own files (edDraw)
 function fmtT(x){return Math.floor(x/60)+':'+String(Math.floor(x%60)).padStart(2,'0')}
 async function edInit(){try{const d=await j(`/api/jobs/${sel}/edit/beats`);ED.beats=d.beats||[];ED.kind=d.kind;edBar(d)}catch(e){}}
+
+// ---- editor GPU reservation / session helpers (round 2b) ----
+function edSid(){
+  const key='vsedit.sid.'+sel;
+  let sid=sessionStorage.getItem(key);
+  if(!sid){sid=(crypto.randomUUID&&crypto.randomUUID())||('sid-'+Date.now()+'-'+Math.random().toString(16).slice(2));sessionStorage.setItem(key,sid);}
+  return sid;
+}
+function edStartTimers(){edStopTimers();ED.pollTimer=setInterval(edPoll,4000);ED.heartbeatTimer=setInterval(edHeartbeatIfActive,60000);}
+function edStopTimers(){clearInterval(ED.pollTimer);clearInterval(ED.heartbeatTimer);ED.pollTimer=ED.heartbeatTimer=null;}
+async function edPost(url,body){
+  body=body||{};body.sid=ED.sid;
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  let d={};try{d=await r.json()}catch(_){}
+  if(!r.ok){
+    const e=new Error(d.error||r.statusText||('HTTP '+r.status));
+    e.status=r.status;e.body=d;throw e;
+  }
+  return d;
+}
+function edSetApplyDisabled(disabled){
+  ED.applyDisabled=disabled;
+  document.querySelectorAll('#edp button').forEach(function(b){
+    const t=(b.textContent||'').replace(/\s+/g,' ').toLowerCase();
+    if(t.indexOf('apply')>=0||t.indexOf('skip')>=0)b.disabled=disabled;
+  });
+}
+function edShowResume(msg){
+  msg.textContent='';
+  const b=document.createElement('button');
+  b.type='button';b.textContent='Resume';b.className='ed-resume';
+  b.onclick=function(){if(ED.open!==undefined&&ED.open!==null)edOpen(ED.open);};
+  msg.append('Edit paused after 15 min — ',b);
+  ED.bannerText='paused';
+}
+function edRenderBanners(d){
+  let text='';let paused=false;let waiting=false;
+  const lock=d.lock||{};
+  if(lock.held&&!lock.mine){
+    text='A render is on the runway — your edit starts at its next safe point ('+(lock.desc||'gpu')+', '+(lock.age!=null?lock.age+'s':'')+')';
+  }else if(d.active===false&&!d.holder_jid){
+    paused=true;
+  }else if(d.owner===false&&d.holder_jid){
+    waiting=true;text='Waiting: editor in use ('+d.holder_jid+')';
+  }else if(d.waiting&&d.holder_jid){
+    waiting=true;text='Waiting: editor in use ('+d.holder_jid+')';
+  }
+  ED.waiting=waiting;edSetApplyDisabled(waiting);
+  const msg=$('edmsg');
+  if(msg&&paused){edShowResume(msg);return;}
+  if(msg&&!text&&ED.bannerText){msg.textContent='';ED.bannerText='';}
+  if(msg&&text){msg.textContent=text;ED.bannerText=text;}
+}
+function edBanner(ed){
+  if(!ed)return;
+  edRenderBanners({active:true,owner:ed.ok,holder_jid:ed.holder_jid,waiting:ed.waiting,lock:{}});
+}
+async function edPoll(){
+  if(!ED.sid)return;
+  try{
+    const r=await fetch(`/api/jobs/${sel}/editor?sid=${encodeURIComponent(ED.sid)}`,{cache:'no-store'});
+    const d=await r.json();
+    if(r.ok)edRenderBanners(d);
+  }catch(_){}
+}
+function edHeartbeatIfActive(){
+  if(!ED.sid||typeof sel==='undefined')return;
+  if(Date.now()-(ED.lastActivity||0)>60000)return;
+  fetch(`/api/jobs/${sel}/editor/heartbeat`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid:ED.sid})}).catch(function(){});
+}
+function edCloseSession(){
+  if(!ED.sid||ED._closeSent)return;
+  ED._closeSent=true;edStopTimers();
+  const url=`/api/jobs/${sel}/editor/close`;
+  const body=JSON.stringify({sid:ED.sid});
+  try{
+    if(navigator.sendBeacon){navigator.sendBeacon(url,new Blob([body],{type:'application/json'}));}
+    else{fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:body,keepalive:true});}
+  }catch(_){}
+}
+function edMarkActivity(){ED.lastActivity=Date.now();}
+document.addEventListener('pointerdown',edMarkActivity,{passive:true});
+document.addEventListener('keydown',edMarkActivity,{passive:true});
+document.addEventListener('click',function(e){
+  const el=e.target.closest?e.target.closest('button,.ed-close,[data-close]'):null;
+  if(!el)return;
+  const t=(el.textContent||'').replace(/\s+/g,' ').toLowerCase();
+  if(t.indexOf('done editing')>=0||el.classList.contains('ed-close')||el.id==='edClose'||el.id==='edDone')edCloseSession();
+});
+window.addEventListener('pagehide',edCloseSession);
 function edJump(id){const v=$('ov'),b=ED.beats.find(x=>x.id==id);if(!v||!b)return;v.pause();v.currentTime=b.start+Math.min(0.5,b.dur/2);ED.cur=b.id;edBar()}
 function edAt(t){return ED.beats.find(b=>t>=b.start&&t<b.start+b.dur)}
 function edTick(){scTick();const v=$('ov');if(!v||!ED.beats.length)return;const b=edAt(v.currentTime);const k=b?b.id:'';if(k!==ED.cur){ED.cur=k;edBar()}}
@@ -356,12 +446,13 @@ function scTick(){const v=$('ov'),r=$('scr_r');if(!v||!r)return;const t=v.curren
 function scEdit(){const v=$('ov');if(!v)return;v.pause();const b=edAt(v.currentTime);if(b&&b.editable)edOpen(b.id)}
 
 async function edTarget(t){try{await rvPost(`/api/jobs/${sel}/edit/target`,{target:t});ED.open=null;lastKey='';loadJobs()}catch(e){alert(e.message)}}
-async function edAll(a){try{await rvPost(`/api/jobs/${sel}/edit_all/${a}`);if(a=='undo'){edReload()}else{lastKey='';loadJobs()}}catch(e){alert(e.message)}}
+async function edAll(a){try{await edPost(`/api/jobs/${sel}/edit_all/${a}`,{});if(a=='undo'){edReload()}else{lastKey='';loadJobs()}}catch(e){if(e.status===409&&$('edmsg'))$('edmsg').textContent=e.message;else alert(e.message)}}
 function edReload(){const v=$('ov');if(v){const base=(v.getAttribute('src')||ED.ovSrc||'').split('?')[0];const t=v.getAttribute('src')?v.currentTime:(ED.ovT||0);if(base){v.src=base+'?t='+Date.now();v.currentTime=t}ED.ovSrc=null}edInit()}
 const edQ=()=>ED.space=='long'?'?space=long':'';const edBase=()=>`/files/${sel}/${ED.space=='long'?'longedit/':''}short/`;
 async function edOpen(bid){const v=$('ov');if(v)v.pause();$('edp').innerHTML='<p class="mut">Opening the beat…</p>';
- try{const r=await fetch(`/api/jobs/${sel}/edit/open/${bid}`,{method:'POST'});const d=await r.json();if(!r.ok)throw new Error(d.error);
-  ED.open=bid;ED.space=d.space;ED.rv=d.rv;const b=ED.rv.beats[bid];ED.sel=[...(b.current||[])];ED.fit='auto';ED.draft='';ED.chat=(await j(`/api/jobs/${sel}/edit/chat?beat=${bid}`)).chat;edDraw()}catch(e){$('edp').innerHTML=`<p style="color:var(--bad)">${esc(e.message)}</p>`}}
+ ED.sid=edSid();ED._closeSent=false;edStartTimers();
+ try{const d=await edPost(`/api/jobs/${sel}/edit/open/${bid}`,{});
+  ED.open=bid;ED.space=d.space;ED.rv=d.rv;const b=ED.rv.beats[bid];ED.sel=[...(b.current||[])];ED.fit='auto';ED.draft='';ED.chat=(await j(`/api/jobs/${sel}/edit/chat?beat=${bid}`)).chat;edDraw();edBanner(d.editor)}catch(e){if(e.status===409&&$('edmsg'))$('edmsg').textContent=e.message;$('edp').innerHTML=`<p style="color:var(--bad)">${esc(e.message)}</p>`}}
 // ---- beat-edit panel: six labelled panes (Candidates, Fit options, Actions | Preview, Chat, Log), each with its own tint
 const SRC_OF=(c)=>{const r=c.rung,it=c.item||{};if(it.user||r=='supplied'||r=='own')return['FILE','your file'];
  if(['still','animate','parallax','parallax (fill)','cloud','reconstruction'].includes(r))return['AI','AI-made picture or motion'];
@@ -424,12 +515,12 @@ async function edPreview(){const el=$('edpv');el.innerHTML='<span class="mut">Re
 // let go of the video file before it is replaced (Windows won't replace a file a player has open): pause + unload the players
 function edRelease(){const v=$('ov');if(v&&v.getAttribute('src')){ED.ovSrc=v.getAttribute('src');ED.ovT=v.currentTime;v.pause();v.removeAttribute('src');v.load()}
  document.querySelectorAll('#edpv video').forEach(x=>{x.pause();x.removeAttribute('src');x.load()})}
-async function edApply(){if(!ED.sel.length)return;$('edmsg').textContent='Applying…';edRelease();try{await rvPost(`/api/jobs/${sel}/edit/apply/${ED.open}`,{cands:ED.sel,fit:ED.fit});edWait()}catch(e){$('edmsg').textContent='';edReload();alert(e.message)}}
+async function edApply(){if(!ED.sel.length||ED.waiting)return;$('edmsg').textContent='Applying…';edRelease();try{await edPost(`/api/jobs/${sel}/edit/apply/${ED.open}`,{cands:ED.sel,fit:ED.fit});edWait()}catch(e){$('edmsg').textContent='';edReload();if(e.status===409){if($('edmsg'))$('edmsg').textContent=e.message;return}alert(e.message)}}
 async function edSkip(){const b=ED.rv.beats[ED.open];const cid=b.cands.find(c=>ED.rv.cands[c].rung=='headline');if(!cid){alert('No headline card for this beat');return}ED.sel=[cid];ED.fit='auto';edApply()}
 async function edWait(){const d=await j(`/api/jobs/${sel}/edit/beats`);edBar(d);if(d.busy){setTimeout(edWait,3000);if($('edmsg'))$('edmsg').textContent=d.busy;return}
- if(d.error){edReload();if($('edmsg'))$('edmsg').textContent='✗ Not applied: '+d.error;const bid=ED.open;if(bid){const r=await fetch(`/api/jobs/${sel}/edit/open/${bid}`,{method:'POST'});const x=await r.json();if(r.ok){ED.rv=x.rv;edDraw();$('edmsg').textContent='✗ Not applied: '+d.error}}return}
+ if(d.error){edReload();if($('edmsg'))$('edmsg').textContent='✗ Not applied: '+d.error;const bid=ED.open;if(bid){try{const x=await edPost(`/api/jobs/${sel}/edit/open/${bid}`,{});if(x){ED.rv=x.rv;edDraw();$('edmsg').textContent='✗ Not applied: '+d.error}}catch(e){if(e.status===409&&$('edmsg'))$('edmsg').textContent=e.message}}return}
  if(POPUP&&window.opener){try{window.opener.postMessage({vsEdited:sel},'*')}catch(e){}}
- if($('edmsg'))$('edmsg').textContent='Applied. The video below is updated.';edReload();const bid=ED.open;if(bid){const r=await fetch(`/api/jobs/${sel}/edit/open/${bid}`,{method:'POST'});const x=await r.json();if(r.ok){ED.rv=x.rv;ED.sel=[...(ED.rv.beats[bid].current||[])];edDraw();$('edmsg').textContent='Applied. The video is updated.'}}}
+ if($('edmsg'))$('edmsg').textContent='Applied. The video below is updated.';edReload();const bid=ED.open;if(bid){try{const x=await edPost(`/api/jobs/${sel}/edit/open/${bid}`,{});if(x){ED.rv=x.rv;ED.sel=[...(ED.rv.beats[bid].current||[])];edDraw();$('edmsg').textContent='Applied. The video is updated.'}}catch(e){if(e.status===409&&$('edmsg'))$('edmsg').textContent=e.message}}}
 async function edRv(a){const body={action:a};if(a=='refine'){body.text=$('edrf').value.trim();if(!body.text)return}
  try{ED.rv=await rvPost(`/api/jobs/${sel}/review/${ED.open}${edQ()}`,body);edDraw();setTimeout(edRefresh,1500)}catch(e){alert(e.message)}}
 async function edSupply(){const t=$('edsp').value.trim();if(!t)return;$('edmsg').textContent='Adding your file…';
