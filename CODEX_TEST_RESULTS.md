@@ -35,6 +35,6 @@ The existing HF token was copied to Windows Credential Manager and verified with
 - Real local-vision narration-fit quality and an actual test-server render, in an idle GPU window. Do not start competing GPU work while the old live process renders.
 - Safely activate the approved credential loader, then migrate both existing plaintext settings entries and verify redaction on the live server. Any restart must account for unrelated pending changes in that working tree; do not deploy those implicitly.
 - HF token rotation when Tariq resumes HF work/authentication.
-- Exact Christian reference confirmation: supplied document contains three different channels. See `RENDER_REFERENCE_REVIEW.md`; no exact FFmpeg optimization commands or measured speedup were verified.
+- Christian reference is now confirmed by Tariq's direct link. Expanded description and English browser transcript were reviewed; see `RENDER_REFERENCE_REVIEW.md`. No exact FFmpeg optimization commands or measured speedup were verified.
 
 No visual change was deployed to live. No publishing, deletion, Google generation or paid service was exercised.
