@@ -29,6 +29,8 @@ imagegen_cooldown_hours, imagegen_headless (true), imagegen_delay_secs ([15, 30]
 service), imagegen_providers (["gemini", "chatgpt", "bing"]: the rotation), chatgpt_profile, bing_profile.
 """
 import json
+import hashlib
+import os
 import re
 import time
 from pathlib import Path
@@ -53,6 +55,8 @@ REFUSED = re.compile(r"(can.t (create|generate|make) (images|that|this)|couldn.t
                      r"against (my|our) (policies|guidelines)|unable to (create|generate))", re.I)
 
 PROVIDERS = ("gemini", "chatgpt", "bing", "hf")
+GOOGLE_IMAGE_PROVIDERS = ("gemini",)
+FIT_AUDIT = "fit_audit.json"
 HF_SPACE = "black-forest-labs/FLUX.1-schnell"   # Hugging Face's free hosted FLUX (ZeroGPU): runs on their GPUs, not this PC
 _job_skip = {}       # site -> why it's skipped for the rest of this job
 _last = {}           # site -> when it last answered: each service is paced like a person, not a script
@@ -83,6 +87,30 @@ def reset():
 
 def last_site():
     return _site["cur"]
+
+def _port_from_env(env=None):
+    raw = (os.environ if env is None else env).get("PORT", "")
+    if raw is None:
+        return None
+    raw = str(raw).strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+def narration_fit_on(env=None):
+    """The new narration/image fit check is enforced only on test port 42022.
+
+    Unset PORT, malformed PORT, and every other port keep the old behavior.
+    """
+    return _port_from_env(env) == 42022
+
+def _stable_non_google_first(order):
+    non_google = [x for x in order if x not in GOOGLE_IMAGE_PROVIDERS]
+    google = [x for x in order if x in GOOGLE_IMAGE_PROVIDERS]
+    return non_google + google
 
 
 class Skip(Exception):
@@ -639,6 +667,138 @@ def _has_text(cfg, image, log):
         log(f"  text check unavailable ({str(e)[:80]}); keeping the image"); return ""
 
 
+FIT_PROMPT = ('Does this image directly illustrate the narration below? Ignore on-screen text, logos, watermarks, captions '
+              'and incidental labels. Reply with JSON only: {"match": "yes" or "no", "reason": "<a few words>"}\n\nNarration: ')
+
+def _empty_fit_audit():
+    return {"counts": {"checked": 0, "accepted": 0, "rejected_for_narration": 0, "unavailable": 0}, "entries": {}}
+
+def _fit_audit_file(d):
+    return d / FIT_AUDIT
+
+def _load_fit_audit(d):
+    p = _fit_audit_file(d)
+    try:
+        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else _empty_fit_audit()
+    except (OSError, ValueError):
+        return _empty_fit_audit()
+
+def _save_fit_audit(d, audit):
+    try:
+        p = _fit_audit_file(d)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(audit, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+
+def _fit_fingerprint(sec, source_image, model, prompt, image_path=None):
+    h = hashlib.sha256()
+    h.update(((sec.get("vo") or sec.get("still_prompt") or "")).encode("utf-8", "replace"))
+
+    def stat_fp(p):
+        try:
+            return hashlib.sha256(Path(p).read_bytes()).digest()
+        except OSError:
+            return b"missing"
+
+    h.update(b"\0source")
+    h.update(stat_fp(source_image) if source_image else b"none")
+    h.update(b"\0model")
+    h.update((model or "").encode("utf-8", "replace"))
+    h.update(b"\0prompt")
+    h.update((prompt or "").encode("utf-8", "replace"))
+    if image_path:
+        h.update(b"\0candidate")
+        h.update(stat_fp(image_path))
+    return h.hexdigest()
+
+def _local_fit_vision(cfg, image, prompt):
+    local_cfg = dict(cfg)
+    local_cfg["vet_provider"] = "local"
+    from .footage import _vision
+    return _vision(local_cfg, image, prompt)
+
+def _fit_check_now(cfg, image_path, sec, log):
+    vo = (sec.get("vo") or sec.get("still_prompt") or "").strip()
+    if not vo:
+        return "unavailable", "no narration"
+    try:
+        from .llm import parse_json
+        raw = _local_fit_vision(cfg, image_path, FIT_PROMPT + vo[:2000])
+        j = parse_json(raw)
+        match = str(j.get("match", "")).strip().lower()
+        reason = str(j.get("reason") or "").strip()[:80]
+        if match in ("yes", "true", "1"):
+            return "accepted", reason or "image matches narration"
+        if match in ("no", "false", "0"):
+            return "rejected", reason or "narration mismatch"
+        log(f"  fit: malformed local vision verdict ({raw[:120]!r}); counted as unavailable")
+        return "unavailable", "malformed verdict"
+    except Exception as e:
+        if str(e) == "cancelled":
+            raise
+        log(f"  fit: local vision unavailable ({str(e)[:120]})")
+        return "unavailable", str(e)[:80]
+
+def _keep_fit_rejected(img, d, log):
+    try:
+        rdir = d / "_rejected"
+        rdir.mkdir(parents=True, exist_ok=True)
+        dest = rdir / (img.stem + "_fit_" + time.strftime("%Y%m%d_%H%M%S") + img.suffix)
+        if dest.exists():
+            dest = rdir / (img.stem + "_fit_" + str(time.time_ns()) + img.suffix)
+        img.replace(dest)
+        return dest
+    except OSError as e:
+        log(f"    fit: could not keep rejected image {img.name} for evidence ({str(e)[:80]})")
+        return None
+
+def _fit_verdict_for(cfg, d, sec, image_path, prompt, log, provider="imagegen", source_image=None):
+    audit = _load_fit_audit(d)
+    if not isinstance(audit, dict):
+        audit = _empty_fit_audit()
+    audit.setdefault("counts", {})
+    audit.setdefault("entries", {})
+    for c in ("checked", "accepted", "rejected_for_narration", "unavailable"):
+        audit["counts"].setdefault(c, 0)
+
+    model = cfg.get("vet_model", "qwen2.5vl:7b")
+    fp = _fit_fingerprint(sec, source_image, model, prompt, image_path)
+    key = Path(image_path).name
+
+    ent = audit["entries"].get(key)
+    if ent and ent.get("fp") == fp and ent.get("verdict") in ("accepted", "rejected") and Path(image_path).is_file():
+        log(f"  fit[{provider}] {key}: cached {ent['verdict']}: {ent.get('reason', '')}")
+        return ent["verdict"], ent.get("reason", "")
+
+    try:
+        verdict, reason = _fit_check_now(cfg, image_path, sec, log)
+    except Exception as exc:
+        if str(exc) == "cancelled": raise
+        verdict, reason = "unavailable", type(exc).__name__
+    audit["entries"][key] = {
+        "fp": fp,
+        "verdict": verdict,
+        "reason": reason,
+        "provider": provider,
+        "image": key,
+        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    counts = audit["counts"]
+    counts["checked"] += 1
+    if verdict == "accepted":
+        counts["accepted"] += 1
+    elif verdict == "rejected":
+        counts["rejected_for_narration"] += 1
+    else:
+        counts["unavailable"] += 1
+    _save_fit_audit(d, audit)
+    log(f"  fit[{provider}] {key}: {verdict}: {reason}")
+    log(f"  fit audit: checked={counts['checked']} accepted={counts['accepted']} "
+        f"rejected_for_narration={counts['rejected_for_narration']} unavailable={counts['unavailable']}")
+    return verdict, reason
+
+
 # ---------------------------------------------------------------- ladder entry
 def generate(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
     """Rung 3. -> (image_path, site, prompt) or (None, None, None). Never raises (cancel aside)."""
@@ -648,22 +808,47 @@ def generate(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
 
 def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
     """-> [(image_path, prompt), ...] (first = the scene, then variants), or []. Never raises (cancel aside).
-    The video's service first (rotation), then the others if it fails; last_site() says which one made them."""
+    The video's service first (rotation), then the others if it fails; last_site() says which one made them.
+    On PORT=42022 only, every generated/resumed image also has to pass a local narration-fit check before
+    it can be selected; rejected and unavailable evidence is kept under imagegen/_rejected."""
     count = max(1, min(int(count), 1 + len(VARIANTS), int(cfg.get("imagegen_per_beat", 1))))
     if not cfg.get("imagegen_on", True):
         return []
     order = [x for x in (cfg.get("imagegen_providers") or PROVIDERS) if x in PROVIDERS] or ["gemini"]
+    order = _stable_non_google_first(order)
+    fit_on = narration_fit_on()
+    source_image = str(image) if image and Path(image).is_file() else None
+    cached_failed_site = None
     d = Path(sd) / "imagegen"; d.mkdir(parents=True, exist_ok=True)
     led = d / "gemini_usage.json"   # (name kept from when Gemini was the only service: one ledger per video)
     try: used = json.loads(led.read_text(encoding="utf-8")) if led.exists() else {}
     except (OSError, ValueError): used = {}
+
     if key in used:   # already made (a resumed job)
         site = used[key].get("site", "gemini")
         files = [d / f for f in used[key].get("files", [])] or [d / f"{key}_gemini.jpg"] + [d / f"{key}_gemini_{k + 2}.jpg" for k in range(count - 1)]
         files = [x for x in files if x.is_file()]
         if files:
             _site["cur"] = site
-            return [(x, used[key].get("prompt", "")) for x in files]
+            if not fit_on:
+                return [(x, used[key].get("prompt", "")) for x in files]
+            kept = []
+            for img in files:
+                verdict, reason = _fit_verdict_for(cfg, d, sec, img, used[key].get("prompt", ""), log, site, source_image=source_image)
+                if verdict == "accepted":
+                    kept.append(img)
+                else:
+                    _keep_fit_rejected(img, d, log)
+                    log(f"  fit: cached {site}: {img.name}: {verdict} ({reason}); evidence kept")
+            if kept:
+                used[key]["files"] = [x.name for x in kept]
+                led.write_text(json.dumps(used, indent=1), encoding="utf-8")
+                return [(x, used[key].get("prompt", "")) for x in kept]
+            used.pop(key, None)
+            cached_failed_site = site
+            led.write_text(json.dumps(used, indent=1), encoding="utf-8")
+            log(f"  fit: cached {site} image(s) failed narration fit; trying next provider")
+
     cap = int(cfg.get("imagegen_max_per_video", 8))
     if len(used) >= cap:
         log(f"  image generators: {cap} images already made for this video; next rung"); return []
@@ -673,7 +858,10 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
         pref = cfg.get("imagegen_first") if cfg.get("imagegen_first") in order else None
         first = _job_provider(cfg, sd, [x for x in order if x != pref] or order)
         tries = ([pref] if pref else []) + [first] + [x for x in order if x not in (first, pref)]
-    image = str(image) if image and Path(image).is_file() else None
+        tries = _stable_non_google_first(tries)
+    if cached_failed_site:
+        tries = [site for site in tries if site != cached_failed_site]
+    image = source_image
     timeout = int(cfg.get("imagegen_timeout", 240))
     vo = str(sec.get("vo") or sec.get("still_prompt") or "")
     described = None   # the screenshot described once by the local vision model, for the services that take a text prompt
@@ -714,7 +902,23 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
             fails = sorted(d.glob(f"{key}_{site}_*_fail.png"))
             log(f"  {site} failed ({str(e).splitlines()[0][:200]})" + (f"; screenshot {fails[-1]}" if fails else "") + "; next service")
             continue
+
         got = [out] + [x for x in extras if x.is_file()]
+        if fit_on:
+            kept = []
+            for img in got:
+                verdict, reason = _fit_verdict_for(cfg, d, sec, img, prompt, log, site, source_image=source_image)
+                if verdict == "accepted":
+                    kept.append(img)
+                else:
+                    _keep_fit_rejected(img, d, log)
+                    log(f"  fit: {site}: {img.name}: {verdict} ({reason}); evidence kept")
+            if kept:
+                got = kept
+            else:
+                log(f"  fit: {site}: all image(s) failed narration fit; next provider")
+                continue
+
         if cfg.get("imagegen_rotate", False) and site not in (first, pref):   # the video's service is out: the rest of this video uses the one that worked (one look per video)
             try: (d / "provider.txt").write_text(site, encoding="utf-8")
             except OSError: pass

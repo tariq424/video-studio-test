@@ -38,6 +38,7 @@ DEFAULTS = {
     "wangp_start_timeout": 300,
     "script_provider": "deepseek",
     "qa_provider": "off",
+    "hf_token": "",
     "anthropic_api_key": "",
     "zai_api_key": "",
     "zai_base_url": "https://api.z.ai/api/anthropic",
@@ -137,7 +138,7 @@ DEFAULTS = {
     "aisstream_api_key": "",          # optional (aisstream.io, free): live AIS position for ship_route when the narration gives an MMSI
 }
 
-SECRETS = ("anthropic_api_key", "zai_api_key", "deepseek_api_key", "aisstream_api_key")
+SECRETS = ("anthropic_api_key", "zai_api_key", "deepseek_api_key", "aisstream_api_key", "hf_token")
 
 VAULT = "ExplainerStudio"   # shared with Explainer Studio so saved keys carry over
 
@@ -165,14 +166,56 @@ def _raw():
         except Exception: pass
     return {}
 
+def _atomic_write(path, text):
+    import os, tempfile
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        try: os.unlink(tmp)
+        except OSError: pass
+        raise
+
+def _store_verified(name, value):
+    try:
+        _vault_set(name, value)
+        if _vault_get(name) != value:
+            raise RuntimeError("vault verification failed")
+    except Exception:
+        raise RuntimeError("Credential Manager write failed for " + name) from None
+
 def _migrate():
-    """Move any plain-text keys from settings.json into the Windows vault."""
-    raw = _raw(); changed = False
+    """Move plaintext secrets into the OS vault.
+
+    Vault writes are verified before settings.json is rewritten. The rewrite is
+    atomic and keeps no plaintext backup. Returns the number of settings keys moved.
+    """
+    raw = _raw()
+    new_raw = dict(raw)
+    migrated = 0
     for k in SECRETS:
         v = raw.get(k, "")
         if v and v != "vault":
-            _vault_set(k, v); raw[k] = "vault"; changed = True
-    if changed: CFG.write_text(json.dumps(raw, indent=1), encoding="utf-8")
+            if k == "hf_token":
+                kr = _kr()
+                if kr is None:
+                    raise RuntimeError("Windows Credential Manager unavailable; refusing to migrate hf_token")
+            _store_verified(k, v)
+            new_raw[k] = "vault"
+            migrated += 1
+    if migrated:
+        _atomic_write(CFG, json.dumps(new_raw, indent=1))
+    return migrated
+
+def migrate_secrets():
+    """Safe local entry point for moving plaintext secrets into the OS vault."""
+    return _migrate()
 
 def load():
     d = dict(DEFAULTS)
@@ -182,8 +225,10 @@ def load():
     import os
     for k in SECRETS:   # Windows vault; on the Linux worker the service's environment (VS_<NAME>) or a plain value
         plain = raw.get(k) if raw.get(k) not in (None, "", "vault") else ""
-        d[k] = _vault_get(k) or os.environ.get("VS_" + k.upper(), "") or plain
-    if os.environ.get("VS_HF_TOKEN") and not d.get("hf_token"): d["hf_token"] = os.environ["VS_HF_TOKEN"]
+        if k == "hf_token":
+            d[k] = _vault_get(k) or os.environ.get("VS_HF_TOKEN", "")
+        else:
+            d[k] = _vault_get(k) or os.environ.get("VS_" + k.upper(), "") or plain
     return d
 
 def save(upd):
@@ -194,9 +239,9 @@ def save(upd):
                 v = v.strip()
                 if v == "" or v.startswith("••"): continue
                 if v == "delete": v = ""
-                _vault_set(k, v); raw[k] = "vault" if v else ""
+                _store_verified(k, v); raw[k] = "vault" if v else ""
             else: raw[k] = v
-    CFG.write_text(json.dumps(raw, indent=1), encoding="utf-8")
+    _atomic_write(CFG, json.dumps(raw, indent=1))
     return load()
 
 def public(d=None):
