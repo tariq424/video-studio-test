@@ -433,12 +433,13 @@ function scDraw(){const el=$('scrub'),v=$('ov');if(!el||!v)return;const d=ED.las
   <button class="sec" data-testid="scrub-play" onclick="$('ov').play()">▶ Play</button><button class="sec" data-testid="scrub-stop" onclick="$('ov').pause()">■ Stop</button>
   <span data-testid="scrub-time" id="scr_t" style="font-variant-numeric:tabular-nums;font-weight:600">0:00.0</span><span class="mut" style="font-size:13px">/ ${fmtTs(D)}</span>
   <span data-testid="scrub-beat" id="scr_b" class="rv-badge">—</span>
-  <button data-testid="scrub-edit" id="scr_e" onclick="scEdit()" disabled>Edit this beat</button></div></div>`;
+  <button data-testid="scrub-edit" id="scr_e" onclick="scEdit()" disabled>Edit this beat</button></div><div id="scr_source" data-testid="scrub-source" class="src-note" hidden></div></div>`;
  el.innerHTML=h;scTick()}
 function scSeek(t){const v=$('ov');if(!v)return;v.currentTime=+t;scTick()}
 function scTick(){const v=$('ov'),r=$('scr_r');if(!v||!r)return;const t=v.currentTime||0;
  if(document.activeElement!==r)r.value=t.toFixed(2);if(isFinite(v.duration)&&+r.max<v.duration)r.max=v.duration.toFixed(2);
  $('scr_t').textContent=fmtTs(t);const b=edAt(t),busy=(ED.last||{}).busy;
+ const source=$('scr_source');if(source){source.hidden=!b?.source;source.textContent=b?.source?'Picture source: '+b.source:''}
  $('scr_b').textContent=b?(b.label+(ED.kind!='short'?' · '+b.id:'')+(b.editable?'':' (not editable)')):(ED.beats.length?'between beats':'beats not loaded');
  $('scr_b').dataset.beat=b?b.id:'';
  const e=$('scr_e');e.disabled=!(b&&b.editable)||!!busy||!v.paused;e.title=!v.paused?'Stop the video first':busy?String(busy):'';
