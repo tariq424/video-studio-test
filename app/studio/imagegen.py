@@ -667,8 +667,22 @@ def _has_text(cfg, image, log):
         log(f"  text check unavailable ({str(e)[:80]}); keeping the image"); return ""
 
 
-FIT_PROMPT = ('Does this image directly illustrate the narration below? Ignore on-screen text, logos, watermarks, captions '
-              'and incidental labels. Reply with JSON only: {"match": "yes" or "no", "reason": "<a few words>"}\n\nNarration: ')
+FIT_PROMPT = ('Does this image directly illustrate the narration below? Wording-level variants of the same subject '
+              '(synonyms, partial views, differently named or unnamed features - e.g. "glass doors" where the narration '
+              'says "glass-doored studios") still count as a match; only a genuinely different main subject does not. '
+              'Ignore on-screen text, logos, watermarks, captions and incidental labels. Reply with JSON only: '
+              '{"match": "yes" or "no", "reason": "<a few words>"}\n\nNarration: ')
+
+FIT_SUBJECT_PROMPT = ('Second, independent check after a first match=no. Look past passing foreground (a car dashboard, '
+                      'a window frame, hands) to the place or thing the image is showing. Is that the same kind of place '
+                      'or thing the narration is about - not the exact named instance, but the category? A narration '
+                      'about a beach cove matches any beach-cove photo; a narration about an arts centre or gallery '
+                      'matches that venue\'s halls, studios, glass doors or building; a narration about a boat matches a '
+                      'boat. Wording, synonyms, interior vs exterior views, and attribute detail do not matter '
+                      '("glass doors" vs "glass-doored studios" is the same subject). A genuinely different kind of '
+                      'place or thing (for example a place of worship or an office where the narration describes a '
+                      'secular arts venue) is not the same subject. If you cannot tell, answer no. Reply with JSON only: '
+                      '{"same_subject": "yes" or "no", "reason": "<a few words>"}\n\nNarration: ')
 
 def _empty_fit_audit():
     return {"counts": {"checked": 0, "accepted": 0, "rejected_for_narration": 0, "unavailable": 0}, "entries": {}}
@@ -731,7 +745,22 @@ def _fit_check_now(cfg, image_path, sec, log):
         if match in ("yes", "true", "1"):
             return "accepted", reason or "image matches narration"
         if match in ("no", "false", "0"):
-            return "rejected", reason or "narration mismatch"
+            # A rejection needs the subject check to agree: wording-level variants of the same
+            # subject (S8: genuine Arts Centre pictures rejected over "glass doors" wording) are
+            # matches; only a genuine subject mismatch rejects. Locked-source beats that already
+            # pass stage 1 never reach this; unavailable/malformed verdicts keep their behavior.
+            try:
+                raw2 = _local_fit_vision(cfg, image_path, FIT_SUBJECT_PROMPT + vo[:2000])
+                j2 = parse_json(raw2)
+                same = str(j2.get("same_subject", "")).strip().lower() in ("yes", "true", "1")
+                why2 = str(j2.get("reason") or "").strip()[:80]
+            except Exception as e:
+                if str(e) == "cancelled":
+                    raise
+                same, why2 = False, f"subject check unavailable: {str(e)[:50]}"
+            if same:
+                return "accepted", f"wording-level only; subject check: {why2 or reason or 'same subject'}"[:80]
+            return "rejected", f"subject mismatch: {why2 or reason or 'narration mismatch'}"[:80]
         log(f"  fit: malformed local vision verdict ({raw[:120]!r}); counted as unavailable")
         return "unavailable", "malformed verdict"
     except Exception as e:
