@@ -11,6 +11,16 @@ field genuinely must change — justify it in the RESULT if so. There is NO
 media-poc/app.py; do not create one.)
 
 
+AMENDED Nov 3, 2026 (Koda, at Tariq's direction; supersedes the D126-published
+text — Z007 had not started, so this file was updated in place): adds §C
+(deepseek-describe parser regression) and §D (Restore-bubble suppression) to
+the original sign-in detection + generation scope (§A/§B unchanged). New
+evidence since first publication: Tariq hand-fixed the chatgpt profile
+(real-Chrome launch on the profile, waited out the Cloudflare check — it now
+shows his chats) and hand-patched all 5 profiles' exit state; a fresh RUN ALL
+still returned every browser blocker, plus the §C regression below.
+
+
 ## The problem (verified from the code and a live RUN ALL, Nov 3, 2026)
 
 
@@ -97,10 +107,46 @@ is not the finish line:
   free generations.
 
 
+### C. deepseek-describe (r3) parser regression — ADDED by the amendment
+r3 was `ok` (~5.4s) in the Z005 runs and in Tariq's Nov 3 morning run; in his
+latest RUN ALL it regressed to blocker (~5.3s): "could not parse reply ..."
+with the raw reply snippet showing a `"thinking"` field — DeepSeek's
+response now carries thinking content the parser does not expect. Fix
+r3_deepseek_describe's reply handling so it is robust to the CURRENT reply
+shapes:
+- Diagnose first: record the raw response's structure (content block types /
+  top-level keys only — never the API key) in the RESULT before changing code.
+- Content blocks of type "thinking" must be ignored for parsing purposes; the
+  description/prompt comes from the text content. Also accept `content`
+  returned as a plain string, not only a list of blocks.
+- Fix the error-path bug visible in the current code: a Blocker raised inside
+  the parse try block (e.g. "model returned no text") is caught by the generic
+  `except` and re-wrapped as "could not parse reply". A precise blocker must
+  survive as itself — re-raise Blocker untouched.
+- Keep everything else about r3 (endpoint, model default deepseek-flash, the
+  JSON/fenced/regex/conversational extraction ladder) unchanged.
+
+
+### D. Kill the Chrome "Restore pages?" bubble permanently — ADDED by the amendment
+The headless route runs exit Chrome uncleanly, so the profiles keep recording
+a crashed exit and later launches can surface the Restore bubble (Tariq
+hand-patched all 5 profiles' Preferences exit state on Nov 3; the routes must
+stop re-breaking it). In `_browser()`, apply Tariq's proven pipeline pattern
+(login-all-profiles.ps1 v2.3):
+- Before launch, if the site's profile is not in use, repair
+  `profiles/<site>/Default/Preferences`: set `"exit_type":"Normal"` and
+  `"exited_cleanly":true`, raw-text flips only, everything else untouched;
+  skip silently if the file is missing or locked.
+- Add the launch arg `--hide-crash-restore-bubble` to the Chromium launch
+  (both headless and headed paths). If you add any further restore/infobar
+  flags, verify each against the installed Chrome version and list in the
+  RESULT exactly which flags are in the final code.
+
+
 ### Out of scope — do not touch
 r1 cloudflare (waits on Tariq's secrets/cloudflare.env), r2 hf-flux,
-r3 deepseek-describe, r9 wangp, r11 blender (that is Z006), the OPEN LOGIN
-helper in server.py, and the 11-route registry count.
+r9 wangp, r11 blender (that is Z006), the OPEN LOGIN helper in server.py,
+and the 11-route registry count. (r3 is in scope ONLY for §C.)
 
 
 ## Acceptance — all reported in Z007-RESULT.md at the repo root of this branch
@@ -121,3 +167,10 @@ helper in server.py, and the 11-route registry count.
 5. Blocker messages show the real profile folder paths (profiles/bing, etc.).
 6. Commits + Z007-RESULT.md pushed to `poc/media-routes`. Only routes.py
    changed (server.py only if justified in the RESULT).
+7. (§C) In the same fresh RUN ALL: r3 deepseek-describe ends `ok` again with
+   a real description + prompt in its output JSON, run against a reply that
+   includes thinking content; the RESULT quotes the diagnosed response
+   structure (block types / keys) that the fix handles.
+8. (§D) After the RUN ALL, every profile's Default\Preferences shows
+   exit_type Normal / exited_cleanly true (quote the check), and the RESULT
+   lists the final launch args added for restore-bubble suppression.
