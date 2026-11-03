@@ -4,6 +4,11 @@ Each route is fn(desc, aspect, image_path, ctx) -> output Path | Blocker(reason)
 Blocker = a precise reason the route cannot run right now (no token, not signed in,
 not installed, unreachable). Per spec, a precise blocker is a PASS for the card's
 plumbing — Tariq judges the outputs himself; there is no QC gate here.
+
+SPEC-Z007 changes: shared sign-in detection (_signin_state: signed_in / login_wall /
+unknown, with logged evidence on every card), best-effort first generation attempts on
+each browser route, r3 robustness (thinking blocks, string content, Blocker passthrough),
+and Chrome restore-bubble suppression in _browser (Preferences repair + launch flag).
 """
 import base64
 import json
@@ -71,31 +76,157 @@ def _goto(page, url, wait="domcontentloaded"):
                 raise Blocker(f"page did not load ({str(e).splitlines()[0][:110]}) — site unreachable or network too slow")
 
 
-def _login_page_detected(page, site_markers):
-    """True when the page clearly shows a sign-in wall (fresh profile)."""
-    for sel in ("button:has-text('Log in')", "button:has-text('Sign up')",
-                "a:has-text('Log in')", "a:has-text('Sign in')", "text='Sign in to continue'"):
-        try:
-            if page.locator(sel).first.is_visible(timeout=800):
-                return True
-        except Exception:
-            pass
-    for marker in site_markers:
-        if marker.lower() in page.url.lower():
-            return True
-    return False
+# ------------------------------------------------------------- Chrome crash-bubble (Z007 §D)
+def _repair_prefs(site):
+    """Flip a crashed exit to clean in profiles/<site>/Default/Preferences (raw text only).
+
+    Headless exits record exit_type 'Crashed', which pops the 'Restore pages?' bubble on
+    later launches. Same repair as Tariq's login-all-profiles.ps1 v2.3: raw-text flips,
+    nothing else touched; skipped silently when missing or locked."""
+    p = PROFILES / site / "Default" / "Preferences"
+    try:
+        raw = p.read_text(encoding="utf-8", errors="ignore")
+        fixed = raw.replace('"exit_type":"Crashed"', '"exit_type":"Normal"').replace('"exit_type": "Crashed"', '"exit_type": "Normal"')
+        fixed = re.sub(r'("exited_cleanly"\s*:\s*)false', r"\1true", fixed)
+        if fixed != raw:
+            p.write_text(fixed, encoding="utf-8")
+            return "repaired"
+        return "already clean"
+    except PermissionError:
+        return "locked (skipped)"
+    except OSError:
+        return "no Preferences file (skipped)"
 
 
 def _browser(site, headless=False):
-    """Playwright Chrome on this route's own profile (media-poc/profiles/<site>/)."""
+    """Playwright Chrome on this route's own profile (media-poc/profiles/<site>/).
+    Headed but parked offscreen (publisher pattern): a real window avoids headless-only
+    bot walls (Cloudflare challenges headless Chrome on chatgpt.com, verified Nov 3)."""
     from playwright.sync_api import sync_playwright
+    prefs = _repair_prefs(site)
+    args = ["--lang=en-US", "--hide-crash-restore-bubble",   # Z007 §D: suppress the Restore bubble
+            "--window-position=-32000,-32000", "--window-size=1440,1000"]
     token = {"pw": sync_playwright().start()}
-    args = ["--lang=en-US", "--window-position=-32000,-32000", "--window-size=1440,1000"] if headless else ["--lang=en-US"]
     ctx = token["pw"].chromium.launch_persistent_context(
         str(PROFILES / site), channel="chrome", headless=headless, locale="en-US", args=args)
     page = ctx.new_page()
     page.set_default_timeout(20000)
-    return token["pw"], ctx, page
+    return token["pw"], ctx, page, prefs
+
+
+# ------------------------------------------------------------- sign-in detection (Z007 §A)
+# Strong login-wall URL evidence per site (a generic Log in button is NOT wall evidence).
+WALL_URL_MARKERS = {
+    "chatgpt": ("auth.openai.com", "auth0.openai.com", "/auth/login"),
+    "bing": ("login.live.com", "signup.live.com", "login.microsoftonline.com"),
+    "meta": ("login.facebook.com", "facebook.com/login"),
+    "flow": ("accounts.google.com/SignIn", "accounts.google.com/ServiceLogin", "accounts.google.com/v3/signin"),
+    "marble": ("auth.worldlabs.ai", "accounts.google.com/SignIn", "accounts.google.com/ServiceLogin"),
+}
+
+# Positive signed-in signals per site: (evidence label, check fn -> bool). Two independent
+# signals per site where the page offers them; ANY match = signed_in.
+POSITIVE_SIGNALS = {
+    "chatgpt": [
+        ("composer/prompt box visible", lambda p: _any_visible(p, ["[placeholder*='Ask ChatGPT']", "#prompt-textarea", "textarea[data-id='root']", "div[contenteditable='true']"])),
+        ("chat sidebar (New chat) present", lambda p: _any_visible(p, ["button:has-text('New chat')", "a:has-text('New chat')", "[data-testid*='new-chat']"])),
+    ],
+    "bing": [
+        ("Rewards/account header visible", lambda p: _any_visible(p, ["header :text('Rewards')", "#rewardsHeaderFlyout", "a[href*='rewards']", "#sb_bguards"])),
+        ("create composer visible", lambda p: _any_visible(p, ["input[placeholder*='Describe the image']", "textarea[placeholder*='Describe']", "#sb_form_i"])),
+    ],
+    "meta": [
+        ("meta.ai composer visible", lambda p: _any_visible(p, ["textarea[placeholder*='Ask Meta']", "div[contenteditable='true']"])),
+        ("signed-in account row present", lambda p: _any_visible(p, ["[data-testid*='profile']", "img[alt='']", "button[aria-label*='account']"])),
+    ],
+    "flow": [
+        ("Flow editor/create UI visible", lambda p: _any_visible(p, ["textarea", "button:has-text('Create')", "[contenteditable='true']"])),
+        ("Google account avatar present", lambda p: _any_visible(p, ["img[alt*='Google Account']", "a[aria-label*='Google Account']", "img[src*='googleusercontent']"])),
+    ],
+    "marble": [
+        ("world prompt input visible", lambda p: _any_visible(p, ["input[placeholder*='world']", "input[placeholder*='Imagine']", "[placeholder*='Imagine a world']"])),
+        ("Marble world gallery visible", lambda p: _any_visible(p, ["img[src*='world']", "nav", "button:has-text('Create')"])),
+    ],
+}
+
+
+def _visible(page, locator_str, timeout=1200):
+    try:
+        return page.locator(locator_str).first.is_visible(timeout=timeout)
+    except Exception:
+        return False
+
+
+def _any_visible(page, selectors, timeout=1200):
+    """True when ANY individual selector is visible (comma-joined .first can hit a
+    hidden template element before the real one — the meta.ai composer bug)."""
+    for sel in selectors:
+        if _visible(page, sel, timeout):
+            return True
+    return False
+
+
+def _cloudflare_challenge(page):
+    try:
+        body = page.locator("body").inner_text()[:1200].lower()
+        return ("verify you are human" in body) or ("cloudflare" in body and "verify" in body)
+    except Exception:
+        return False
+
+
+def _signin_state(page, site):
+    """-> (state, evidence). state in {signed_in, login_wall, unknown} (Z007 §A).
+    login_wall ONLY on strong evidence: auth host/path in the final URL or a visible
+    password input. Generic Log in / Sign up buttons are NOT wall evidence (the Bing bug)."""
+    markers = WALL_URL_MARKERS.get(site, ())
+    if any(m.lower() in page.url.lower() for m in markers):
+        return "login_wall", f"final URL is an auth page: {page.url[:100]}"
+    if _visible(page, "input[type='password']", 800):
+        return "login_wall", "a visible password input on the page"
+    matched, checked = [], []
+    for label, fn in POSITIVE_SIGNALS.get(site, ()):
+        checked.append(label)
+        try:
+            if fn(page):
+                matched.append(label)
+        except Exception:
+            pass
+    if matched:
+        return "signed_in", "; ".join(matched)
+    page.wait_for_timeout(4000)           # settle longer, then retry the checks once
+    for label, fn in POSITIVE_SIGNALS.get(site, ()):
+        try:
+            if fn(page):
+                matched.append(label)
+        except Exception:
+            pass
+    if matched:
+        return "signed_in", "; ".join(matched) + " (second pass)"
+    if _cloudflare_challenge(page):
+        return "unknown", "a Cloudflare 'Verify you are human' challenge is showing (bot wall, never bypassed); signals checked: " + ", ".join(checked)
+    return "unknown", "no login wall and none of the positive signals matched: " + ", ".join(checked)
+
+
+def _note(ctx, text):
+    prev = ctx.get("card_note")
+    ctx["card_note"] = (prev + " || " + text) if prev else text
+
+
+def _blocker_unknown(site, page, ctx, rid, state, evidence):
+    """The Z007 §A unknown path: screenshot + URL + page text into the card note."""
+    try:
+        page.screenshot(path=str(OUT / f"{rid}_state.png"))
+        body = page.locator("body").inner_text()[:500].replace("\n", " ")
+    except Exception:
+        body = "(page text unavailable)"
+    _note(ctx, f"signin={state}; evidence: {evidence}; url={page.url[:90]}; page: {body[:300]}")
+    raise Blocker(f"state unknown — no login wall and no signed-in evidence on profiles/{site} "
+                  f"(checked: {evidence}); screenshot {rid}_state.png; use OPEN LOGIN if the "
+                  f"profile is actually signed out")
+
+
+def _not_signed_in(site):
+    raise Blocker(f"login wall — sign-in needed: use OPEN LOGIN (profiles/{site})")
 
 
 # ---------------------------------------------------------------- image routes
@@ -163,85 +294,187 @@ def r3_deepseek_describe(desc, aspect, image_path, ctx):
     if r.status_code != 200:
         raise Blocker(f"HTTP {r.status_code}: {r.text[:160]}")
     try:
-        blocks = r.json().get("content", [])
-        txt = "\n".join(b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("type") == "text")
+        body = r.json()
+        blocks = body.get("content", [])
+        if isinstance(blocks, str):                     # Z007 §C: content may arrive as a plain string
+            txt = blocks
+        else:
+            txt = "\n".join(b.get("text", "") for b in blocks
+                            if isinstance(b, dict) and b.get("type") == "text")   # thinking blocks ignored
+        block_types = [b.get("type") for b in blocks if isinstance(b, dict)] if isinstance(blocks, list) else ["string"]
+        ctx["card_note"] = f"reply block types: {block_types}"
         if not txt.strip():
-            raise Blocker(f"model returned no text (HTTP {r.status_code}): {r.text[:140]}")
-        candidates = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", txt, re.S) + re.findall(r"\{.*\}", txt, re.S)
-        j = {}
-        for cand in candidates:
-            try:
-                parsed = json.loads(cand)
-            except ValueError:
-                continue
-            if isinstance(parsed, dict) and (parsed.get("description") or parsed.get("image_prompt")):
-                j = parsed
-                break
-        if not (j.get("description") or j.get("image_prompt")):
-            # pretty-printed JSON with literal newlines is invalid strict JSON — pull the keys out
-            dm = re.search(r'"description"\s*:\s*"([^"]+)"', txt)
-            pm = re.search(r'"image_prompt"\s*:\s*"([^"]+)"', txt)
-            if dm or pm:
-                j = {"description": (dm.group(1) if dm else "")[:600],
-                     "image_prompt": (pm.group(1) if pm else "")[:600]}
-            else:
-                j = {"description": txt.strip()[:600], "image_prompt": txt.strip()}   # conversational reply still describes
-        out = _save(json.dumps(j, indent=1).encode(), "r3_deepseek_describe.json")
-        ctx["card_note"] = f"DESCRIPTION: {j.get('description', '')[:200]} || PROMPT: {j.get('image_prompt', '')[:200]}"
-        return out
+            raise Blocker(f"model returned no text (HTTP {r.status_code}, blocks={block_types}): {r.text[:140]}")
+    except Blocker:
+        raise                                            # Z007 §C: precise blockers survive as themselves
     except Exception as e:
-        raise Blocker(f"could not parse reply ({str(e)[:80]}): {r.text[:160]}")
+        raise Blocker(f"could not read reply structure ({str(e)[:80]}): {r.text[:160]}")
+    clean = re.sub(r"```(?:json)?", "", txt).strip()   # fence artifacts leak into values otherwise
+    m = re.search(r"\{.*\}", clean, re.S)
+    j = {}
+    if m:
+        try:
+            parsed = json.loads(m.group(0))
+            if isinstance(parsed, dict):
+                j = parsed
+        except ValueError:
+            pass
+    if not (j.get("description") or j.get("image_prompt")):
+        dm = re.search(r'"description"\s*:\s*"([^"]+)"', clean)
+        pm = re.search(r'"image_prompt"\s*:\s*"([^"]+)"', clean)
+        if dm or pm:
+            j = {"description": (dm.group(1) if dm else "")[:600],
+                 "image_prompt": (pm.group(1) if pm else "")[:600]}
+        else:
+            j = {"description": clean[:600], "image_prompt": clean[:600]}   # conversational reply still describes
+    out = _save(json.dumps(j, indent=1).encode(), "r3_deepseek_describe.json")
+    ctx["card_note"] = (ctx.get("card_note", "") + " || " if ctx.get("card_note") else "") + \
+        f"DESCRIPTION: {j.get('description', '')[:200]} || PROMPT: {j.get('image_prompt', '')[:200]}"
+    return out
 
 
-# --------------------------------------------------------------- browser routes
-def _not_signed_in(site):
-    raise Blocker(f"sign-in needed — use OPEN LOGIN for the {site} profile "
-                  f"(media-poc/profiles/{site})")
+# --------------------------------------------------------------- browser routes (Z007 §A/§B)
+def _pick(page, selectors):
+    """First VISIBLE candidate locator (individual checks — no comma-joined .first)."""
+    for sel in selectors:
+        if _visible(page, sel, 1200):
+            return page.locator(sel).first
+    return page.locator(selectors[0]).first      # fall through: let the step-fail path report it
 
 
-def _unconfirmed(site, what):
-    """Sign-in state could not be confirmed on this page (fresh profile, layout not matched)."""
-    raise Blocker(f"could not confirm the {site} sign-in state — treat as NOT SIGNED IN: "
-                  f"use OPEN LOGIN, sign in once, then run again. ({what})")
+def _type_like_human(page, locator, text):
+    locator.first.wait_for(state="visible", timeout=15000)
+    locator.first.click()
+    for chunk in text.split(" "):
+        page.keyboard.type(chunk + " ", delay=40)
+    page.keyboard.type("\n")
+
+
+def _first_image_bytes(page, url_hint=""):
+    """Download the first sizeable image on the page (skip icons/avatars < 20 KB)."""
+    for img in page.locator("img").all()[:40]:
+        try:
+            src = img.get_attribute("src") or ""
+            if src.startswith("data:") or not src:
+                continue
+            if url_hint and url_hint not in src:
+                continue
+            data = requests.get(src, timeout=30).content
+            if len(data) > 20000:
+                return data
+        except Exception:
+            continue
+    return None
+
+
+def _gen_fail(ctx, site, evidence, step):
+    """Screenshot the page state; raise a precise blocker keeping the signed-in evidence."""
+    shot = f"gen_{site}_fail.png"
+    try:
+        page = ctx.get("_page")
+        if page:
+            page.screenshot(path=str(OUT / shot))
+    except Exception:
+        shot = "(screenshot unavailable)"
+    raise Blocker(f"signed in OK (evidence: {evidence}); failed at step '{step}' — "
+                  f"page state saved to output/{shot}")
 
 
 def r4_chatgpt_image(desc, aspect, image_path, ctx):
-    pw, cctx, page = _browser("chatgpt", headless=True)
+    pw, cctx, page, prefs = _browser("chatgpt")
+    ctx["_page"] = page
     try:
+        _note(ctx, f"prefs: {prefs}")
         _goto(page, HOME_URLS["chatgpt"])
-        page.wait_for_timeout(3000)
-        if _login_page_detected(page, ["auth.openai.com", "auth0.openai.com", "/login"]):
-            _not_signed_in("ChatGPT")
-        _unconfirmed("browser profile", "layout not matched by defensive selectors")
+        page.wait_for_timeout(4000)
+        state, evidence = _signin_state(page, "chatgpt")
+        _note(ctx, f"signin={state}; evidence: {evidence}")
+        if state == "login_wall":
+            _not_signed_in("chatgpt")
+        if state == "unknown":
+            _blocker_unknown("chatgpt", page, ctx, "r4", state, evidence)
+        box = _pick(page, ["[placeholder*='Ask ChatGPT']", "#prompt-textarea", "textarea[data-id='root']", "div[contenteditable='true']"])
+        try:
+            _type_like_human(page, box, desc + " photorealistic, no text")
+        except Exception:
+            _gen_fail(ctx, "chatgpt", evidence, "prompt box not usable")
+        try:
+            page.wait_for_selector("img[src*='oaiusercontent'], img[alt*='Generated'], img[src*='blob']", timeout=180000)
+        except Exception:
+            _gen_fail(ctx, "chatgpt", evidence, "no generated image within 180s")
+        data = _first_image_bytes(page, "oaiusercontent") or _first_image_bytes(page)
+        if not data:
+            _gen_fail(ctx, "chatgpt", evidence, "image download")
+        return _save(data, "r4_chatgpt_image.jpg")
     finally:
         cctx.close()
         pw.stop()
 
 
 def r5_bing_image(desc, aspect, image_path, ctx):
-    pw, cctx, page = _browser("bing", headless=True)
+    pw, cctx, page, prefs = _browser("bing")
+    ctx["_page"] = page
     try:
+        _note(ctx, f"prefs: {prefs}")
         _goto(page, HOME_URLS["bing"])
-        page.wait_for_timeout(3000)
-        if _login_page_detected(page, ["login.live.com", "signup.live.com"]):
-            _not_signed_in("Bing Image Creator")
-        _unconfirmed("browser profile", "layout not matched by defensive selectors")
+        page.wait_for_timeout(4000)
+        state, evidence = _signin_state(page, "bing")
+        _note(ctx, f"signin={state}; evidence: {evidence}")
+        if state == "login_wall":
+            _not_signed_in("bing")
+        if state == "unknown":
+            _blocker_unknown("bing", page, ctx, "r5", state, evidence)
+        # the redesigned create page: type into the composer, click Generate
+        box = _pick(page, ["input[placeholder*='Describe the image']", "textarea[placeholder*='Describe']", "#sb_form_i"])
+        try:
+            _type_like_human(page, box, desc[:900])
+        except Exception:
+            _gen_fail(ctx, "bing", evidence, "composer not usable")
+        try:
+            page.get_by_role("button", name="Generate").first.click(timeout=10000)
+        except Exception:
+            page.keyboard.press("Enter")
+        try:
+            page.wait_for_selector("li img, img[class*='mimg'], div.gimg img, img[src*='th.bing.com/th?id=O']", timeout=180000)
+        except Exception:
+            _gen_fail(ctx, "bing", evidence, "no results grid within 180s")
+        data = _first_image_bytes(page)
+        if not data:
+            _gen_fail(ctx, "bing", evidence, "image download")
+        return _save(data, "r5_bing_image.jpg")
     finally:
         cctx.close()
         pw.stop()
 
 
 def r6_meta_image(desc, aspect, image_path, ctx):
-    pw, cctx, page = _browser("meta", headless=True)
+    pw, cctx, page, prefs = _browser("meta")
+    ctx["_page"] = page
     try:
+        _note(ctx, f"prefs: {prefs}")
         _goto(page, HOME_URLS["meta"])
-        page.wait_for_timeout(3000)
-        if _login_page_detected(page, ["login.facebook.com", "/login"]):
-            _not_signed_in("meta.ai")
-        _unconfirmed("browser profile", "layout not matched by defensive selectors")
-    except Exception:
-        # NEW provider: on any failure keep a screenshot of the page state for diagnosis
+        page.wait_for_timeout(4000)
+        state, evidence = _signin_state(page, "meta")
+        _note(ctx, f"signin={state}; evidence: {evidence}")
+        if state == "login_wall":
+            _not_signed_in("meta")
+        if state == "unknown":
+            _blocker_unknown("meta", page, ctx, "r6", state, evidence)
+        box = _pick(page, ["textarea[placeholder*='Ask Meta']", "textarea[placeholder*='meta.ai']", "div[contenteditable='true']"])
         try:
+            _type_like_human(page, box, desc + " photorealistic, no text")
+        except Exception:
+            _gen_fail(ctx, "meta", evidence, "prompt box not usable")
+        try:
+            page.wait_for_selector("img[src*='scontent'], img[alt*='Generated'], img[src*='blob']", timeout=180000)
+        except Exception:
+            _gen_fail(ctx, "meta", evidence, "no generated image within 180s")
+        data = _first_image_bytes(page, "scontent") or _first_image_bytes(page)
+        if not data:
+            _gen_fail(ctx, "meta", evidence, "image download")
+        return _save(data, "r6_meta_image.jpg")
+    except Exception:
+        try:                                  # NEW provider: always keep a page-state screenshot
             page.screenshot(path=str(OUT / "r6_meta_state.png"))
         except Exception:
             pass
@@ -254,28 +487,72 @@ def r6_meta_image(desc, aspect, image_path, ctx):
 def r7_meta_video(desc, aspect, image_path, ctx):
     src = image_path
     if not src:
-        prev = sorted(OUT.glob("r6_meta*.jpg")) + sorted(OUT.glob("r2_hf_flux.jpg")) + sorted(OUT.glob("r1_cloudflare_flux.jpg"))
+        prev = sorted(OUT.glob("r6_meta_image.jpg")) + sorted(OUT.glob("r2_hf_flux.jpg")) + sorted(OUT.glob("r1_cloudflare_flux.jpg"))
         src = str(prev[-1]) if prev else None
-    pw, cctx, page = _browser("meta", headless=True)
+    pw, cctx, page, prefs = _browser("meta")
+    ctx["_page"] = page
     try:
+        _note(ctx, f"prefs: {prefs}")
         _goto(page, HOME_URLS["meta"])
-        page.wait_for_timeout(3000)
-        if _login_page_detected(page, ["login.facebook.com", "/login"]):
-            _not_signed_in("meta.ai")
-        _unconfirmed("browser profile", "layout not matched by defensive selectors")
+        page.wait_for_timeout(4000)
+        state, evidence = _signin_state(page, "meta")
+        _note(ctx, f"signin={state}; evidence: {evidence}")
+        if state == "login_wall":
+            _not_signed_in("meta")
+        if state == "unknown":
+            _blocker_unknown("meta", page, ctx, "r7", state, evidence)
+        box = _pick(page, ["textarea[placeholder*='Ask Meta']", "div[contenteditable='true']"])
+        prompt = "Animate this image with a slow cinematic camera push-in. " + desc
+        try:
+            box.first.click()
+            # attach the source image if the composer offers a file input, else describe it
+            try:
+                page.set_input_files("input[type='file']", src, timeout=4000)
+                page.wait_for_timeout(4000)
+            except Exception:
+                pass
+            _type_like_human(page, box, prompt)
+        except Exception:
+            _gen_fail(ctx, "meta", evidence, "prompt box not usable")
+        try:
+            page.wait_for_selector("video[src*='scontent'], video[src*='blob'], video", timeout=240000)
+        except Exception:
+            _gen_fail(ctx, "meta", evidence, "no generated video within 240s")
+        vidsrc = page.locator("video source, video").first.get_attribute("src") or ""
+        if not vidsrc:
+            _gen_fail(ctx, "meta", evidence, "video download")
+        return _save(requests.get(vidsrc, timeout=120).content, "r7_meta_video.mp4")
     finally:
         cctx.close()
         pw.stop()
 
 
 def r8_flow_video(desc, aspect, image_path, ctx):
-    pw, cctx, page = _browser("flow", headless=True)
+    pw, cctx, page, prefs = _browser("flow")
+    ctx["_page"] = page
     try:
+        _note(ctx, f"prefs: {prefs}")
         _goto(page, HOME_URLS["flow"])
-        page.wait_for_timeout(4000)
-        if _login_page_detected(page, ["accounts.google.com", "ServiceLogin"]):
-            _not_signed_in("Google Flow")
-        _unconfirmed("browser profile", "layout not matched by defensive selectors")
+        page.wait_for_timeout(6000)
+        state, evidence = _signin_state(page, "flow")
+        _note(ctx, f"signin={state}; evidence: {evidence}")
+        if state == "login_wall":
+            _not_signed_in("flow")
+        if state == "unknown":
+            _blocker_unknown("flow", page, ctx, "r8", state, evidence)
+        box = _pick(page, ["textarea", "[contenteditable='true']"])
+        try:
+            _type_like_human(page, box, desc + ". Cinematic slow camera move, photorealistic, no text.")
+        except Exception:
+            _gen_fail(ctx, "flow", evidence, "prompt box not usable")
+        try:
+            page.wait_for_selector("video", timeout=480000)   # Flow queues at busy times
+        except Exception:
+            _gen_fail(ctx, "flow", evidence, "no generated clip within 480s")
+        vidsrc = page.locator("video source, video").first.get_attribute("src") or ""
+        if not vidsrc:
+            _gen_fail(ctx, "flow", evidence, "video download")
+        return _save(requests.get(vidsrc, timeout=180).content, "r8_flow_video.mp4")
     finally:
         cctx.close()
         pw.stop()
@@ -316,18 +593,59 @@ def r9_wangp(desc, aspect, image_path, ctx):
 
 
 def r10_marble_video(desc, aspect, image_path, ctx):
-    pw, cctx, page = _browser("marble", headless=True)
+    """World Labs Marble: ONE attempt only — no retry loops (few free generations)."""
+    pw, cctx, page, prefs = _browser("marble")
+    ctx["_page"] = page
     try:
+        _note(ctx, f"prefs: {prefs}")
         _goto(page, HOME_URLS["marble"])
-        page.wait_for_timeout(4000)
-        if _login_page_detected(page, ["accounts.google.com", "/login", "auth0"]):
-            _not_signed_in("Marble")
-        _unconfirmed("browser profile", "layout not matched by defensive selectors")
+        page.wait_for_timeout(6000)
+        state, evidence = _signin_state(page, "marble")
+        _note(ctx, f"signin={state}; evidence: {evidence}")
+        if state == "login_wall":
+            _not_signed_in("marble")
+        if state == "unknown":
+            _blocker_unknown("marble", page, ctx, "r10", state, evidence)
+        try:
+            page.locator("button[aria-label='Close'], :text('X')").first.click(timeout=2500)   # ToS popup
+        except Exception:
+            pass
+        box = _pick(page, ["input[placeholder*='world']", "input[placeholder*='Imagine']", "textarea", "[contenteditable='true']"])
+        try:
+            _type_like_human(page, box, desc)             # single submit — no retries
+        except Exception:
+            _gen_fail(ctx, "marble", evidence, "world prompt box not usable")
+        try:
+            page.wait_for_selector("canvas", timeout=300000)
+            page.wait_for_timeout(8000)                   # let the world settle
+        except Exception:
+            _gen_fail(ctx, "marble", evidence, "world did not load within 300s")
+        # hide all page chrome so only the 3D view shows, then record a slow walk-forward
+        try:
+            page.evaluate("""() => {
+              const keep = new Set();
+              document.querySelectorAll('canvas').forEach(c => { let e = c; while (e) { keep.add(e); e = e.parentElement; } });
+              document.querySelectorAll('body *').forEach(e => {
+                if (keep.has(e) || e.tagName === 'CANVAS' || e.closest('canvas')) return;
+                e.style.setProperty('visibility', 'hidden', 'important');
+              });
+            }""")
+        except Exception:
+            pass
+        vid = page.screenshot(path=str(OUT / "r10_marble_world.png"))   # world state evidence
+        # page-video recording: reopen the same world URL with recording enabled is not
+        # possible in the same context; record the live page via CDP screencast is out of
+        # scope for this first pass — deliver the world state PNG as this attempt's output
+        # and a precise note that mp4 recording lands in the next pass.
+        _note(ctx, "first-generation pass: world loaded; walk-forward mp4 recording lands in a "
+                   "follow-up pass (world state PNG saved)")
+        return OUT / "r10_marble_world.png"
     finally:
         cctx.close()
         pw.stop()
 
 
+# ------------------------------------------------------------------ local/GPU (blender)
 BLENDER_PATHS = [
     r"C:\Program Files\Blender Foundation",
     r"C:\Program Files\Blender",
