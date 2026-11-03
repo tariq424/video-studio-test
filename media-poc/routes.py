@@ -375,15 +375,28 @@ world = bpy.data.worlds.new('sky'); scene.world = world
 world.use_nodes = True
 world.node_tree.nodes['Background'].inputs[0].default_value = (0.45, 0.6, 0.85, 1)
 world.node_tree.nodes['Background'].inputs[1].default_value = 1.0
-# camera orbit
+# camera orbit (SPEC-Z006: the factory scene keeps its default camera, so reuse it
+# when present and always guard the link — 'Object already in collection' otherwise)
 cam = scene.camera or bpy.data.objects.new('cam', bpy.data.cameras.new('cam'))
-scene.camera = cam; bpy.context.collection.objects.link(cam)
-scene.render.engine = 'BLENDER_EEVEE_NEXT' if hasattr(bpy.types, 'SceneEEVEENext') else 'BLENDER_EEVEE'
+scene.camera = cam
+if cam.name not in bpy.context.collection.objects:
+    bpy.context.collection.objects.link(cam)
+for _eng in ('BLENDER_EEVEE_NEXT', 'BLENDER_EEVEE', 'CYCLES'):   # 4.2+/5.x renamed the EEVEE id
+    try:
+        scene.render.engine = _eng
+        break
+    except TypeError:
+        continue
 scene.render.resolution_x = 1280
 scene.render.resolution_y = 720
 scene.render.fps = 24
 scene.frame_end = 96
-scene.render.image_settings.file_format = 'FFMPEG'
+ims = scene.render.image_settings
+try:
+    ims.media_type = 'VIDEO'          # Blender 5.x moved movie output behind media_type
+except TypeError:
+    pass                              # Blender <=4.x: file_format takes 'FFMPEG' directly
+ims.file_format = 'FFMPEG'
 scene.render.ffmpeg.format = 'MPEG4'
 scene.render.ffmpeg.codec = 'H264'
 scene.render.filepath = sys.argv[sys.argv.index('--') + 1]
