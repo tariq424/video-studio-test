@@ -235,12 +235,13 @@ def r1_cloudflare_flux(desc, aspect, image_path, ctx):
     if not env or not env.get("CLOUDFLARE_ACCOUNT_ID") or not env.get("CLOUDFLARE_API_TOKEN"):
         raise Blocker("no token — create media-poc/secrets/cloudflare.env with "
                       "CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN")
-    w, h = _dims(aspect)
+    # SPEC-Z008 §F: FLUX-1-schnell REJECTS width/height (AiError 5006, "unevaluated
+    # properties"); the proven D142 body is prompt + steps only.
     r = requests.post(
         f"https://api.cloudflare.com/client/v4/accounts/{env['CLOUDFLARE_ACCOUNT_ID']}"
         "/ai/run/@cf/black-forest-labs/flux-1-schnell",
         headers={"Authorization": f"Bearer {env['CLOUDFLARE_API_TOKEN']}"},
-        json={"prompt": desc[:2000], "width": w, "height": h, "steps": 4},
+        json={"prompt": desc[:2000], "steps": 4},
         timeout=180)
     if r.status_code != 200:
         raise Blocker(f"HTTP {r.status_code}: {r.text[:160]}")
@@ -367,6 +368,71 @@ def _first_image_bytes(page, url_hint=""):
     return None
 
 
+def _poll_generation(page, ctx, rid, site, evidence, selectors, out_name, deadline_s=480, every=15, min_bytes=20000):
+    """SPEC-Z008 §A/§B2: poll up to `deadline_s` for a generated image, ~every `every` s.
+    Each poll logs (elapsed, img count) into the card note. Downloads via requests first;
+    if that returns nothing usable, fetches the bytes inside the browser context, and as a
+    last resort screenshots the img element. Fails only after the full window."""
+    t0 = time.time()
+    polls = []
+    while time.time() - t0 < deadline_s:
+        elapsed = int(time.time() - t0)
+        imgs = page.locator("img")
+        n = imgs.count()
+        data = None
+        srcs = []
+        for i in range(min(n, 30)):
+            try:
+                s = imgs.nth(i).get_attribute("src") or ""
+                if s.startswith("http") and ("blob" in s or "oaiusercontent" in s or "scontent" in s or "th.bing" in s or "bing.net" in s or "rid=" in s or "id=" in s):
+                    srcs.append(s)
+            except Exception:
+                continue
+        for s in srcs:
+            try:
+                d = requests.get(s, timeout=30).content
+                if len(d) >= min_bytes:
+                    data = d
+                    break
+            except Exception:
+                continue
+        if data is None and srcs:
+            # fetch inside the browser context (same-origin, cookies included)
+            try:
+                d_b64 = page.evaluate("""async (srcs) => {
+                    for (const s of srcs) {
+                        try {
+                            const r = await fetch(s);
+                            if (!r.ok) continue;
+                            const b = new Uint8Array(await r.arrayBuffer());
+                            if (b.length < 20000) continue;
+                            let bin = '';
+                            for (let i = 0; i < b.length; i += 32768)
+                                bin += String.fromCharCode.apply(null, b.subarray(i, i + 32768));
+                            return btoa(bin);
+                        } catch (e) { continue; }
+                    }
+                    return null;
+                }""", srcs[:10])
+                if d_b64:
+                    data = base64.b64decode(d_b64)
+            except Exception:
+                pass
+        polls.append(f"{elapsed}s: {n} imgs, {len(srcs)} candidates, {'downloaded' if data else 'none usable'}")
+        _note(ctx, "poll " + "; ".join(polls[-3:]))
+        if data:
+            _note(ctx, f"poll loop: success at {elapsed}s after {len(polls)} polls")
+            return _save(data, out_name)
+        page.wait_for_timeout(every * 1000)
+    try:
+        page.screenshot(path=str(OUT / f"gen_{site}_fail.png"))
+    except Exception:
+        pass
+    raise Blocker(f"signed in OK (evidence: {evidence}); full {deadline_s}s poll window elapsed with no "
+                  f"downloadable image ({len(polls)} polls; last: {polls[-1] if polls else 'none'}) — "
+                  f"page state saved to output/gen_{site}_fail.png")
+
+
 def _gen_fail(ctx, site, evidence, step):
     """Screenshot the page state; raise a precise blocker keeping the signed-in evidence."""
     shot = f"gen_{site}_fail.png"
@@ -398,14 +464,10 @@ def r4_chatgpt_image(desc, aspect, image_path, ctx):
             _type_like_human(page, box, desc + " photorealistic, no text")
         except Exception:
             _gen_fail(ctx, "chatgpt", evidence, "prompt box not usable")
-        try:
-            page.wait_for_selector("img[src*='oaiusercontent'], img[alt*='Generated'], img[src*='blob']", timeout=180000)
-        except Exception:
-            _gen_fail(ctx, "chatgpt", evidence, "no generated image within 180s")
-        data = _first_image_bytes(page, "oaiusercontent") or _first_image_bytes(page)
-        if not data:
-            _gen_fail(ctx, "chatgpt", evidence, "image download")
-        return _save(data, "r4_chatgpt_image.jpg")
+        # SPEC-Z008 §A: generation may simply take longer than one fixed wait — poll 480s
+        return _poll_generation(page, ctx, "r4", "chatgpt", evidence,
+                                ["img[src*='oaiusercontent']", "img[alt*='Generated']", "img[src*='blob']"],
+                                "r4_chatgpt_image.jpg", deadline_s=480)
     finally:
         cctx.close()
         pw.stop()
@@ -434,14 +496,10 @@ def r5_bing_image(desc, aspect, image_path, ctx):
             page.get_by_role("button", name="Generate").first.click(timeout=10000)
         except Exception:
             page.keyboard.press("Enter")
-        try:
-            page.wait_for_selector("li img, img[class*='mimg'], div.gimg img, img[src*='th.bing.com/th?id=O']", timeout=180000)
-        except Exception:
-            _gen_fail(ctx, "bing", evidence, "no results grid within 180s")
-        data = _first_image_bytes(page)
-        if not data:
-            _gen_fail(ctx, "bing", evidence, "image download")
-        return _save(data, "r5_bing_image.jpg")
+        # SPEC-Z008 §B2: poll up to 480s for the results grid / generated images
+        return _poll_generation(page, ctx, "r5", "bing", evidence,
+                                ["li img", "img[class*='mimg']", "div.gimg img", "img[src*='th.bing.com']"],
+                                "r5_bing_image.jpg", deadline_s=480)
     finally:
         cctx.close()
         pw.stop()
@@ -540,7 +598,51 @@ def r8_flow_video(desc, aspect, image_path, ctx):
             _not_signed_in("flow")
         if state == "unknown":
             _blocker_unknown("flow", page, ctx, "r8", state, evidence)
-        box = _pick(page, ["textarea", "[contenteditable='true']"])
+        # SPEC-Z008 §B (D140 evidence): the landing page has NO composer - only a hidden 0x0
+        # textarea and a visible "add / New project" button. Start a project first.
+        newproj = _pick(page, ["button:has-text('New project')", ":text('New project')", "button:has-text('add')"])
+        try:
+            newproj.first.click(timeout=10000)
+            _note(ctx, "clicked New project (landing-page composer confirmed absent, per D140)")
+        except Exception:
+            _gen_fail(ctx, "flow", evidence, "'New project' button not found/clickable")
+        page.wait_for_timeout(8000)
+        # inventory the post-click screen the same way D140 did (main frame + iframes)
+        inv = []
+        for fr in [page.main_frame] + page.frames:
+            if fr == page.main_frame or fr != page.main_frame:
+                ta = fr.locator("textarea").count()
+                ce = fr.locator("[contenteditable='true']").count()
+                tb = fr.locator("[role='textbox']").count()
+                if ta or ce or tb:
+                    inv.append(f"frame={fr.url.split('/')[-1][:40] or 'main'}: textarea={ta} contenteditable={ce} textbox={tb}")
+        _note(ctx, "post-New-project inventory: " + ("; ".join(inv) if inv else "no editors found on any frame"))
+        box = None
+        for sel in ("textarea:visible", "[contenteditable='true']:visible", "[role='textbox']:visible"):
+            for fr in [page.main_frame] + page.frames:
+                loc = fr.locator(sel)
+                for i in range(min(loc.count(), 5)):
+                    cand = loc.nth(i)
+                    try:
+                        if cand.is_visible() and (cand.bounding_box() or {}).get("height", 0) > 20:
+                            box = cand
+                            break
+                    except Exception:
+                        continue
+                if box:
+                    break
+            if box:
+                break
+        if box is None:
+            shot = "gen_flow_composer.png"
+            try:
+                page.screenshot(path=str(OUT / shot))
+            except Exception:
+                shot = "(screenshot unavailable)"
+            raise Blocker(f"signed in OK (evidence: {evidence}); New project clicked; composer NOT found "
+                          f"on the post-click screen (inventory: {'; '.join(inv) or 'none'}; "
+                          f"iframes: {len(page.frames)}) — screenshot output/{shot}")
+        _note(ctx, "composer found: visible editor in frame " + (box.page.url.split('/')[-1][:40] or 'main'))
         try:
             _type_like_human(page, box, desc + ". Cinematic slow camera move, photorealistic, no text.")
         except Exception:
@@ -666,40 +768,103 @@ def find_blender():
 
 
 BLENDER_SCRIPT = """
-import bpy, math, sys
+import bpy, math, re, sys
+import mathutils
 scene = bpy.context.scene
+args = sys.argv[sys.argv.index('--') + 1:]
+desc = (args[0] if len(args) > 1 else "").lower()
+out = args[-1]
+
+# clean the factory scene entirely
 for ob in list(bpy.data.objects):
-    if ob.type != 'CAMERA' and ob.type != 'LIGHT':
-        bpy.data.objects.remove(ob, do_unlink=True)
-# ground
-bpy.ops.mesh.primitive_plane_add(size=40, location=(0, 0, 0))
-ground = bpy.context.object
-m = bpy.data.materials.new('ground'); m.diffuse_color = (0.25, 0.3, 0.22, 1)
-ground.data.materials.append(m)
-# low-poly jet from primitives: fuselage cylinder + two wings + tail
-bpy.ops.mesh.primitive_cylinder_add(radius=0.45, depth=6, location=(0, 0, 1.4), rotation=(math.pi / 2, 0, 0))
-jet = bpy.context.object; jet.name = 'fuselage'
-wm = bpy.data.materials.new('white'); wm.diffuse_color = (0.92, 0.92, 0.94, 1)
-jet.data.materials.append(wm)
-for sx in (-1, 1):
-    bpy.ops.mesh.primitive_cube_add(scale=(2.6, 0.9, 0.07), location=(sx * 1.6, -0.2, 1.4))
-    wing = bpy.context.object; wing.data.materials.append(wm)
-bpy.ops.mesh.primitive_cube_add(scale=(0.7, 0.5, 0.06), location=(0, 2.4, 1.9))
-tail = bpy.context.object; tail.data.materials.append(wm)
-# sun + sky
-bpy.ops.object.light_add(type='SUN', location=(4, -6, 8))
-bpy.context.object.data.energy = 4
+    bpy.data.objects.remove(ob, do_unlink=True)
+
+def make_mat(name, color, rough=0.5, metal=0.0):
+    m = bpy.data.materials.new(name)
+    m.use_nodes = True
+    bsdf = m.node_tree.nodes['Principled BSDF']
+    bsdf.inputs['Base Color'].default_value = (*color, 1)
+    bsdf.inputs['Roughness'].default_value = rough
+    bsdf.inputs['Metallic'].default_value = metal
+    return m
+
+def link(ob):
+    if ob.name not in bpy.context.collection.objects:
+        bpy.context.collection.objects.link(ob)
+
+def add(kind, **kw):
+    getattr(bpy.ops.mesh, 'primitive_' + kind + '_add')(**kw)
+    return bpy.context.object
+
+# ground with a rough, slightly varied material
+ground = add('plane', size=60)
+ground.data.materials.append(make_mat('ground', (0.18, 0.22, 0.16), rough=0.9, metal=0.0))
+
+# subject from the description, by keyword class (simple, stated honestly: this is a
+# keyword->primitive classifier, not a general scene builder)
+white = make_mat('hull', (0.88, 0.89, 0.91), rough=0.28, metal=0.15)
+dark = make_mat('dark', (0.05, 0.05, 0.06), rough=0.6, metal=0.1)
+glass = make_mat('glassy', (0.4, 0.5, 0.6), rough=0.1, metal=0.6)
+if re.search(r'jet|plane|aircraft|airliner|aviat|737|airbus', desc):
+    add('cylinder', radius=0.45, depth=6, location=(0, 0, 1.6), rotation=(math.pi / 2, 0, 0)).data.materials.append(white)
+    for sx in (-1, 1):
+        w = add('cube', scale=(2.6, 0.9, 0.07), location=(sx * 1.6, -0.2, 1.6)); w.data.materials.append(white)
+    t = add('cube', scale=(0.7, 0.5, 0.06), location=(0, 2.4, 2.1)); t.data.materials.append(white)
+    for sx in (-1, 1):   # engines
+        e = add('cylinder', radius=0.3, depth=0.9, location=(sx * 1.2, -0.6, 1.1), rotation=(math.pi / 2, 0, 0)); e.data.materials.append(dark)
+    subject_z = 2.0
+elif re.search(r'car|vehicle|automobile|truck|supercar', desc):
+    b = add('cube', scale=(2.2, 1.0, 0.45), location=(0, 0, 0.75)); b.data.materials.append(make_mat('paint', (0.55, 0.08, 0.08), rough=0.25, metal=0.6))
+    c = add('cube', scale=(1.2, 0.9, 0.35), location=(-0.2, 0, 1.2)); c.data.materials.append(glass)
+    for px in (-1.1, 1.1):
+        for py in (-0.95, 0.95):
+            add('cylinder', radius=0.4, depth=0.3, location=(px, py, 0.4), rotation=(0, math.pi / 2, 0)).data.materials.append(dark)
+    subject_z = 1.2
+elif re.search(r'boat|ship|yacht|sail', desc):
+    h = add('cube', scale=(1.0, 3.0, 0.5), location=(0, 0, 0.5)); h.data.materials.append(white)
+    c = add('cube', scale=(0.7, 1.0, 0.5), location=(0, -0.6, 1.0)); c.data.materials.append(white)
+    subject_z = 1.2
+elif re.search(r'building|house|tower|skyscraper|city|castle', desc):
+    b1 = add('cube', scale=(1.5, 1.5, 2.2), location=(0, 0, 2.2)); b1.data.materials.append(make_mat('wall', (0.75, 0.7, 0.62), rough=0.8))
+    b2 = add('cube', scale=(0.9, 0.9, 1.4), location=(1.8, 0.4, 1.4)); b2.data.materials.append(make_mat('wall2', (0.6, 0.58, 0.55), rough=0.75))
+    subject_z = 3.0
+else:   # abstract monument (honest default: no subject keyword matched)
+    p = add('cube', scale=(1.6, 1.6, 0.3), location=(0, 0, 0.3)); p.data.materials.append(make_mat('plinth', (0.4, 0.38, 0.34), rough=0.85))
+    m = add('cube', scale=(0.5, 0.5, 2.6), location=(0, 0, 1.7)); m.data.materials.append(make_mat('mono', (0.25, 0.26, 0.3), rough=0.2, metal=0.7))
+    s = add('sphere', radius=0.55, location=(0, 0, 3.3)); s.data.materials.append(glass)
+    subject_z = 2.4
+
+# sky: Nishita sky if this Blender has it, else a gradient-tinted background
 world = bpy.data.worlds.new('sky'); scene.world = world
 world.use_nodes = True
-world.node_tree.nodes['Background'].inputs[0].default_value = (0.45, 0.6, 0.85, 1)
-world.node_tree.nodes['Background'].inputs[1].default_value = 1.0
-# camera orbit (SPEC-Z006: the factory scene keeps its default camera, so reuse it
-# when present and always guard the link — 'Object already in collection' otherwise)
+wnodes = world.node_tree.nodes
+bg = wnodes['Background']
+sky = None
+try:
+    sky = wnodes.new('ShaderNodeTexSky')
+    sky.sky_type = 'NISHITA'
+    sky.sun_elevation = math.radians(8)      # dusk: sun low
+    sky.sun_rotation = math.radians(220)
+    wnodes.links.new(sky.outputs['Color'], bg.inputs['Color'])
+    bg.inputs['Strength'].default_value = 0.35
+except Exception:
+    bg.inputs[0].default_value = (0.18, 0.22, 0.34, 1)   # dusk gradient stand-in
+    bg.inputs[1].default_value = 1.0
+
+# key sun + gentle fill
+sun = bpy.data.lights.new('key', 'SUN'); sun.energy = 4; sun.angle = math.radians(4)
+so = bpy.data.objects.new('key', sun); link(so)
+so.location = (5, -7, 6); so.rotation_euler = (math.radians(55), 0, math.radians(-35))
+fill = bpy.data.lights.new('fill', 'AREA'); fill.energy = 180; fill.size = 6
+fo = bpy.data.objects.new('fill', fill); link(fo)
+fo.location = (-6, 3, 4)
+
+# camera orbit (SPEC-Z006: reuse the scene camera if the scene kept one; guard the link)
 cam = scene.camera or bpy.data.objects.new('cam', bpy.data.cameras.new('cam'))
 scene.camera = cam
 if cam.name not in bpy.context.collection.objects:
     bpy.context.collection.objects.link(cam)
-for _eng in ('BLENDER_EEVEE_NEXT', 'BLENDER_EEVEE', 'CYCLES'):   # 4.2+/5.x renamed the EEVEE id
+for _eng in ('BLENDER_EEVEE_NEXT', 'BLENDER_EEVEE', 'CYCLES'):
     try:
         scene.render.engine = _eng
         break
@@ -711,19 +876,22 @@ scene.render.fps = 24
 scene.frame_end = 96
 ims = scene.render.image_settings
 try:
-    ims.media_type = 'VIDEO'          # Blender 5.x moved movie output behind media_type
+    ims.media_type = 'VIDEO'
 except TypeError:
-    pass                              # Blender <=4.x: file_format takes 'FFMPEG' directly
+    pass
 ims.file_format = 'FFMPEG'
 scene.render.ffmpeg.format = 'MPEG4'
 scene.render.ffmpeg.codec = 'H264'
-scene.render.filepath = sys.argv[sys.argv.index('--') + 1]
-# slow orbit: the jet sits while the camera sweeps 60 degrees around it
+scene.render.filepath = out
+# slow orbit, camera explicitly AIMED at the subject (a fixed Euler tilt looked past it -
+# Z008 acceptance found sky+ground-only frames; track-quaternion guarantees framing)
+cam.data.lens = 38
+target = mathutils.Vector((0.0, 0.0, subject_z - 0.3))
 for f in range(1, scene.frame_end + 1):
-    a = math.radians(210 + 60 * f / scene.frame_end)
-    cam.location = (8 * math.cos(a), -8 * math.sin(a), 3.2)
-    bpy.context.view_layer.update()
-    cam.rotation_euler = (math.radians(78), 0, a + math.pi / 2)
+    a = math.radians(200 + 70 * f / scene.frame_end)
+    cam.location = (11.5 * math.cos(a), -11.5 * math.sin(a), subject_z + 2.0)
+    direction = target - cam.location
+    cam.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()
     scene.frame_set(f)
 bpy.ops.render.render(animation=True)
 print('BLENDER POC RENDER DONE')
@@ -739,8 +907,9 @@ def r11_blender_video(desc, aspect, image_path, ctx):
     script = OUT / "_blender_scene.py"
     script.write_text(BLENDER_SCRIPT, encoding="utf-8")
     out_mp4 = OUT / "r11_blender_video.mp4"
-    ctx["card_note"] = f"blender at: {where}"
-    r = subprocess.run([exe, "-b", "-P", str(script), "--", str(out_mp4)],
+    ctx["card_note"] = (f"blender at: {where} || subject class from description keywords; "
+                        "Principled node materials + Nishita sky + key/fill lights (Z008 §E)")
+    r = subprocess.run([exe, "-b", "-P", str(script), "--", desc, str(out_mp4)],
                        capture_output=True, text=True, timeout=1800)
     if not out_mp4.is_file():
         raise Blocker("blender ran but produced no mp4: " + (r.stderr or r.stdout)[-200:].replace("\n", " "))
