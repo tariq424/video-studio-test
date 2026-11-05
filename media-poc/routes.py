@@ -231,27 +231,39 @@ def _not_signed_in(site):
 
 # ---------------------------------------------------------------- image routes
 def r1_cloudflare_flux(desc, aspect, image_path, ctx):
+    """SPEC-Z009 §C: byte-for-byte the D142-proven call shape (Authorization header only;
+    requests auto-sets the JSON content type; body = prompt + steps). Accepts a raw image
+    body OR the JSON base64 wrapper. On failure, runs a standalone D142-shape probe in the
+    same run and quotes BOTH raw responses (no token value anywhere)."""
     env = _env("cloudflare.env")
     if not env or not env.get("CLOUDFLARE_ACCOUNT_ID") or not env.get("CLOUDFLARE_API_TOKEN"):
         raise Blocker("no token — create media-poc/secrets/cloudflare.env with "
                       "CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN")
-    # SPEC-Z008 §F: FLUX-1-schnell REJECTS width/height (AiError 5006, "unevaluated
-    # properties"); the proven D142 body is prompt + steps only.
-    r = requests.post(
-        f"https://api.cloudflare.com/client/v4/accounts/{env['CLOUDFLARE_ACCOUNT_ID']}"
-        "/ai/run/@cf/black-forest-labs/flux-1-schnell",
-        headers={"Authorization": f"Bearer {env['CLOUDFLARE_API_TOKEN']}"},
-        json={"prompt": desc[:2000], "steps": 4},
-        timeout=180)
-    if r.status_code != 200:
-        raise Blocker(f"HTTP {r.status_code}: {r.text[:160]}")
-    j = r.json()
-    if not j.get("success"):
-        raise Blocker("API error: " + json.dumps(j.get("errors", j))[:160])
-    img = j["result"].get("image")
-    if not img:
-        raise Blocker("no image in response")
-    return _save(base64.b64decode(img), "r1_cloudflare_flux.jpg")
+    url = (f"https://api.cloudflare.com/client/v4/accounts/{env['CLOUDFLARE_ACCOUNT_ID']}"
+           "/ai/run/@cf/black-forest-labs/flux-1-schnell")
+    headers = {"Authorization": "Bearer " + env["CLOUDFLARE_API_TOKEN"]}
+    r = requests.post(url, headers=headers,
+                      json={"prompt": desc[:2000], "steps": 4}, timeout=180)
+    raw_route = f"HTTP {r.status_code}: {r.text[:180]}"
+    data = None
+    if r.status_code == 200:
+        if r.content[:3] == bytes.fromhex("ffd8ff") or r.content[:4] == bytes.fromhex("89504e47"):
+            data = r.content                       # raw image body
+        else:
+            img = (r.json().get("result") or {}).get("image")
+            if img:
+                data = base64.b64decode(img)
+    if not data:
+        probe = requests.post(url, headers={"Authorization": "Bearer " + env["CLOUDFLARE_API_TOKEN"]},
+                              json={"prompt": "A red lighthouse on a rocky coast at sunset, photorealistic",
+                                    "steps": 4}, timeout=180)
+        raw_probe = f"HTTP {probe.status_code}: {probe.text[:180]}"
+        raise Blocker(f"raw route response: {raw_route} || standalone D142-shape probe (same run, "
+                      f"identical URL/method/headers/body-keys per cf_test_D142.py): {raw_probe} "
+                      f"— if both are 401 code 10000, the env token is an EXPIRED wrangler OAuth "
+                      f"access token (hours-long lifetime): refresh via wrangler login (D141-style "
+                      f"dump) or supply a real REST API token")
+    return _save(data, "r1_cloudflare_flux.jpg")
 
 
 def r2_hf_flux(desc, aspect, image_path, ctx):
@@ -271,67 +283,64 @@ def r2_hf_flux(desc, aspect, image_path, ctx):
     return _save(Path(src).read_bytes(), "r2_hf_flux.jpg")
 
 
-def r3_deepseek_describe(desc, aspect, image_path, ctx):
-    env = _env("deepseek.env")
-    if not env or not env.get("DEEPSEEK_API_KEY"):
-        raise Blocker("no key — create media-poc/secrets/deepseek.env with DEEPSEEK_API_KEY "
-                      "(optional DEEPSEEK_BASE_URL, default https://api.deepseek.com/anthropic)")
+def r3_meta_describe(desc, aspect, image_path, ctx):
+    """SPEC-Z009 §A: image -> description + image prompt, via the signed-in meta.ai
+    profile (same _browser pattern as r6/r7). DeepSeek removed from the POC — its API
+    kept returning thinking-only replies; per Tariq, Meta does this job."""
     if not image_path:
         raise Blocker("needs an image (upload one, or run R6/R1/R2 first)")
-    base = (env.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com/anthropic").rstrip("/")
-    b64 = base64.b64encode(Path(image_path).read_bytes()).decode()
-    r = requests.post(
-        f"{base}/v1/messages",
-        headers={"x-api-key": env["DEEPSEEK_API_KEY"], "anthropic-version": "2023-06-01",
-                 "Content-Type": "application/json"},
-        json={"model": env.get("DEEPSEEK_MODEL", "deepseek-flash"), "max_tokens": 800,
-              "messages": [{"role": "user", "content": [
-                  {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}},
-                  {"type": "text", "text": "Describe this image in two sentences, then write a "
-                                           "ready-to-use image-generation prompt for recreating it "
-                                           "without brands or text. Reply as JSON: "
-                                           '{"description": "...", "image_prompt": "..."}'}]}]},
-        timeout=180)
-    if r.status_code != 200:
-        raise Blocker(f"HTTP {r.status_code}: {r.text[:160]}")
+    pw, cctx, page, prefs = _browser("meta")
+    ctx["_page"] = page
     try:
-        body = r.json()
-        blocks = body.get("content", [])
-        if isinstance(blocks, str):                     # Z007 §C: content may arrive as a plain string
-            txt = blocks
-        else:
-            txt = "\n".join(b.get("text", "") for b in blocks
-                            if isinstance(b, dict) and b.get("type") == "text")   # thinking blocks ignored
-        block_types = [b.get("type") for b in blocks if isinstance(b, dict)] if isinstance(blocks, list) else ["string"]
-        ctx["card_note"] = f"reply block types: {block_types}"
-        if not txt.strip():
-            raise Blocker(f"model returned no text (HTTP {r.status_code}, blocks={block_types}): {r.text[:140]}")
-    except Blocker:
-        raise                                            # Z007 §C: precise blockers survive as themselves
-    except Exception as e:
-        raise Blocker(f"could not read reply structure ({str(e)[:80]}): {r.text[:160]}")
-    clean = re.sub(r"```(?:json)?", "", txt).strip()   # fence artifacts leak into values otherwise
-    m = re.search(r"\{.*\}", clean, re.S)
-    j = {}
-    if m:
+        _note(ctx, f"prefs: {prefs}")
+        _goto(page, HOME_URLS["meta"])
+        page.wait_for_timeout(4000)
+        state, evidence = _signin_state(page, "meta")
+        _note(ctx, f"signin={state}; evidence: {evidence}")
+        if state == "login_wall":
+            _not_signed_in("meta")
+        if state == "unknown":
+            _blocker_unknown("meta", page, ctx, "r3", state, evidence)
+        box = _pick(page, ["textarea[placeholder*='Ask Meta']", "textarea[placeholder*='meta.ai']", "div[contenteditable='true']"])
         try:
-            parsed = json.loads(m.group(0))
-            if isinstance(parsed, dict):
-                j = parsed
-        except ValueError:
-            pass
-    if not (j.get("description") or j.get("image_prompt")):
-        dm = re.search(r'"description"\s*:\s*"([^"]+)"', clean)
-        pm = re.search(r'"image_prompt"\s*:\s*"([^"]+)"', clean)
-        if dm or pm:
-            j = {"description": (dm.group(1) if dm else "")[:600],
-                 "image_prompt": (pm.group(1) if pm else "")[:600]}
-        else:
-            j = {"description": clean[:600], "image_prompt": clean[:600]}   # conversational reply still describes
-    out = _save(json.dumps(j, indent=1).encode(), "r3_deepseek_describe.json")
-    ctx["card_note"] = (ctx.get("card_note", "") + " || " if ctx.get("card_note") else "") + \
-        f"DESCRIPTION: {j.get('description', '')[:200]} || PROMPT: {j.get('image_prompt', '')[:200]}"
-    return out
+            box.first.click()
+            # attach the image through the composer's file input (the + control), then send the standing text
+            page.set_input_files("input[type='file']", image_path, timeout=6000)
+            page.wait_for_timeout(3000)
+            _type_like_human(page, box, "Describe this image in detail. Then write one image-generation prompt that would recreate it.")
+        except Exception:
+            _gen_fail(ctx, "meta", evidence, "composer/attach not usable")
+        # wait until a real answer streams in AFTER our prompt (marker-anchored, class-free)
+        marker = "recreate it"
+        full = ""
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            try:
+                # scope to the thread region: <main> holds the conversation, not the sidebar history
+                full = (page.locator("main").inner_text()
+                        if page.locator("main").count() and page.locator("main").first.is_visible()
+                        else page.locator("body").inner_text())
+            except Exception:
+                full = ""
+            if marker in full:
+                tail = full[full.index(marker) + len(marker):]
+                if len(tail.strip()) > 400:
+                    break
+            page.wait_for_timeout(5000)
+        reply = full[full.index(marker) + len(marker):] if marker in full else ""
+        junk = ("Ask Meta AI", "Instant", "New chat", "Search", "Media", "Artifacts", "Topics",
+                "Pinned", "History", "Create images", "Discover", "Ask anything", "Take action",
+                "Scheduled", "Vibes", "Settings", "Privacy policy")
+        lines = [l.strip() for l in reply.splitlines()
+                 if l.strip() and len(l.strip()) > 1 and not any(j in l for j in junk)]
+        reply = chr(10).join(lines).strip()
+        out = _save(("DESCRIPTION + IMAGE PROMPT (via meta.ai profile — DeepSeek removed from the POC)\n\n"
+                     + reply.strip()[:4000]).encode(), "r3_meta_describe.txt")
+        _note(ctx, f"via meta.ai profile — DeepSeek removed from the POC; reply excerpt: {reply.strip()[:180]}")
+        return out
+    finally:
+        cctx.close()
+        pw.stop()
 
 
 # --------------------------------------------------------------- browser routes (Z007 §A/§B)
@@ -599,7 +608,8 @@ def r8_flow_video(desc, aspect, image_path, ctx):
         if state == "unknown":
             _blocker_unknown("flow", page, ctx, "r8", state, evidence)
         # SPEC-Z008 §B (D140 evidence): the landing page has NO composer - only a hidden 0x0
-        # textarea and a visible "add / New project" button. Start a project first.
+        # textarea and a visible "add / New project" button. Start a project first, then drive
+        # the editor INSIDE its frame (Z008 found it in an iframe, not the top page).
         newproj = _pick(page, ["button:has-text('New project')", ":text('New project')", "button:has-text('add')"])
         try:
             newproj.first.click(timeout=10000)
@@ -607,46 +617,44 @@ def r8_flow_video(desc, aspect, image_path, ctx):
         except Exception:
             _gen_fail(ctx, "flow", evidence, "'New project' button not found/clickable")
         page.wait_for_timeout(8000)
-        # inventory the post-click screen the same way D140 did (main frame + iframes)
+        # in-frame inventory (the D140 way, inside frames this time)
         inv = []
-        for fr in [page.main_frame] + page.frames:
-            if fr == page.main_frame or fr != page.main_frame:
-                ta = fr.locator("textarea").count()
-                ce = fr.locator("[contenteditable='true']").count()
-                tb = fr.locator("[role='textbox']").count()
-                if ta or ce or tb:
-                    inv.append(f"frame={fr.url.split('/')[-1][:40] or 'main'}: textarea={ta} contenteditable={ce} textbox={tb}")
-        _note(ctx, "post-New-project inventory: " + ("; ".join(inv) if inv else "no editors found on any frame"))
         box = None
-        for sel in ("textarea:visible", "[contenteditable='true']:visible", "[role='textbox']:visible"):
-            for fr in [page.main_frame] + page.frames:
-                loc = fr.locator(sel)
-                for i in range(min(loc.count(), 5)):
-                    cand = loc.nth(i)
-                    try:
-                        if cand.is_visible() and (cand.bounding_box() or {}).get("height", 0) > 20:
-                            box = cand
+        box_frame = None
+        for fr in page.frames:
+            ta = fr.locator("textarea")
+            ce = fr.locator("[contenteditable='true']")
+            tb = fr.locator("[role='textbox']")
+            n = ta.count() + ce.count() + tb.count()
+            if n:
+                inv.append(f"frame={fr.url.split('/')[-1][:50] or fr.name[:30] or 'main'}: textarea={ta.count()} contenteditable={ce.count()} textbox={tb.count()}")
+            if box is None:
+                for loc in (ta, ce, tb):
+                    for i in range(min(loc.count(), 5)):
+                        cand = loc.nth(i)
+                        try:
+                            cand.click(timeout=3000)          # drive INSIDE the frame
+                            cand.fill(desc + ". Cinematic slow camera move, photorealistic, no text.")
+                            box, box_frame = cand, fr
                             break
-                    except Exception:
-                        continue
-                if box:
-                    break
+                        except Exception:
+                            continue
+                    if box:
+                        break
             if box:
                 break
+        _note(ctx, "in-frame inventory: " + ("; ".join(inv) if inv else "no editors on any frame"))
         if box is None:
             shot = "gen_flow_composer.png"
             try:
                 page.screenshot(path=str(OUT / shot))
             except Exception:
                 shot = "(screenshot unavailable)"
-            raise Blocker(f"signed in OK (evidence: {evidence}); New project clicked; composer NOT found "
-                          f"on the post-click screen (inventory: {'; '.join(inv) or 'none'}; "
-                          f"iframes: {len(page.frames)}) — screenshot output/{shot}")
-        _note(ctx, "composer found: visible editor in frame " + (box.page.url.split('/')[-1][:40] or 'main'))
-        try:
-            _type_like_human(page, box, desc + ". Cinematic slow camera move, photorealistic, no text.")
-        except Exception:
-            _gen_fail(ctx, "flow", evidence, "prompt box not usable")
+            raise Blocker(f"signed in OK (evidence: {evidence}); New project clicked; in-frame composer "
+                          f"still not drivable - IN-FRAME inventory: {'; '.join(inv) or 'none'}; "
+                          f"iframes: {len(page.frames)}; screenshot output/{shot}")
+        _note(ctx, f"composer driven inside frame {box_frame.url.split('/')[-1][:50] or box_frame.name[:30] or 'main'}")
+        page.keyboard.press("Enter")             # submit from the composer's frame context
         try:
             page.wait_for_selector("video", timeout=480000)   # Flow queues at busy times
         except Exception:
@@ -920,7 +928,7 @@ def r11_blender_video(desc, aspect, image_path, ctx):
 ROUTES = [
     {"id": "r1", "name": "cloudflare-flux", "proves": "Cloudflare Workers AI REST image (FLUX.1-schnell)", "fn": r1_cloudflare_flux},
     {"id": "r2", "name": "hf-flux", "proves": "Hugging Face FLUX.1-schnell via gradio_client (free; HF_TOKEN raises quota)", "fn": r2_hf_flux},
-    {"id": "r3", "name": "deepseek-describe", "proves": "DeepSeek vision: image -> description + image prompt", "fn": r3_deepseek_describe, "needs_image": True},
+    {"id": "r3", "name": "meta-describe", "proves": "meta.ai describe: image -> description + image prompt (via meta.ai profile - DeepSeek removed from the POC)", "fn": r3_meta_describe, "needs_image": True},
     {"id": "r4", "name": "chatgpt-image", "proves": "ChatGPT browser profile image generation (paid account)", "fn": r4_chatgpt_image},
     {"id": "r5", "name": "bing-image", "proves": "Bing Image Creator browser profile", "fn": r5_bing_image},
     {"id": "r6", "name": "meta-image", "proves": "meta.ai image generation (NEW provider, defensive selectors)", "fn": r6_meta_image},

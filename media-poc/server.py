@@ -5,6 +5,8 @@ RUN ALL (sequential; browser and GPU routes serialized by simply running one at 
 time), output preview serving, per-profile OPEN LOGIN, and smoke-report.json.
 """
 import json
+import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -23,6 +25,17 @@ _lock = threading.Lock()
 _state = {r["id"]: {"status": "idle", "seconds": None, "output": None, "note": "", "error": ""} for r in ROUTES}
 _upload = {"path": None}
 _runs = 0
+_last = {"desc": "", "aspect": "16:9"}   # (Z009 §E) cards show the LAST saved result, not "idle"
+_rep = OUT / "smoke-report.json"
+if _rep.is_file():
+    try:
+        for row in json.loads(_rep.read_text(encoding="utf-8")).get("routes", []):
+            if row["id"] in _state:
+                _state[row["id"]].update(status=row.get("result", "idle"), seconds=row.get("seconds"),
+                                         output=row.get("output"), note=row.get("note", ""),
+                                         error=row.get("error", ""))
+    except Exception:
+        pass
 _last = {"desc": "", "aspect": "16:9"}
 
 
@@ -137,26 +150,39 @@ def report():
     return JSONResponse(json.loads(p.read_text(encoding="utf-8"))) if p.is_file() else {"none": True}
 
 
+def _find_chrome():
+    """Real chrome.exe (SPEC-Z009 §F: Playwright-driven browsers can't do real sign-ins —
+    Google refuses them outright, ChatGPT serves the Cloudflare splash)."""
+    cands = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+    ]
+    exe = shutil.which("chrome")
+    if exe:
+        return exe
+    for c in cands:
+        if Path(c).is_file():
+            return c
+    return None
+
+
 @app.get("/api/login/{site}")
 def login(site: str):
     if site not in routes.HOME_URLS:
         return JSONResponse({"error": "unknown site"}, status_code=404)
-    helper = ROOT / "_login_helper.py"
-    if not helper.is_file():
-        helper.write_text(
-            "import sys, time\n"
-            "from playwright.sync_api import sync_playwright\n"
-            "site, url, prof = sys.argv[1], sys.argv[2], sys.argv[3]\n"
-            "with sync_playwright() as pw:\n"
-            "    ctx = pw.chromium.launch_persistent_context(prof, channel='chrome', headless=False, args=['--lang=en-US'])\n"
-            "    b = ctx.new_page(); b.goto(url, wait_until='domcontentloaded')\n"
-            "    print('LOGIN WINDOW OPEN FOR ' + site + ' - sign in, then close the browser window.', flush=True)\n"
-            "    while len(ctx.pages):\n"
-            "        time.sleep(2)\n",
-            encoding="utf-8")
-    subprocess.Popen([sys.executable, str(helper), site, routes.HOME_URLS[site],
-                      str(routes.PROFILES / site)], cwd=str(ROOT))
-    return {"opened": site}
+    chrome = _find_chrome()
+    if not chrome:
+        return JSONResponse({"error": "chrome.exe not found for OPEN LOGIN"}, status_code=500)
+    routes._repair_prefs(site)          # same clean-exit repair _browser() does
+    prof = str(routes.PROFILES / site)
+    subprocess.Popen([chrome,
+                      f"--user-data-dir={prof}",
+                      "--hide-crash-restore-bubble",
+                      "--window-position=60,60", "--window-size=1280,900",
+                      "--lang=en-US",
+                      routes.HOME_URLS[site]])
+    return {"opened": site, "browser": "real chrome"}
 
 
 @app.get("/output/{name}")
