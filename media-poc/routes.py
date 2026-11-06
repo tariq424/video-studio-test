@@ -104,7 +104,7 @@ def _browser(site, headless=False):
     bot walls (Cloudflare challenges headless Chrome on chatgpt.com, verified Nov 3)."""
     from playwright.sync_api import sync_playwright
     prefs = _repair_prefs(site)
-    args = ["--lang=en-US", "--hide-crash-restore-bubble",   # Z007 §D: suppress the Restore bubble
+    args = ["--lang=en-US", "--hide-crash-restore-bubble", "--no-default-browser-check",   # Z007 §D: no Restore bubble, no "set as default" popup
             "--window-position=-32000,-32000", "--window-size=1440,1000"]
     token = {"pw": sync_playwright().start()}
     ctx = token["pw"].chromium.launch_persistent_context(
@@ -378,6 +378,28 @@ def _type_like_human(page, locator, text, submit=True):
         page.keyboard.type("\n")
 
 
+def _dismiss_popups(page, ctx):
+    """Close 'what's new' / promo windows that cover the composer (ChatGPT's 'Create GIFs' card, Nov 6)."""
+    closed = 0
+    for _ in range(3):
+        dlg = page.locator("[role='dialog']:visible")
+        if not dlg.count():
+            break
+        for sel in ("[role='dialog'] button[aria-label='Close']", "[role='dialog'] button[aria-label*='close' i]",
+                    "[role='dialog'] button:has-text('Maybe later')", "[role='dialog'] button:has-text('Not now')"):
+            try:
+                b = page.locator(sel).first
+                if b.is_visible(timeout=500):
+                    b.click(timeout=3000); closed += 1; break
+            except Exception:
+                continue
+        else:
+            page.keyboard.press("Escape"); closed += 1
+        page.wait_for_timeout(700)
+    if closed:
+        _note(ctx, f"closed {closed} popup(s) over the page")
+
+
 def _is_image(data):
     """True only for real image bytes (JPEG/PNG/GIF/WebP). Bing once returned an HTML page that passed as 'ok'."""
     if not data or len(data) < 12:
@@ -443,20 +465,22 @@ def _poll_generation(page, ctx, rid, site, evidence, selectors, out_name, deadli
     polls = []
     while time.time() - t0 < deadline_s:
         elapsed = int(time.time() - t0)
-        imgs = page.locator("img")
-        n = imgs.count()
         data = None
-        srcs = []
-        for i in range(min(n, 30)):
-            try:
-                s = imgs.nth(i).get_attribute("src") or ""
-                if baseline and s in baseline:
-                    continue           # was on the page before the prompt: not a result
-                if s.startswith("http") and ("blob" in s or "oaiusercontent" in s or "scontent" in s or "th.bing" in s or "bing.net" in s or "rid=" in s or "id=" in s):
-                    srcs.append(s)
-            except Exception:
-                continue
+        # every loaded, reasonably large image (absolute currentSrc: ChatGPT now serves results from relative
+        # /backend-api/... addresses the old src filter never matched); known result hosts first
+        try:
+            found = page.evaluate("""() => [...document.images]
+                .filter(i => i.complete && i.naturalWidth >= 200 && i.naturalHeight >= 200)
+                .map(i => i.currentSrc || i.src).filter(s => s && !s.startsWith('data:'))""")
+        except Exception:
+            found = []
+        n = len(found)
+        known = ("oaiusercontent", "backend-api", "estuary", "scontent", "th.bing", "bing.net", "OIG")
+        srcs = [s for s in dict.fromkeys(found) if not (baseline and s in baseline)]   # new since the prompt only
+        srcs.sort(key=lambda s: not any(k in s for k in known))
         for s in srcs:
+            if not s.startswith("http"):
+                continue           # blob: URLs only work inside the browser (fetched below)
             try:
                 d = requests.get(s, timeout=30).content
                 if len(d) >= min_bytes and _is_image(d):
@@ -529,14 +553,22 @@ def r4_chatgpt_image(desc, aspect, image_path, ctx):
             _blocker_unknown("chatgpt", page, ctx, "r4", state, evidence)
         box = _pick(page, ["#prompt-textarea", "[placeholder*='Ask ChatGPT']", "textarea[data-id='root']", "div[contenteditable='true']"])
         before = _img_srcs(page)
+        start_url = page.url
+        _dismiss_popups(page, ctx)
         try:
+            box.first.click()
+            page.keyboard.press("Control+A")      # ChatGPT keeps an unsent draft: clear it so only this prompt goes out
+            page.keyboard.press("Backspace")
             _type_like_human(page, box, "Create an image: " + _prompt(desc, "photorealistic, no text"), submit=False)
         except Exception:
             _gen_fail(ctx, "chatgpt", evidence, "prompt box not usable")
         page.wait_for_timeout(800)
+        # sent = the chat moved to its own /c/ address, a Stop button appeared, or our message is in the thread
         _submit(page, ["button[data-testid='send-button']", "#composer-submit-button", "button[aria-label*='Send']"],
                 ctx, evidence, "chatgpt",
-                lambda p: p.locator("[data-message-author-role='user']").count() > 0)
+                lambda p: (p.url != start_url and "/c/" in p.url)
+                          or p.locator("button[data-testid='stop-button'], button[aria-label*='Stop']").count() > 0
+                          or p.locator("[data-message-author-role='user']").count() > 0)
         # SPEC-Z008 §A: generation may simply take longer than one fixed wait — poll 480s
         return _poll_generation(page, ctx, "r4", "chatgpt", evidence,
                                 ["img[src*='oaiusercontent']", "img[alt*='Generated']", "img[src*='blob']"],
