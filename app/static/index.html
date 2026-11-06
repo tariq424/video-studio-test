@@ -142,7 +142,7 @@ const POPUP=new URLSearchParams(location.search).get('popup')==='edit';
 if(EMBED)document.documentElement.classList.add('embed');
 if(POPUP){document.documentElement.classList.add('popup');addEventListener('DOMContentLoaded',()=>{for(const id of ['popTitle','popClose'])if($(id))$(id).style.display=''})}
 const $=id=>document.getElementById(id);
-if(location.port!=='42021'){const tp=$('testpill');if(tp)tp.style.display='';}
+if(location.port!=='42020'){const tp=$('testpill');if(tp)tp.style.display='';}
 function openEditPopup(id){window.open('/?job='+encodeURIComponent(id)+'&popup=edit','vsedit','width=1280,height=900');}
 window.addEventListener('message',(e)=>{if(e.data&&e.data.vsEdited){sel=e.data.vsEdited;editing=false;planCache=null;lastKey='';loadJobs();}});
 async function j(u,o){const r=await fetch(u,o);if(!r.ok)throw new Error(await r.text());return r.json()}

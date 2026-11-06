@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT / "app"))
 from studio import config, physics, review
 from studio.render_media import inspect_video
 
-os.environ["PORT"] = "42021"
+os.environ["PORT"] = "42020"
 out = Path(r"F:\videos_test\jobs\physics_modules_20261018")
 out.mkdir(parents=True, exist_ok=True)
 (out / "space.json").write_text(json.dumps({"w": 1280, "h": 720}))

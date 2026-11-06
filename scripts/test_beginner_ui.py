@@ -1,4 +1,4 @@
-"""Browser test against port 42021; does not submit a video job."""
+"""Browser test against port 42020; does not submit a video job."""
 import json
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
@@ -7,14 +7,14 @@ evidence = Path(r'F:\videos_test\evidence\audience')
 with sync_playwright() as p:
     browser = p.chromium.launch(channel='chrome', headless=True)
     page = browser.new_page(viewport={'width': 1440, 'height': 1100})
-    page.goto('http://127.0.0.1:42021/')
+    page.goto('http://127.0.0.1:42020/')
     dropdown = page.get_by_test_id('audience')
     options = dropdown.locator('option').evaluate_all('(els)=>els.map(e=>e.value)')
     assert options == ['', 'common', 'beginner', 'informed', 'expert'], options
     expect(dropdown).to_have_value('')
     dropdown.select_option('beginner')
     expect(dropdown).to_have_value('beginner')
-    page.goto('http://127.0.0.1:42021/make')
+    page.goto('http://127.0.0.1:42020/make')
     choice = page.get_by_test_id('make-audience')
     expect(choice).to_have_value('')
     choice.select_option('beginner')

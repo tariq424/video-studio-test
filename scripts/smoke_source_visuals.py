@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 assert ROOT == Path(r"F:\code\video-studio-test")
-os.environ["PORT"] = "42021"
+os.environ["PORT"] = "42020"
 sys.path.insert(0, str(ROOT / "app"))
 from studio import config, media, review, short, source_visuals
 from studio.render_media import inspect_video

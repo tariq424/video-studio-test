@@ -1,6 +1,6 @@
 """Machine-wide GPU barrier for Video Studio (design: DeepSeek round 1-2 via ai-exchange, fixes by Claude).
 
-One GPU user at a time across every process (live 42021, test copies, QC scripts). Byte-range lock on a file
+One GPU user at a time across every process (live 42020, test copies, QC scripts). Byte-range lock on a file
 (msvcrt on Windows, fcntl elsewhere): the OS frees it when the holder process exits, so a crash never leaves a stale
 lock. Metadata (holder pid/desc/since) is display-only; the OS lock is the truth.
 Claude fixes over the DeepSeek draft: Windows LK_LOCK gives up after ~10 s, so acquire() polls LK_NBLCK; re-entrant

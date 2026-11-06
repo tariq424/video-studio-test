@@ -42,7 +42,7 @@ def main():
     held = False; t0 = time.time()
     try:
         def current():
-            try: return requests.get("http://127.0.0.1:42021/api/status", timeout=10).json().get("current")
+            try: return requests.get("http://127.0.0.1:42020/api/status", timeout=10).json().get("current")
             except Exception: return None
         for i in range(1440):   # up to 12 h; the pipeline keeps working while we wait (no hold until Video Studio is idle)
             cur = current()

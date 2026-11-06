@@ -7,7 +7,7 @@ from studio import config
 from studio.pipeline import Studio, STAGES, stages_for
 from studio.wangp import WanGP
 
-VS_PORT = int(os.environ.get("PORT") or 42021)   # the launcher sets PORT; unset = live (42021) as before
+VS_PORT = int(os.environ.get("PORT") or 42020)   # the launcher sets PORT; unset = live (42020) as before
 app = Flask(__name__, static_folder="static"); studio = Studio(port=VS_PORT)
 
 @app.get("/")
@@ -223,7 +223,7 @@ def edit_beats(jid):
     return jsonify(out)
 
 def _editor_ns():
-    return None if VS_PORT == 42021 else str(VS_PORT)
+    return None if VS_PORT == 42020 else str(VS_PORT)
 
 def _editor_owner(jid, sid):
     from studio import editor_session

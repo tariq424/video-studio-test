@@ -14,7 +14,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-VS = "http://127.0.0.1:42021"
+VS = "http://127.0.0.1:42020"
 CODE = Path("F:/code")
 JOBS = Path("F:/videos_test/jobs")
 WORK = Path("F:/bermuda/_work")

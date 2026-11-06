@@ -64,7 +64,7 @@ def main():
         'presenter': False, 'captions': True, 'auto_approve': True, 'auto_retries': 3,
         'title': 'Media validation smoke', 'done': [s for s in stages_for('long') if s != 'assemble']})
     print('Seeded', JOB, flush=True)
-    print('POST http://127.0.0.1:42021/api/jobs/media_fallback_smoke/resume', flush=True)
+    print('POST http://127.0.0.1:42020/api/jobs/media_fallback_smoke/resume', flush=True)
 
 
 if __name__ == '__main__':

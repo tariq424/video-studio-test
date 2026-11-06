@@ -108,7 +108,7 @@ class Job:
 class Studio:
     def __init__(self, port=None):
         self.port = port
-        self.live = port in (None, "42021", 42021)
+        self.live = port in (None, "42020", 42020)
         self.q = _StudioQueue(self)
         self.current = None; self.cancel = set()
         self._editor_waits = {}

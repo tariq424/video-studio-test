@@ -216,7 +216,7 @@ class Suite:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--vs", default="http://127.0.0.1:42021")
+    ap.add_argument("--vs", default="http://127.0.0.1:42020")
     ap.add_argument("--only", default="text,nlm,clip"); ap.add_argument("--nlm", default="")
     ap.add_argument("--job-minutes", type=float, default=15)
     ap.add_argument("--text-file", default="", help="make the text test from this file instead of the built-in description")

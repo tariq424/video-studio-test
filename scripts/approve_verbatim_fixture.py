@@ -15,7 +15,7 @@ if ROOT != Path(r"F:\code\video-studio-test"):
     raise SystemExit("Only run in the isolated checkout")
 job = sys.argv[1]
 assert re.fullmatch(r"\d{8}_\d{6}", job)
-base = f"http://127.0.0.1:42021/api/jobs/{job}"
+base = f"http://127.0.0.1:42020/api/jobs/{job}"
 for _ in range(60):
     state = requests.get(base, timeout=10).json()
     if state["status"] == "awaiting_review":

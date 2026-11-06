@@ -36,7 +36,7 @@ def main():
             auto_approve=False, presenter=False, captions=True, audience=audience,
             provider='deepseek', done=['transcript'], auto_retries=3, title=f'Audience {audience} smoke')
         (job / 'state.json').write_text(json.dumps(state, indent=2), encoding='utf-8')
-        print(f'Seeded {job}; resume via port 42021. Stops at script review, before TTS/render.')
+        print(f'Seeded {job}; resume via port 42020. Stops at script review, before TTS/render.')
 
 
 if __name__ == '__main__': main()

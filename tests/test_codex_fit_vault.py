@@ -32,7 +32,7 @@ def test_narration_fit_port_isolation(monkeypatch):
     monkeypatch.delenv("PORT", raising=False)
     assert imagegen.narration_fit_on() is False
 
-    monkeypatch.setenv("PORT", "42021")
+    monkeypatch.setenv("PORT", "42020")
     assert imagegen.narration_fit_on() is False
 
     monkeypatch.setenv("PORT", "42022")
@@ -277,7 +277,7 @@ def test_unchanged_cache_not_counted_again_but_inputs_invalidate(monkeypatch, tm
     assert json.loads((tmp_path / imagegen.FIT_AUDIT).read_text())["counts"]["checked"] == 4
 
 
-@pytest.mark.parametrize("port", [None, "42021", "42023", "bad", ""])
+@pytest.mark.parametrize("port", [None, "42020", "42023", "bad", ""])
 def test_production_and_other_ports_do_not_call_fit(monkeypatch, tmp_path, port):
     if port is None: monkeypatch.delenv("PORT", raising=False)
     else: monkeypatch.setenv("PORT", port)
