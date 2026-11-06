@@ -73,6 +73,10 @@ def _run_route(rid, desc, aspect):
             st.update(status="failed", seconds=round(time.time() - t0, 1),
                       error=f"{type(e).__name__}: {str(e)[:220]}")
     _runs += 1
+    try:
+        _write_report()   # single RUNs are saved too: after a restart the cards showed a stale run-all result
+    except Exception:
+        pass
 
 
 def _write_report():
