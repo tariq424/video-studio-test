@@ -400,6 +400,24 @@ def _dismiss_popups(page, ctx):
         _note(ctx, f"closed {closed} popup(s) over the page")
 
 
+def _flow_close_news(page, ctx):
+    """Flow shows a 'what's new' window (e.g. 'Introducing Omni 1.2' with Get started) that blocks the editor; close it
+    in whichever frame it is in."""
+    for fr in page.frames:
+        for sel in ("button:has-text('Get started')", "button:has-text('Got it')", "button[aria-label='Close']",
+                    "button:has-text('close')"):
+            try:
+                b = fr.locator(sel).first
+                if b.is_visible(timeout=400):
+                    b.click(timeout=3000)
+                    _note(ctx, f"closed Flow news window ({sel})")
+                    page.wait_for_timeout(1500)
+                    return
+            except Exception:
+                continue
+    _dismiss_popups(page, ctx)
+
+
 def _is_image(data):
     """True only for real image bytes (JPEG/PNG/GIF/WebP). Bing once returned an HTML page that passed as 'ok'."""
     if not data or len(data) < 12:
@@ -707,6 +725,7 @@ def r8_flow_video(desc, aspect, image_path, ctx):
         # SPEC-Z008 §B (D140 evidence): the landing page has NO composer - only a hidden 0x0
         # textarea and a visible "add / New project" button. Start a project first, then drive
         # the editor INSIDE its frame (Z008 found it in an iframe, not the top page).
+        _flow_close_news(page, ctx)
         newproj = _pick(page, ["button:has-text('New project')", ":text('New project')", "button:has-text('add')"])
         try:
             newproj.first.click(timeout=10000)
@@ -714,6 +733,7 @@ def r8_flow_video(desc, aspect, image_path, ctx):
         except Exception:
             _gen_fail(ctx, "flow", evidence, "'New project' button not found/clickable")
         page.wait_for_timeout(8000)
+        _flow_close_news(page, ctx)      # the "Introducing Omni 1.2" window opens over the editor (Nov 6)
         # in-frame inventory (the D140 way, inside frames this time)
         inv = []
         box = None
@@ -731,7 +751,7 @@ def r8_flow_video(desc, aspect, image_path, ctx):
                         cand = loc.nth(i)
                         try:
                             cand.click(timeout=3000)          # drive INSIDE the frame
-                            cand.fill(desc + ". Cinematic slow camera move, photorealistic, no text.")
+                            cand.fill(_prompt(desc, "cinematic slow camera move, photorealistic, no text"))
                             box, box_frame = cand, fr
                             break
                         except Exception:
@@ -751,15 +771,67 @@ def r8_flow_video(desc, aspect, image_path, ctx):
                           f"still not drivable - IN-FRAME inventory: {'; '.join(inv) or 'none'}; "
                           f"iframes: {len(page.frames)}; screenshot output/{shot}")
         _note(ctx, f"composer driven inside frame {box_frame.url.split('/')[-1][:50] or box_frame.name[:30] or 'main'}")
-        page.keyboard.press("Enter")             # submit from the composer's frame context
+        def _videos():
+            out = []
+            for fr in page.frames:
+                try:
+                    out += fr.evaluate("() => [...document.querySelectorAll('video')].map(v => v.currentSrc || v.src || (v.querySelector('source')||{}).src || '').filter(Boolean)")
+                except Exception:
+                    pass
+            return out
+        before = set(_videos())
+        # Enter in the composer's own frame, then the send arrow if the text is still sitting there (Nov 6: Enter alone
+        # left the prompt unsent and the route waited 480 s for nothing)
         try:
-            page.wait_for_selector("video", timeout=480000)   # Flow queues at busy times
+            box.press("Enter")
         except Exception:
-            _gen_fail(ctx, "flow", evidence, "no generated clip within 480s")
-        vidsrc = page.locator("video source, video").first.get_attribute("src") or ""
+            pass
+        page.wait_for_timeout(1500)
+        try:
+            still = (box.input_value() if box.evaluate("e => 'value' in e") else box.inner_text()).strip()
+        except Exception:
+            still = ""
+        if still:
+            for sel in ("button[aria-label='Start generation']", "button[aria-label*='Send' i]", "button[aria-label*='Submit' i]", "button:has-text('arrow_forward')",
+                        "button:has(i:text('arrow_forward'))", "button[type='submit']"):
+                try:
+                    b = box_frame.locator(sel).last
+                    if b.is_visible(timeout=600):
+                        b.click(timeout=4000); _note(ctx, f"sent with {sel}"); break
+                except Exception:
+                    continue
+            page.wait_for_timeout(1500)
+            try:
+                still = (box.input_value() if box.evaluate("e => 'value' in e") else box.inner_text()).strip()
+            except Exception:
+                still = ""
+            if still:
+                _gen_fail(ctx, "flow", evidence, "prompt typed but not sent")
+        _note(ctx, "prompt sent")
+        t0, vidsrc = time.time(), ""
+        while time.time() - t0 < 480 and not vidsrc:          # Flow queues at busy times
+            page.wait_for_timeout(15000)
+            new = [s for s in _videos() if s not in before]
+            vidsrc = new[0] if new else ""
         if not vidsrc:
-            _gen_fail(ctx, "flow", evidence, "video download")
-        return _save(requests.get(vidsrc, timeout=180).content, "r8_flow_video.mp4")
+            _gen_fail(ctx, "flow", evidence, "no generated clip within 480s")
+        data = None
+        if vidsrc.startswith("http"):
+            try:
+                data = requests.get(vidsrc, timeout=180).content
+            except Exception:
+                data = None
+        if not data or len(data) < 50000:                     # signed/blob links: fetch inside the browser
+            try:
+                b64 = page.evaluate("""async (u) => { const r = await fetch(u); const b = new Uint8Array(await r.arrayBuffer());
+                    let s = ''; for (let i = 0; i < b.length; i += 32768) s += String.fromCharCode.apply(null, b.subarray(i, i + 32768));
+                    return btoa(s); }""", vidsrc)
+                data = base64.b64decode(b64)
+            except Exception:
+                data = None
+        if not data or len(data) < 50000:
+            _gen_fail(ctx, "flow", evidence, f"video download ({vidsrc[:80]})")
+        return _save(data, "r8_flow_video.mp4")
     finally:
         cctx.close()
         pw.stop()
