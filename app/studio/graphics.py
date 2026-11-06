@@ -111,7 +111,7 @@ def _valid(t, d):
 def classify(cfg, sec, log, ctx=""):
     """-> {"template": t | None, "data", "why", "how": "analysis" | "model"}. Never raises."""
     from .physics import synthetic_motion
-    motion = synthetic_motion(sec)
+    motion = synthetic_motion(sec, cfg, log)
     if motion:
         return {"template": "motion", "data": motion, "why": "physical motion requires animation", "how": "synthetic"}
     a = _from_analysis(sec)

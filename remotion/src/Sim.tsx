@@ -35,7 +35,29 @@ const Altimeter: React.FC<{ cx: number; cy: number; r: number; ft: number }> = (
 };
 
 export type Sim = { kind: "sim"; module: string; title: string; unit: string; series: [number, number][]; icon?: string; label?: string;
-  notes?: string; marks?: { t: number; text: string }[]; livery?: Livery | null };
+  notes?: string; marks?: { t: number; text: string }[]; livery?: Livery | null; synthetic?: boolean };
+
+// Subject riding the curve (synthetic profiles: physics.synthetic_profile). Drawn pointing right; rotated with the curve.
+const Rider: React.FC<{ icon?: string; f: number }> = ({ icon, f }) => {
+  if (icon === "sub") return <g fill="#f2c94c"><ellipse cx={0} cy={0} rx={46} ry={16} /><rect x={-8} y={-30} width={22} height={18} rx={4} /></g>;
+  if (icon === "car") return <g><rect x={-46} y={-14} width={92} height={24} rx={8} fill="#f2c94c" /><path d="M-26,-14 L-14,-32 L18,-32 L32,-14 Z" fill="#f2c94c" />
+    <circle cx={-26} cy={12} r={11} fill="#11161f" stroke="#e8edf5" strokeWidth={3} /><circle cx={26} cy={12} r={11} fill="#11161f" stroke="#e8edf5" strokeWidth={3} /></g>;
+  if (icon === "train") return <g><rect x={-60} y={-26} width={112} height={40} rx={10} fill="#f2c94c" /><path d="M52,-26 L70,-4 L70,14 L52,14 Z" fill="#f2c94c" />
+    {[-44, -18, 8, 34].map((x) => <rect key={x} x={x} y={-18} width={18} height={12} rx={2} fill="#11161f" />)}</g>;
+  if (icon === "ship") return <g><path d="M-58,0 L58,0 L44,22 L-50,22 Z" fill="#f2c94c" /><rect x={-30} y={-24} width={44} height={24} fill="#e8edf5" /><rect x={-6} y={-40} width={10} height={16} fill="#e85d4a" /></g>;
+  if (icon === "rocket") return <g><path d="M56,0 L30,-14 L-36,-14 L-36,14 L30,14 Z" fill="#e8edf5" /><path d="M-36,-14 L-52,-28 L-52,-6 Z M-36,14 L-52,28 L-52,6 Z" fill="#e85d4a" />
+    <path d={`M-38,-8 L${-70 - (f % 6) * 4},0 L-38,8 Z`} fill="#ffc83d" /></g>;
+  if (icon === "drop") return <g><rect x={-18} y={-18} width={36} height={36} rx={6} fill="#f2c94c" transform="rotate(20)" />
+    {[0, 1, 2].map((i) => <line key={i} x1={-34 - i * 14} y1={-12 + i * 12} x2={-60 - i * 14} y2={-12 + i * 12} stroke="rgba(255,255,255,0.5)" strokeWidth={3} />)}</g>;
+  if (icon === "wave") return <g><circle r={20} fill="#4cb8ff" /><circle r={30 + (f % 30)} fill="none" stroke="#4cb8ff" strokeOpacity={1 - (f % 30) / 30} strokeWidth={3} /></g>;
+  if (icon === "storm") return <g transform={`rotate(${-f * 8})`}><circle r={12} fill="#e85d4a" />
+    {[0, 120, 240].map((a) => <path key={a} transform={`rotate(${a})`} d="M0,-12 C26,-14 40,8 34,30 C26,10 14,0 0,0 Z" fill="#e85d4a" />)}</g>;
+  if (icon === "dot") return <g><circle r={16} fill="#f2c94c" /><circle r={28} fill="none" stroke="#f2c94c" strokeOpacity={0.4} strokeWidth={4} /></g>;
+  return <g fill="#ffffff"><path d="M48,0 C40,-6 20,-7 -30,-6 L-44,-24 L-52,-24 L-44,-4 L-48,0 L-44,4 L-52,24 L-44,24 L-30,6 C20,7 40,6 48,0 Z" />
+    <path d="M6,-4 L-22,-34 L-12,-34 L22,-4 Z M6,4 L-22,34 L-12,34 L22,4 Z" /></g>;
+};
+// time axis label in the unit that reads best for the series length
+const tLabel = (s: number, T: number) => s === 0 ? "0" : T >= 5400 ? `${+(s / 3600).toFixed(s / 3600 < 10 && T < 36000 ? 1 : 0)} h` : T >= 120 ? `${Math.round(s / 60)} min` : T < 3 ? `${s.toFixed(2)} s` : `${Math.round(s)} s`;
 
 export const SimBackdrop: React.FC<{ g: Sim; dur: number }> = ({ g, dur }) => {
   const f = useCurrentFrame(); const { fps, width: W, height: H } = useVideoConfig(); const t = f / fps; const tall = H > W;
@@ -61,28 +83,32 @@ export const SimBackdrop: React.FC<{ g: Sim; dur: number }> = ({ g, dur }) => {
     const deg = (Math.atan2(Y(v(t1)) - Y(v(t0)), X(t1) - X(t0)) * 180) / Math.PI;
     return Math.max(-28, Math.min(28, deg)); })();
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((k) => vmin + span * k);
-  const fmt = (v: number) => `${Math.round(v).toLocaleString("en-US")} ${g.unit}`;
+  const dec = span < 10 ? 1 : 0;   // small ranges (metres of flood, km/h near zero) keep one decimal
+  const num = (v: number) => v.toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  const fmt = (v: number) => `${num(v)} ${g.unit}`;
   return (
     <AbsoluteFill style={{ background: "linear-gradient(170deg, #0d1626 0%, #070a12 70%)" }}>
       <div style={{ position: "absolute", top: tall ? 330 : 50, left: 0, right: 0, textAlign: "center", fontFamily: HEAD, fontWeight: 900, fontSize: tall ? 56 : 46, color: C.text }}>{g.title}</div>
       <svg width={W} height={H} style={{ position: "absolute", inset: 0 }}>
         {ticks.map((v, i) => <g key={i}><line x1={box.x} x2={box.x + box.w} y1={Y(v)} y2={Y(v)} stroke="rgba(255,255,255,0.1)" />
-          <text x={box.x - 12} y={Y(v) + 8} fill="rgba(255,255,255,0.55)" fontSize={tall ? 24 : 20} textAnchor="end" fontFamily="Inter">{Math.round(v).toLocaleString("en-US")}</text></g>)}
-        {(g.marks || []).map((m, i) => <g key={"m" + i} opacity={tNow >= m.t ? 1 : 0.25}><line x1={X(m.t)} x2={X(m.t)} y1={box.y} y2={box.y + box.h} stroke={C.gold} strokeDasharray="8 8" />
-          <text x={X(m.t) + 10} y={box.y + 30 + i * 34} fill={C.gold} fontSize={tall ? 24 : 21} fontFamily="Inter" fontWeight={700}>{m.text}</text></g>)}
+          <text x={box.x - 12} y={Y(v) + 8} fill="rgba(255,255,255,0.55)" fontSize={tall ? 24 : 20} textAnchor="end" fontFamily="Inter">{num(v)}</text></g>)}
+        {g.synthetic ? [0, 0.5, 1].map((k) => <text key={"x" + k} x={X(T * k)} y={box.y + box.h + (tall ? 40 : 34)} fill="rgba(255,255,255,0.55)"
+          fontSize={tall ? 24 : 20} textAnchor={k === 0 ? "start" : k === 1 ? "end" : "middle"} fontFamily="Inter">{tLabel(T * k, T)}</text>) : null}
+        {(g.marks || []).map((m, i) => { const right = X(m.t) > box.x + box.w * 0.6;   // late marks read leftward so they never leave the frame
+          return <g key={"m" + i} opacity={tNow >= m.t ? 1 : 0.25}><line x1={X(m.t)} x2={X(m.t)} y1={box.y} y2={box.y + box.h} stroke={C.gold} strokeDasharray="8 8" />
+          <text x={X(m.t) + (right ? -10 : 10)} y={box.y + 30 + i * 34} textAnchor={right ? "end" : "start"} fill={C.gold} fontSize={tall ? 24 : 21} fontFamily="Inter" fontWeight={700}>{m.text}</text></g>; })}
         <path d={path} fill="none" stroke={C.teal} strokeWidth={6} strokeLinejoin="round" />
         {air ? <g transform={`translate(${X(cur[0])},${Y(cur[1])}) rotate(${pitch}) scale(${tall ? 0.7 : 0.72}) translate(-200,-60)`}>
           <LiveryAirliner lv={g.livery} f={f} id={`sl${Math.round(T)}`} /></g> : null}
         {air ? <Altimeter cx={tall ? W - 220 : W - 290} cy={tall ? 1260 : H / 2 + 10} r={tall ? 118 : 175} ft={cur[1]} /> : null}
-        <g transform={`translate(${X(cur[0])},${Y(cur[1])}) rotate(${-ang})`} opacity={air ? 0 : 1}>
-          {g.icon === "sub"
-            ? <g fill="#f2c94c"><ellipse cx={0} cy={0} rx={46} ry={16} /><rect x={-8} y={-30} width={22} height={18} rx={4} /></g>
-            : <g fill="#ffffff"><path d="M48,0 C40,-6 20,-7 -30,-6 L-44,-24 L-52,-24 L-44,-4 L-48,0 L-44,4 L-52,24 L-44,24 L-30,6 C20,7 40,6 48,0 Z" />
-                <path d="M6,-4 L-22,-34 L-12,-34 L22,-4 Z M6,4 L-22,34 L-12,34 L22,4 Z" /></g>}
+        <g transform={`translate(${X(cur[0])},${Y(cur[1])}) rotate(${["drop", "wave", "storm", "dot", "car", "train", "ship"].includes(g.icon || "") ? 0 : -ang})`} opacity={air ? 0 : 1}>
+          <Rider icon={g.icon} f={f} />
         </g>
       </svg>
-      <div style={{ position: "absolute", ...(air && tall ? { left: 90, top: 1150 } : { right: tall ? 90 : 200, top: tall ? 1300 : 52 }), fontFamily: HEAD, fontWeight: 900, fontSize: tall ? 64 : 52, color: C.gold }}>{fmt(cur[1])}</div>
-      {g.notes ? <div style={{ position: "absolute", left: tall ? 90 : 200, top: tall ? (air ? 1240 : 1310) : 180, fontFamily: BODY, fontWeight: 600, fontSize: tall ? 26 : 22, color: C.mut, maxWidth: tall ? (air ? 560 : 520) : 900 }}>{g.notes}</div> : null}
+      {g.synthetic ? <div style={{ position: "absolute", left: tall ? 90 : 200, bottom: tall ? 320 : 70, fontFamily: BODY, fontWeight: 700, fontSize: tall ? 24 : 20,
+        letterSpacing: 2, color: C.mut, border: `2px solid ${C.mut}`, borderRadius: 6, padding: "4px 12px" }}>SYNTHETIC · {g.label || "modelled, not measured"}</div> : null}
+      <div style={{ position: "absolute", ...(air && tall ? { left: 90, top: 1150 } : { right: tall ? 90 : 200, top: tall ? (g.synthetic ? 1345 : 1300) : 52 }), fontFamily: HEAD, fontWeight: 900, fontSize: tall ? 64 : 52, color: C.gold }}>{fmt(cur[1])}</div>
+      {g.notes ? <div style={{ position: "absolute", left: tall ? 90 : 200, top: tall ? (air ? 1240 : g.synthetic ? 1440 : 1310) : 180, fontFamily: BODY, fontWeight: 600, fontSize: tall ? 26 : 22, color: C.mut, maxWidth: tall ? (air ? 560 : 520) : 900 }}>{g.notes}</div> : null}
     </AbsoluteFill>
   );
 };

@@ -426,18 +426,224 @@ def non_physical(sec, text=None):
     return ""
 
 
+# ---------------------------------------------------------------- synthetic profiles (2026-11-06)
+# When no module has real data, the beat still gets REAL PHYSICS on SYNTHETIC DATA: a small law of motion (travel, braking,
+# free fall with drag, launch, rising water, strengthening storm) driven by the narration's own numbers, with typical values for
+# that kind of object filling the gaps (listed as "assumed" on screen). Drawn by Sim.tsx like the aircraft / submarine profiles,
+# labelled SYNTHETIC. Replaces the old `physical_flow` schematic (a fixed sine wave that ignored the narration).
+# kind -> (typical cruise speed km/h, icon)
+MOVERS = [
+    (r"\b(trains?|railway|rail)\b", "train", 120, "train"), (r"\b(trucks?|lorr(y|ies)|convoys?)\b", "truck", 80, "car"),
+    (r"\b(cars?|vehicles?|evs?|buses|taxis?)\b", "car", 100, "car"), (r"\b(bikes?|bicycles?|cyclists?)\b", "bike", 25, "dot"),
+    (r"\b(ships?|vessels?|tankers?|freighters?|ferr(y|ies)|boats?|cargo)\b", "ship", 26, "ship"),   # ~14 kn
+    (r"\b(troops|soldiers|marchers|people|crowds?)\b", "troops", 5, "dot"),
+    (r"\b(drones?)\b", "drone", 120, "dot"), (r"\b(helicopters?)\b", "helicopter", 250, "plane"),
+    (r"\b(jets?|aircraft|airplanes?|planes?|airliners?|flights?)\b", "aircraft", 850, "plane"),
+]
+LAUNCH = r"\b(rockets?|missiles?|spacecraft|launch\w*|lift(ed)? off|blast(ed)? off)\b"
+FALL = r"\b(fell|falls?|falling|dropp(ed|ing)|plung\w*|plummet\w*|debris|collaps\w*|tumbl\w*)\b"
+BRAKE = r"\b(crash(ed|es|ing)?|collid\w*|slammed|smashed|brak\w*|skid\w*|stopp(ed|ing)|halted|impact)\b"
+WATER = r"\b(floods?|flooding|river|rising water|water levels?|tides?|storm surge|dam)\b"
+STORM = r"\b(storms?|hurricanes?|typhoons?|cyclones?|tornado\w*|winds?|gusts?)\b"
+TRAVEL = r"\b(travel\w*|drove|driv\w*|sail\w*|flew|fly\w*|cross\w*|transit\w*|head(ed|ing)|en route|journey|moved|moving|went|raced|sped|accelerat\w*)\b"
+PHYS_MODELS = ("travel", "brake", "free_fall", "launch", "water_rise", "storm_build")
+
+
+def _num_unit(text, units):
+    """First "<number> <unit>" in the text (digits with commas) for any of the unit regexes. -> (value, matched unit) or (None, "")."""
+    m = re.search(r"([\d][\d,]*(?:\.\d+)?)\s*(" + "|".join(units) + r")\b", text, re.I)
+    return (float(m.group(1).replace(",", "")), m.group(2).lower()) if m else (None, "")
+
+
+def _speed_kmh(text):
+    v, u = _num_unit(text, [r"km/h", r"kph", r"kilomet(?:er|re)s? (?:an|per) hour", r"mph", r"miles (?:an|per) hour", r"knots?", r"kn"])
+    if v is None: return None
+    return v * (1.609 if u.startswith("m") else 1.852 if u.startswith("kn") else 1.0)
+
+
+def _metres(text):
+    v, u = _num_unit(text, [r"feet", r"ft", r"met(?:er|re)s?", r"m", r"kilomet(?:er|re)s?", r"km", r"miles?"])
+    if v is None: return None
+    return v * {"f": 0.3048, "k": 1000.0}.get(u[0], 1609.0 if u.startswith("mi") else 1.0)
+
+
+def _secs(text):
+    v, u = _num_unit(text, [r"seconds?", r"secs?", r"minutes?", r"mins?", r"hours?", r"hrs?", r"days?"])
+    if v is None: return None
+    return v * (60 if u.startswith("mi") else 3600 if u.startswith("h") else 86400 if u.startswith("d") else 1)
+
+
+def _ease(a, b, x):   # smooth start/stop between two values (0 <= x <= 1)
+    return a + (b - a) * (0.5 - 0.5 * math.cos(math.pi * max(0.0, min(1.0, x))))
+
+
+def _tl(secs):   # readable duration for labels
+    return f"{secs / 3600:.1f} h" if secs >= 5400 else f"{secs / 60:.0f} min" if secs >= 120 else f"{secs:.0f} s"
+
+
+def _profile(model, p, kind="object", icon="dot"):
+    """One physics law -> Sim.tsx spec (series [[t_s, value]]). p holds narration numbers; anything missing gets a typical value
+    and is listed in `assumed`. -> spec or None."""
+    assumed, s, marks = [], [], []
+    def a(name, val, why):
+        if p.get(name) in (None, "", 0): p[name] = val; assumed.append(why)
+        return float(p[name])
+    if model == "travel":   # accelerate to cruise, hold, slow to a stop; drawn as DISTANCE covered (a flat speed line says nothing)
+        v = a("speed_kmh", dict((k, c) for _, k, c, _ in MOVERS).get(kind, 60), f"typical {kind} speed")
+        T = a("secs", 60 * {"car": 30, "truck": 120, "train": 60, "ship": 720, "aircraft": 120, "helicopter": 60, "drone": 20,
+                            "bike": 60, "troops": 240}.get(kind, 30), f"typical {kind} trip length")
+        acc = {"car": 3.0, "truck": 1.2, "train": 0.5, "ship": 0.05, "aircraft": 2.0}.get(kind, 1.5)   # m/s^2
+        ta = min(T * 0.3, (v / 3.6) / acc)
+        speed = lambda t: _ease(0, v, t / ta) if t < ta else (_ease(v, 0, (t - (T - ta)) / ta) if t > T - ta else v)
+        d, prev = 0.0, 0.0
+        for i in range(241):
+            t = T * i / 240
+            d += (speed(prev) + speed(t)) / 2 / 3.6 * (t - prev) / 1000; prev = t   # km, trapezoid rule
+            s.append([round(t, 2), round(d, 2)])
+        marks = [{"t": T * 0.5, "text": f"cruising at {v:,.0f} km/h"}]
+        return {"title": p.get("title") or f"{kind.capitalize()} journey", "unit": "km", "series": s, "icon": icon, "marks": marks,
+                "label": f"about {d:,.{0 if d >= 100 else 1}f} km in {_tl(T)} at {v:,.0f} km/h", "assumed": assumed}
+    if model == "brake":    # cruise, then a hard stop (braking) or an impact (crash): speed vs time
+        v = a("speed_kmh", dict((k, c) for _, k, c, _ in MOVERS).get(kind, 80), f"typical {kind} speed")
+        crash = bool(p.get("impact"))
+        dec = float(p.get("decel_mps2") or 0) or (300.0 if crash else 7.0)   # an impact stops in ~0.1 s; firm braking ~7 m/s^2
+        if not p.get("decel_mps2"): assumed.append("impact deceleration" if crash else "braking deceleration (dry road)")
+        tb = (v / 3.6) / dec; lead = max(1.0, tb * (3 if not crash else 20)); T = lead + tb + lead * 0.5
+        for i in range(241):
+            t = T * i / 240
+            val = v if t < lead else max(0.0, v - (t - lead) * dec * 3.6)
+            s.append([round(t, 3), round(val, 1)])
+        g_load = dec / G
+        marks = [{"t": lead, "text": "impact" if crash else "brakes on"}]
+        return {"title": p.get("title") or ("Impact" if crash else "Braking"), "unit": "km/h", "series": s, "icon": icon, "marks": marks,
+                "label": f"{v:,.0f} km/h to 0 in {tb:.2f} s ({g_load:,.0f} g)", "assumed": assumed}
+    if model == "free_fall":   # height vs time with air drag: v(t) = vt*tanh(g t / vt), h = h0 - (vt^2/g) ln cosh(g t / vt)
+        h0 = a("height_m", 100.0, "drop height"); vt = a("terminal_mps", 55.0, "terminal speed (~55 m/s, a person-sized object)")
+        T = vt / G * math.acosh(math.exp(min(h0 * G / vt ** 2, 700)))   # time to reach the ground
+        for i in range(241):
+            t = T * i / 240
+            h = h0 - (vt ** 2 / G) * math.log(math.cosh(G * t / vt))
+            s.append([round(t, 3), round(max(0.0, h), 1)])
+        v_end = vt * math.tanh(G * T / vt)
+        return {"title": p.get("title") or "Fall", "unit": "m", "series": s, "icon": "drop", "marks": [{"t": T, "text": f"ground at {v_end * 3.6:,.0f} km/h"}],
+                "label": f"{h0:,.0f} m in {T:.1f} s", "assumed": assumed}
+    if model == "launch":      # powered climb then coast: altitude vs time (no atmosphere model; illustrative ascent)
+        acc = a("accel_mps2", 25.0, "thrust acceleration (~2.5 g)"); burn = a("burn_secs", 60.0, "engine burn time")
+        T = burn * 2.2; vb = acc * burn; hb = 0.5 * acc * burn ** 2
+        for i in range(241):
+            t = T * i / 240
+            h = 0.5 * acc * t * t if t <= burn else hb + vb * (t - burn) - 0.5 * G * (t - burn) ** 2
+            s.append([round(t, 2), round(max(0.0, h) / 1000, 2)])
+        return {"title": p.get("title") or "Launch", "unit": "km", "series": s, "icon": "rocket", "marks": [{"t": burn, "text": f"burnout at {vb * 3.6:,.0f} km/h"}],
+                "label": f"{acc / G:.1f} g for {burn:.0f} s", "assumed": assumed}
+    if model == "water_rise":  # logistic rise to a crest: level vs time
+        rise = a("rise_m", 3.0, "rise to the crest"); T = a("secs", 12 * 3600.0, "hours to crest")
+        for i in range(241):
+            t = T * 1.2 * i / 240
+            s.append([round(t), round(rise / (1 + math.exp(-10 * (t / T - 0.5))), 3)])
+        return {"title": p.get("title") or "Water level", "unit": "m", "series": s, "icon": "wave", "marks": [{"t": T, "text": "crest"}],
+                "label": f"+{rise:,.1f} m in {_tl(T)}", "assumed": assumed}
+    if model == "storm_build":  # sustained wind strengthening to a peak: wind vs time
+        w0 = a("start_mph", 40.0, "starting wind"); w1 = a("peak_mph", 120.0, "peak wind"); T = a("secs", 36 * 3600.0, "hours to peak")
+        for i in range(241):
+            t = T * 1.15 * i / 240
+            s.append([round(t), round(_ease(w0, w1, t / T), 2)])   # whole numbers drew a staircase
+        cat = next((c for c, lo in ((5, 157), (4, 130), (3, 111), (2, 96), (1, 74)) if w1 >= lo), 0)
+        return {"title": p.get("title") or "Wind speed", "unit": "mph", "series": s, "icon": "storm",
+                "marks": [{"t": T, "text": f"peak {w1:,.0f} mph" + (f" (cat {cat})" if cat else "")}], "label": f"{w0:,.0f} to {w1:,.0f} mph in {_tl(T)}", "assumed": assumed}
+    return None
+
+
+SYNTH_PICK = """A news video needs an animated physics graph for this beat. Narration: "{vo}"
+Pick ONE model and fill its parameters ONLY with numbers the narration states (leave any other parameter out: typical values are
+added and shown as assumed). Models:
+- travel: something moving along (vehicle, train, ship, aircraft, troops). params: kind (car/truck/train/ship/aircraft/drone/bike/troops), speed_kmh, secs (trip time)
+- brake: something stopping hard or crashing. params: kind, speed_kmh, impact (true for a crash/collision), decel_mps2
+- free_fall: something falling. params: height_m, terminal_mps
+- launch: rocket / missile going up. params: accel_mps2, burn_secs
+- water_rise: flood / river / surge rising. params: rise_m, secs (time to crest)
+- storm_build: storm / hurricane strengthening. params: start_mph, peak_mph, secs
+- none: no physical motion here (figurative, markets, software, opinions)
+Also give title: 2-4 words for the graph (e.g. "Braking from 100 km/h").
+Reply with ONLY JSON: {{"model": "...", "params": {{...}}, "title": "..."}}"""
+
+
+def _pick_model(text):
+    """Offline choice of a physics model from the narration's words. -> (model, kind, icon) or (None, ...)."""
+    kind, icon = next(((k, ic) for rx, k, _, ic in MOVERS if re.search(rx, text, re.I)), ("object", "dot"))
+    if re.search(LAUNCH, text, re.I) and not re.search(BRAKE, text, re.I): return "launch", kind, icon
+    if re.search(STORM, text, re.I) and re.search(r"\b(strengthen\w*|intensif\w*|grew|grow\w*|built|build\w*|picked up|gain\w*|category)\b", text, re.I):
+        return "storm_build", kind, icon
+    if re.search(WATER, text, re.I) and re.search(r"\b(ris\w*|rose|swell\w*|surg\w*|crest\w*|flood\w*|burst|overflow\w*)\b", text, re.I):
+        return "water_rise", kind, icon
+    if re.search(BRAKE, text, re.I) and kind != "object": return "brake", kind, icon
+    if re.search(FALL, text, re.I) and kind in ("object", "drone"): return "free_fall", kind, icon
+    if kind != "object" and re.search(TRAVEL + r"|\bflows?\b", text, re.I): return "travel", kind, icon
+    return None, kind, icon   # e.g. "water flows through a river": no event to model, so graphics draw it instead
+
+
+def synthetic_profile(sec, cfg=None, log=None):
+    """REAL physics on SYNTHETIC data for a beat with physical motion and no real data. The script model picks the law and copies
+    the narration's numbers (when cfg has a provider); offline, the words pick it and regexes read the numbers. -> sim spec or None."""
+    text = str(sec.get("vo") or "")
+    if not text or non_physical(sec, text): return None
+    model, kind, icon = _pick_model(text)
+    params, title = {}, ""
+    if cfg and (cfg.get("script_provider") or cfg.get("deepseek_api_key") or cfg.get("anthropic_api_key")):
+        try:
+            from .llm import LLM
+            c = dict(cfg)
+            if c.get("script_provider") == "claude" and not c.get("anthropic_api_key"): c["script_provider"] = "deepseek" if c.get("deepseek_api_key") else "local"
+            def chk(j):
+                if j.get("model") not in PHYS_MODELS + ("none",): raise ValueError("unknown model")
+            with LLM(c, log or (lambda _: None), lambda: False) as llm:
+                j = llm.chat_json("You set up physics simulations for news graphics. Reply with JSON only.",
+                                  SYNTH_PICK.format(vo=text[:700].replace('"', "'")), max_tokens=500, check=chk)
+            if j.get("model") == "none": return None
+            model = j["model"]; params = {k: v for k, v in (j.get("params") or {}).items() if v not in (None, "")}; title = str(j.get("title") or "")[:40]
+            kind = str(params.pop("kind", "") or kind).lower()
+            icon = next((ic for _, k, _, ic in MOVERS if k == kind), icon)
+        except Exception as e:
+            (log or (lambda _: None))(f"  physics: model picker unavailable ({str(e)[:80]}); words decide")
+    if not model: return None
+    if not params:   # offline: the narration's own numbers
+        sp, m, sec_ = _speed_kmh(text), _metres(text), _secs(text)
+        if not sp and m and sec_ and model == "travel" and m >= 1000:   # "400 km in 5 hours" -> 80 km/h
+            sp = m / 1000 / (sec_ / 3600)
+        if sp and model != "storm_build": params["speed_kmh"] = sp
+        if sec_: params["secs"] = sec_
+        if model == "storm_build":   # winds in mph (or km/h, knots): the highest is the peak, a lower one the start
+            ws = [float(x.replace(",", "")) * f for x, u in re.findall(r"([\d][\d,]*)\s*(mph|km/h|kph|knots?|kn)\b", text, re.I)
+                  for f in [{"m": 1.0, "k": 0.621}.get(u[0].lower(), 1.0) if not u.lower().startswith("kn") else 1.151]]
+            if ws: params["peak_mph"] = max(ws)
+            if len(ws) > 1: params["start_mph"] = min(ws)
+        if m and model == "free_fall": params["height_m"] = m
+        if m and model == "water_rise" and m < 30: params["rise_m"] = m
+        if model == "brake" and re.search(r"\b(crash\w*|collid\w*|slammed|smashed|impact)\b", text, re.I): params["impact"] = True
+    try:
+        params = {k: (float(v) if k not in ("impact", "title") and not isinstance(v, bool) else v) for k, v in params.items()}
+    except (TypeError, ValueError):
+        params = {}
+    if title: params["title"] = title
+    r = _profile(model, params, kind, icon)
+    if not r or len(r["series"]) < 2: return None
+    notes = "Modelled from the narration, not measured" + (": assumed " + ", ".join(r.pop("assumed")) if r.get("assumed") else "")
+    r.pop("assumed", None)
+    return {"kind": "sim", "module": f"synthetic_{model}", **r, "notes": notes, "synthetic": True, "source": "synthetic"}
+
+
 # Deterministic, offline illustrative motion. Never presented as observations.
-def synthetic_motion(sec):
+def synthetic_motion(sec, cfg=None, log=None):
     text = str(sec.get("vo") or "")
     if non_physical(sec, text): return None
     radar = re.search(r"\b(radar|radars)\b", text, re.I)
     moving = re.search(r"\b(mov\w*|sweep\w*|flow\w*|travel\w*|sail\w*|transit\w*|cross\w*|heading|en route|route|tracking|track)\b", text, re.I)
     ship = re.search(r"\b(ships?|vessels?|tankers?|shipping)\b", text, re.I)
-    if not radar and not moving: return None
-    # Avoid treating financial/figurative movement as physical motion.
-    physical = ship or radar or re.search(r"\b(water|wind|aircraft|plane|vehicle|car|train|storm|river|current|particles?|fluid|satellites?|missiles?|troops|cargo|spacecraft|rocket|ball)\b", text, re.I)
-    if not physical: return None
-    if ship and re.search(r"hormuz", text, re.I):
+    if not radar and not (ship and moving and re.search(r"hormuz", text, re.I)):
+        # everything else: a physics law on the narration's numbers; synthetic_profile has its own gate (a real mover or a
+        # physical event: crash, fall, launch, flood, storm) so "the market moves higher" still gets nothing
+        return synthetic_profile(sec, cfg, log)
+    if ship:
         params = {"title": "Strait of Hormuz transit", "waypoints": [
             {"name": "", "lat": 26.5, "lon": 55.6},
             {"name": "Strait of Hormuz", "lat": 26.6, "lon": 56.3},
@@ -446,12 +652,13 @@ def synthetic_motion(sec):
         result.update(synthetic=True, label="SYNTHETIC • illustrative route, not live AIS",
                       notes="Illustrative coordinates and timing; no observed vessel track.", source="synthetic")
         return result
-    return {"kind": "motion", "module": "radar_sweep" if radar else "physical_flow",
-            "title": "Radar sweep" if radar else ("Vessel transit" if ship else "Physical motion"),
+    if not radar:   # everything else that moves: a physics law on the narration's numbers (no more fixed sine "physical_flow")
+        return synthetic_profile(sec, cfg, log)
+    return {"kind": "motion", "module": "radar_sweep", "title": "Radar sweep",
             "synthetic": True, "source": "synthetic",
             "label": "SYNTHETIC • schematic, not live tracking",
             "angles": [i * 6 for i in range(121)],
-            "points": [[0.15 + i * 0.7 / 60, 0.5 + 0.16 * math.sin(i / 60 * math.pi * 2)] for i in range(61)],
+            "points": [[0.15 + i * 0.7 / 60, 0.5] for i in range(61)],
             "targets": [[0.25, 0.3], [0.7, 0.4], [0.55, 0.75]]}
 
 
@@ -501,13 +708,10 @@ def provide(cfg, sec, backdrop, log, pos=None, story=""):
             return {"module": mod, "source": kind, "verb": verb, "spec": spec, "params": params}
     spec = _map_route(sec, backdrop, text)
     if spec: return {"module": "route", "source": "script map", "verb": "travel", "spec": spec, "params": {}}
-    spec = synthetic_motion({**sec, "vo": text})
-    if not spec and re.search(MOTION_WORDS + r"|\b(dive[sd]?|diving|launch\w*|fired|struck|strike|charg\w*|chas\w*|fell|falling|rose|climb\w*|accelerat\w*)\b", text, re.I) \
-            and re.search(r"\b(drones?|jets?|aircraft|planes?|ships?|vessels?|boats?|missiles?|rockets?|troops|convoy|cars?|trucks?|trains?|storm|satellites?|helicopters?|submarines?)\b", text, re.I):
-        # physical motion the specific modules don't cover: a labelled schematic path, never passed off as real tracking
-        spec = {"kind": "motion", "module": "physical_flow", "title": (backdrop or {}).get("title") or "Physical motion", "synthetic": True,
-                "source": "synthetic", "label": "SYNTHETIC \u2022 schematic, not live tracking",
-                "points": [[0.12 + i * 0.76 / 60, 0.62 - 0.22 * (i / 60) + 0.06 * math.sin(i / 60 * math.pi * 3)] for i in range(61)],
-                "angles": [i * 6 for i in range(121)], "targets": []}
+    spec = synthetic_motion({**sec, "vo": text}, cfg, log)
+    if not spec and re.search(MOTION_WORDS + r"|\b(dive[sd]?|diving|launch\w*|fired|struck|strike|charg\w*|chas\w*|fell|falling|rose|climb\w*|accelerat\w*|"
+                              r"crash\w*|collid\w*|brak\w*|flood\w*|strengthen\w*|intensif\w*)\b", text, re.I):
+        # physical motion the specific modules don't cover: a physics law on synthetic data (the old fixed sine path is gone)
+        spec = synthetic_profile({**sec, "vo": text}, cfg, log)
     if spec: return {"module": spec.get("module", "motion"), "source": "synthetic", "verb": "motion", "spec": spec, "params": {}}
     return None

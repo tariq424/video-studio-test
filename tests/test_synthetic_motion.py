@@ -4,16 +4,19 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'app'))
 from studio import graphics, physics
 class MotionTests(unittest.TestCase):
     def test_priority(self):
-        for vo in ['Radar sweeps over the coast.', 'Ships moving through Hormuz.', 'Water flows through a river.', 'A train travels from A to B.']:
+        for vo in ['Radar sweeps over the coast.', 'Ships moving through Hormuz.', 'A train travels from A to B.']:
             self.assertEqual(graphics.classify({}, {'vo':vo}, lambda _:None)['template'],'motion')
+        # no event to model (nothing rises, stops, falls or travels anywhere): no physics graph, graphics decide
+        self.assertIsNone(physics.synthetic_motion({'vo':'Water flows through a river.'}))
     def test_non_motion(self):
         self.assertIsNone(physics.synthetic_motion({'vo':'The market moves higher.'}))
         self.assertIsNone(physics.synthetic_motion({'vo':'The ship has a steel hull.'}))
     def test_fallback(self):
-        for module in ['ship_route','weather_event']:
-            result=physics.run(module,{})
-            self.assertTrue(result['synthetic'])
-            self.assertEqual(result['kind'],'motion')
+        result=physics.run('ship_route',{})   # no waypoints: a ship-speed profile on typical values, labelled synthetic
+        self.assertTrue(result['synthetic'])
+        self.assertEqual(result['kind'],'sim')
+        self.assertEqual(result['module'],'synthetic_travel')
+        self.assertIsNone(physics.run('weather_event',{}))   # no track and no strengthening: nothing honest to draw
     def test_explainer_router(self):
         import tempfile
         from unittest.mock import patch
