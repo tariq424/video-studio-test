@@ -167,11 +167,11 @@ AUDIENCE = {   # one line per level, added to the narration prompts (explainer s
 }
 
 def audience_key(cfg):
-    a = str(cfg.get("audience") or "common").lower()
-    return a if a in AUDIENCE else "common"
+    a = str(cfg.get("audience") or "informed").lower()
+    return a if a in AUDIENCE else "informed"
 
 def audience_line(cfg):
-    """The prompt line for this job's audience (cfg["audience"]: the job's choice, else settings.json, else common)."""
+    """The prompt line for this job's audience (cfg["audience"]: the job's choice, else settings.json, else informed)."""
     from . import style
     return AUDIENCE[audience_key(cfg)] + style.text(cfg)   # + the house style learned from feedback ('' when none)
 

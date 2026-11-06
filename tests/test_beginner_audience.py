@@ -11,9 +11,9 @@ from studio import config, make, writer, pipeline
 
 class BeginnerAudienceTests(unittest.TestCase):
     def test_default_and_case_normalization(self):
-        self.assertEqual(config.DEFAULTS['audience'], 'common')
+        self.assertEqual(config.DEFAULTS['audience'], 'informed')
         self.assertEqual(writer.audience_key({'audience': 'Beginner'}), 'beginner')
-        self.assertEqual(writer.audience_key({'audience': 'unknown'}), 'common')
+        self.assertEqual(writer.audience_key({'audience': 'unknown'}), 'informed')
 
     def test_make_rules_override_model_and_explicit_choice_overrides_rules(self):
         with patch.object(make, '_llm', return_value=({'audience': 'expert'}, 'test')):
