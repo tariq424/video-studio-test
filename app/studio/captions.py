@@ -98,7 +98,7 @@ def emoji_png(e, out, size=130):
     for path, sz in EMOJI_FONTS:
         try: f = ImageFont.truetype(path, sz); break
         except OSError: pass
-    if f is None: return False   # no colour-emoji font on this machine (the Linux laptop without fonts-noto-color-emoji): no emoji
+    if f is None: return False   # no colour-emoji font on this machine: no emoji
     im = Image.new("RGBA", (300, 300), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
     d.text((60, 60), e, font=f, embedded_color=True)
     bb = im.getbbox()

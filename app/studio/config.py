@@ -223,12 +223,12 @@ def load():
     except Exception: pass
     raw = _raw(); d.update(raw)
     import os
-    for k in SECRETS:   # Windows vault; on the Linux worker the service's environment (VS_<NAME>) or a plain value
+    for k in SECRETS:   # Windows vault, else a plain value in the config file (hf_token: vault or VS_HF_TOKEN only)
         plain = raw.get(k) if raw.get(k) not in (None, "", "vault") else ""
         if k == "hf_token":
             d[k] = _vault_get(k) or os.environ.get("VS_HF_TOKEN", "")
         else:
-            d[k] = _vault_get(k) or os.environ.get("VS_" + k.upper(), "") or plain
+            d[k] = _vault_get(k) or plain
     return d
 
 def save(upd):
