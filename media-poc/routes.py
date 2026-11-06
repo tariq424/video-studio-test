@@ -914,20 +914,82 @@ def _wangp_urls():
     return list(dict.fromkeys(urls))
 
 
+class _WanMCP:
+    """Minimal WanGP MCP client (streamable HTTP), same calls as the studio's wangp.py: initialize -> wangp_generate ->
+    poll wangp_get_job. Never starts or stops WanGP: it uses one that is already running."""
+    def __init__(self, url):
+        self.url, self.sid = url, None
+
+    def _post(self, body, timeout=120):
+        h = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+        if self.sid:
+            h["mcp-session-id"] = self.sid
+        r = requests.post(self.url, headers=h, data=json.dumps(body), timeout=(5, timeout))
+        if r.headers.get("mcp-session-id"):
+            self.sid = r.headers["mcp-session-id"]
+        return r
+
+    def init(self):
+        r = self._post({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26",
+                        "capabilities": {}, "clientInfo": {"name": "media-poc", "version": "1"}}}, timeout=6)
+        if r.status_code >= 400 or not (r.headers.get("mcp-session-id") or "jsonrpc" in r.text):
+            raise RuntimeError(f"HTTP {r.status_code}")
+        self._post({"jsonrpc": "2.0", "method": "notifications/initialized"})
+
+    def call(self, name, args):
+        r = self._post({"jsonrpc": "2.0", "id": int(time.time() * 1000), "method": "tools/call",
+                        "params": {"name": name, "arguments": args}})
+        data = [l[6:] for l in r.text.splitlines() if l.startswith("data: ")]
+        j = json.loads(data[-1] if data else r.text)
+        res = j.get("result") or {}
+        if "structuredContent" in res:
+            return res["structuredContent"]
+        if res.get("isError"):
+            return {"error": (res.get("content") or [{}])[0].get("text", "error")}
+        return res if "error" not in j else {"error": str(j["error"])}
+
+
 def r9_wangp(desc, aspect, image_path, ctx):
-    import socket
+    """One WanGP still (the studio's rung 6 settings: flux2_klein_9b, 4 steps) from a WanGP that is already running."""
+    wg = None
     for url in _wangp_urls():
-        host_port = url.split("//")[1].split("/")[0]
-        host, _, port = host_port.partition(":")
         try:
-            with socket.create_connection((host, int(port)), timeout=2):
-                pass
+            c = _WanMCP(url); c.init(); wg = c; break
         except Exception:
             continue
-        raise Blocker(f"WanGP MCP found at {url} but the still+i2v MCP calls are not wired in this "
-                      f"POC build; endpoint pattern proven (see wangp.py reference)")
-    raise Blocker("WanGP not reachable (probed Pinokio log URLs + ports 8000/42004; "
-                  "start it in Pinokio to use this route)")
+    if wg is None:
+        raise Blocker("WanGP not reachable (probed Pinokio log URLs + ports 8000/42004). It is unloaded when idle: "
+                      "start it in Pinokio (WanGP > Start), then RUN again")
+    _note(ctx, f"WanGP MCP at {wg.url}")
+    res = {"16:9": "1920x1088", "9:16": "1088x1920", "1:1": "1024x1024"}.get(aspect, "1920x1088")
+    src = {"model_type": "flux2_klein_9b", "prompt": _prompt(desc, "photorealistic, no text"), "resolution": res,
+           "num_inference_steps": 4, "seed": 1001}
+    t0 = time.time()
+    while True:                                   # WanGP runs one job at a time: wait for a busy queue (max 10 min)
+        r = wg.call("wangp_generate", {"source": src, "wait": False})
+        if r.get("job_id"):
+            break
+        if "in progress" in str(r) and time.time() - t0 < 600:
+            time.sleep(15); continue
+        raise Blocker(f"WanGP refused the job: {str(r)[:300]}")
+    jid, t0 = r["job_id"], time.time()
+    while time.time() - t0 < 900:                 # first run loads the model from disk: allow 15 min
+        time.sleep(5)
+        j = wg.call("wangp_get_job", {"job_id": jid, "event_limit": 1})
+        if not j.get("done"):
+            continue
+        result = j.get("result") or {}
+        files = result.get("generated_files") or []
+        if not (result.get("success") and files):
+            raise Blocker(f"WanGP job {jid} failed: {json.dumps(result.get('errors'))[:300]}")
+        p = Path(files[0])
+        data = p.read_bytes()
+        if not _is_image(data):
+            raise Blocker(f"WanGP returned {p.name}, which is not an image")
+        _note(ctx, f"generated in {time.time() - t0:.0f}s ({src['model_type']}, {res}); WanGP left running")
+        return _save(data, "r9_wangp_still" + (p.suffix.lower() or ".png"))
+    wg.call("wangp_cancel_job", {"job_id": jid})
+    raise Blocker(f"WanGP job {jid} did not finish within 15 min (cancelled)")
 
 
 def r10_marble_video(desc, aspect, image_path, ctx):
