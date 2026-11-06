@@ -72,11 +72,6 @@ def remove(cfg, rid):
         _save(cfg, keep); return True
 
 
-def replace_all(cfg, rules):
-    """The laptop worker gets the PC's rules before a job (same list, same ids)."""
-    with _lock: _save(cfg, [r for r in rules if isinstance(r, dict) and r.get("rule")])
-
-
 def learn(cfg, note, context, job="", log=print):
     """Feedback -> rules (via the script AI). -> {"added": [...], "replaced": [...]}"""
     note = " ".join(str(note).split())[:1500]

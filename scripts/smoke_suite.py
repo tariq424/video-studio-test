@@ -2,9 +2,8 @@
   text   a plain text description -> Short, with the presenter on (talking head from Hugging Face, no local GPU)
   nlm    a NotebookLM audio overview -> Short (first 3 minutes used; file: --nlm or the newest in F:\\videos_test\\smoke\\nlm)
   clip   a text description + an existing video (a CPU parallax clip made here from the Hugging Face test image)
-On this PC it waits for the pipeline to be idle and holds the Newsroom while it runs (the hold is always released);
-against the laptop (--vs http://<laptop>:42021 --token ...) nothing on the PC is touched.
-    app\\env\\Scripts\\python.exe scripts\\smoke_suite.py [--only text,nlm,clip] [--nlm file] [--vs URL --token T]
+It waits for the pipeline to be idle and holds the Newsroom while it runs (the hold is always released).
+    app\\env\\Scripts\\python.exe scripts\\smoke_suite.py [--only text,nlm,clip] [--nlm file] [--vs URL]
 Report: F:\\videos_test\\smoke\\<time>\\report.md (+ report.json and the three Shorts)."""
 import argparse
 import json
@@ -47,7 +46,7 @@ for t in (TEXT, CLIP_TEXT): assert len(t.split()) >= 160, len(t.split())
 
 class Suite:
     def __init__(self, a):
-        self.vs, self.h = a.vs.rstrip("/"), ({"X-VS-Token": a.token} if a.token else {})
+        self.vs, self.h = a.vs.rstrip("/"), {}
         self.local = self.vs.startswith(("http://127.0.0.1", "http://localhost"))
         self.out = BASE / time.strftime("%Y%m%d_%H%M%S"); self.out.mkdir(parents=True, exist_ok=True)
         self.a, self.results, self.held, self.t0 = a, [], False, time.time()
@@ -169,7 +168,7 @@ class Suite:
 
     def main(self):
         only = set(self.a.only.split(","))
-        self.log(f"Smoke suite against {self.vs} ({'this PC' if self.local else 'remote worker'}): {', '.join(sorted(only))}")
+        self.log(f"Smoke suite against {self.vs} ({'this PC' if self.local else 'other address'}): {', '.join(sorted(only))}")
         own_before = None; mus_before = None
         try:
             self.wait_idle()
@@ -217,7 +216,7 @@ class Suite:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--vs", default="http://127.0.0.1:42021"); ap.add_argument("--token", default="")
+    ap.add_argument("--vs", default="http://127.0.0.1:42021")
     ap.add_argument("--only", default="text,nlm,clip"); ap.add_argument("--nlm", default="")
     ap.add_argument("--job-minutes", type=float, default=15)
     ap.add_argument("--text-file", default="", help="make the text test from this file instead of the built-in description")

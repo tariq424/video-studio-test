@@ -34,7 +34,6 @@ def test_learn_merge_apply_remove(monkeypatch):
     assert "people typing" in flow._style(cfg) and "puns" not in flow._style(cfg)   # visual prompts get visual rules only
     added = style.add(cfg, "Never open with a question.", "script")
     assert style.remove(cfg, added["id"]) and not style.remove(cfg, "zzz")
-    style.replace_all(cfg, rules[:1]); assert len(style.load(cfg)) == 1
 
 
 def test_endpoints(monkeypatch):
