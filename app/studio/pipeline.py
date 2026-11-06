@@ -540,7 +540,7 @@ class Studio:
                     meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
                     out = short.do_render(j.dir, sp, cfg, meta, log, stop); j.save(short_output=str(out))
                     from . import music
-                    if not s.get("smoke") or cfg.get("music_in_smoke", False): music.mix(out, cfg, log, music.hook_secs_short(j.dir), seed=jid, text=sp.get("title", "") + ": " + " ".join(x["vo"] for x in sp["sections"]))   # hook cue + ducked bed (your tracks)
+                    if not s.get("smoke") or cfg.get("music_in_smoke", False): music.mix(out, cfg, log, music.hook_secs_short(j.dir), seed=jid, timeline=j.dir / "short" / "public" / "teaser.json", text=sp.get("title", "") + ": " + " ".join(x["vo"] for x in sp["sections"]))   # hook cue + ducked bed (your tracks)
                     from . import talkinghead
                     if s.get("presenter") and talkinghead.enabled(cfg):   # talking head over the hook (Hugging Face; optional, never fails the job)
                         out = talkinghead.overlay_short(j.dir, sp, cfg, out, log)
@@ -606,13 +606,14 @@ class Studio:
                         render.refresh_fallbacks(j.dir, plan, cfg, log, stop); j.save_plan(plan); j.save(refresh_fallbacks=False)
                     meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
                     if s.get("presenter", False) or cfg.get("long_renderer", "remotion") == "ffmpeg":   # the old stitcher (presenter PIP lives there)
-                        parts = assemble.build(j.dir, plan, log, stop, use_presenter=s.get("presenter", False), use_captions=s.get("captions", True)); final = assemble.finalize(j.dir, plan, parts, meta, log)
+                        parts = assemble.build(j.dir, plan, log, stop, use_presenter=s.get("presenter", False), use_captions=s.get("captions", True)); final = assemble.finalize(j.dir, plan, parts, meta, log); tl = None
                     else:   # one timeline from the narration, rendered like the Short (explainer.py)
                         from . import explainer
-                        final = explainer.render(j.dir, plan, cfg, meta, log, stop)
+                        final = explainer.render(j.dir, plan, cfg, meta, log, stop); tl = j.dir / "build" / "public" / "teaser.json"
                     if cfg.get("music_long", True):
                         from . import music
-                        music.mix(final, cfg, log, float(cfg.get("music_long_hook_secs", 8)), seed=jid, text=plan.get("title", "") + ": " + " ".join(x["vo"] for x in plan["sections"])[:3000])
+                        music.mix(final, cfg, log, float(cfg.get("music_long_hook_secs", 8)), seed=jid,
+                                  timeline=tl, text=plan.get("title", "") + ": " + " ".join(x["vo"] for x in plan["sections"])[:3000])
                     j.save(output=str(final)); _length_check(j, final, (s.get("minutes") or 0) * 60, "Long video", log)
             if stop():
                 release_gpu()

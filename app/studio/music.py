@@ -102,8 +102,43 @@ def choose(cfg, kind, mood, rng, log):
     return folder(cfg) / rng.choice(any_)["file"] if any_ else None
 
 
-def mix(mp4, cfg, log, hook_secs=6.0, seed=None, text=""):
-    """Lay music under the narration of mp4 (in place). -> True if music was added."""
+def speech_spans(timeline):
+    """[(start, end)] of the spoken words in a Remotion timeline (short/public or build/public teaser.json), merged,
+    in seconds of the video. None if it can't be read."""
+    try:
+        tj = json.loads(Path(timeline).read_text(encoding="utf-8"))
+        spans = sorted((float(b["start"]) + float(s), float(b["start"]) + float(e)) for b in tj["beats"] for _, s, e in b.get("words") or [])
+    except Exception:
+        return None
+    out = []
+    for s, e in spans:
+        if out and s <= out[-1][1] + 0.05: out[-1] = (out[-1][0], max(out[-1][1], e))
+        else: out.append((s, e))
+    return out or None
+
+
+def fade_curve(spans, total, cfg):
+    """An ffmpeg volume expression (gain, 1 = the set level) that keeps the music low under speech and lifts it in every
+    pause of at least music_pause_min secs: it fades UP over music_fade_up secs after the narrator stops and DOWN over
+    music_fade_down secs so it is already low when the next word starts (we know when that is). -> (expr, pauses)"""
+    duck = 10 ** (float(cfg.get("music_under_voice_db", -18)) / 20)
+    up, down, gap = float(cfg.get("music_fade_up", 1.2)), float(cfg.get("music_fade_down", 1.0)), float(cfg.get("music_pause_min", 1.0))
+    pauses = [(0.0, spans[0][0])] if spans[0][0] >= gap else []          # before the first word
+    pauses += [(a[1], b[0]) for a, b in zip(spans, spans[1:]) if b[0] - a[1] >= gap]
+    if total - spans[-1][1] >= 0.5: pauses.append((spans[-1][1], total + 5))   # after the last word: music comes up to the end
+    terms = []
+    for i, (s, e) in enumerate(pauses):
+        rise = f"(t-{s:.3f})/{up}" if s > 0.01 else "1"                   # the very start needs no fade-in from 'ducked'
+        fall = f"({e:.3f}-t)/{down}"
+        terms.append(f"clip(min({rise},{fall}),0,1)")
+    lift = "+".join(terms) or "0"
+    return f"{duck:.4f}+{1 - duck:.4f}*min(1,{lift})", pauses
+
+
+def mix(mp4, cfg, log, hook_secs=6.0, seed=None, text="", timeline=None):
+    """Lay music under the narration of mp4 (in place). -> True if music was added.
+    timeline: the video's teaser.json; with it the music follows the word timings (smooth fades into and out of every
+    pause), without it a compressor ducks the music under the voice."""
     if not cfg.get("music_on", True): return False
     mp4 = Path(mp4); rng = random.Random(seed)
     hm, bm = moods_for(cfg, text, log)
@@ -126,10 +161,18 @@ def mix(mp4, cfg, log, hook_secs=6.0, seed=None, text=""):
                          f"afade=t=out:st={max(0, total - h - 2):.2f}:d=2,adelay={int(h * 1000)}|{int(h * 1000)}[mb]")
         tracks = [t for t, ok in (("[mh]", hook), ("[mb]", bed and total - h > 2)) if ok]
         music = "".join(tracks) + (f"amix=inputs={len(tracks)}:normalize=0:duration=longest" if len(tracks) > 1 else "anull") + ",aformat=channel_layouts=stereo[m];"
-        # duck the music under the voice (sidechain), then put the two together; the voice level is untouched
-        flt = ";".join(parts) + ";" + music + \
-              f"[0:a]asplit=2[v][key];[m][key]sidechaincompress=threshold={float(cfg.get('music_duck_threshold', 0.015))}:ratio={float(cfg.get('music_duck_ratio', 20))}:level_sc={float(cfg.get('music_duck_boost', 4))}:attack=20:release=900[md];" \
-              "[v][md]amix=inputs=2:normalize=0:duration=first[a]"
+        spans = speech_spans(timeline) if timeline else None
+        if spans and spans[-1][1] <= total + 1.0:
+            # the music follows the narration's own word timings: low under speech, smooth fades up into each pause and
+            # back down before the next word (no compressor guessing, so no sudden jumps)
+            expr, pauses = fade_curve(spans, total, cfg)
+            flt = ";".join(parts) + ";" + music.replace("[m];", f",volume='{expr}':eval=frame[md];") + "[0:a][md]amix=inputs=2:normalize=0:duration=first[a]"
+            log(f"  music: fades with the narration ({len(pauses)} pause(s) where it comes up)")
+        else:
+            # no word timings: duck the music under the voice (sidechain); the voice level is untouched
+            flt = ";".join(parts) + ";" + music + \
+                  f"[0:a]asplit=2[v][key];[m][key]sidechaincompress=threshold={float(cfg.get('music_duck_threshold', 0.015))}:ratio={float(cfg.get('music_duck_ratio', 20))}:level_sc={float(cfg.get('music_duck_boost', 4))}:attack=20:release=900[md];" \
+                  "[v][md]amix=inputs=2:normalize=0:duration=first[a]"
         tmp = mp4.with_name("_music_" + mp4.name)
         media.ff(*ins, "-filter_complex", flt, "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
                  "-movflags", "+faststart", "-t", f"{total:.3f}", tmp)
