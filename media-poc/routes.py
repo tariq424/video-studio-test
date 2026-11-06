@@ -755,172 +755,28 @@ def r10_marble_video(desc, aspect, image_path, ctx):
         pw.stop()
 
 
-# ------------------------------------------------------------------ local/GPU (blender)
-BLENDER_PATHS = [
-    r"C:\Program Files\Blender Foundation",
-    r"C:\Program Files\Blender",
-    os.path.expandvars(r"%LOCALAPPDATA%\Programs\Blender Foundation"),
-]
-
-
-def find_blender():
-    exe = shutil.which("blender")
-    if exe:
-        return exe, "PATH"
-    for base in BLENDER_PATHS:
-        b = Path(base)
-        if b.is_dir():
-            for sub in sorted(b.glob("*/blender.exe"), reverse=True):
-                return str(sub), str(sub)
-    return None, None
-
-
-BLENDER_SCRIPT = """
-import bpy, math, re, sys
-import mathutils
-scene = bpy.context.scene
-args = sys.argv[sys.argv.index('--') + 1:]
-desc = (args[0] if len(args) > 1 else "").lower()
-out = args[-1]
-
-# clean the factory scene entirely
-for ob in list(bpy.data.objects):
-    bpy.data.objects.remove(ob, do_unlink=True)
-
-def make_mat(name, color, rough=0.5, metal=0.0):
-    m = bpy.data.materials.new(name)
-    m.use_nodes = True
-    bsdf = m.node_tree.nodes['Principled BSDF']
-    bsdf.inputs['Base Color'].default_value = (*color, 1)
-    bsdf.inputs['Roughness'].default_value = rough
-    bsdf.inputs['Metallic'].default_value = metal
-    return m
-
-def link(ob):
-    if ob.name not in bpy.context.collection.objects:
-        bpy.context.collection.objects.link(ob)
-
-def add(kind, **kw):
-    getattr(bpy.ops.mesh, 'primitive_' + kind + '_add')(**kw)
-    return bpy.context.object
-
-# ground with a rough, slightly varied material
-ground = add('plane', size=60)
-ground.data.materials.append(make_mat('ground', (0.18, 0.22, 0.16), rough=0.9, metal=0.0))
-
-# subject from the description, by keyword class (simple, stated honestly: this is a
-# keyword->primitive classifier, not a general scene builder)
-white = make_mat('hull', (0.88, 0.89, 0.91), rough=0.28, metal=0.15)
-dark = make_mat('dark', (0.05, 0.05, 0.06), rough=0.6, metal=0.1)
-glass = make_mat('glassy', (0.4, 0.5, 0.6), rough=0.1, metal=0.6)
-if re.search(r'jet|plane|aircraft|airliner|aviat|737|airbus', desc):
-    add('cylinder', radius=0.45, depth=6, location=(0, 0, 1.6), rotation=(math.pi / 2, 0, 0)).data.materials.append(white)
-    for sx in (-1, 1):
-        w = add('cube', scale=(2.6, 0.9, 0.07), location=(sx * 1.6, -0.2, 1.6)); w.data.materials.append(white)
-    t = add('cube', scale=(0.7, 0.5, 0.06), location=(0, 2.4, 2.1)); t.data.materials.append(white)
-    for sx in (-1, 1):   # engines
-        e = add('cylinder', radius=0.3, depth=0.9, location=(sx * 1.2, -0.6, 1.1), rotation=(math.pi / 2, 0, 0)); e.data.materials.append(dark)
-    subject_z = 2.0
-elif re.search(r'car|vehicle|automobile|truck|supercar', desc):
-    b = add('cube', scale=(2.2, 1.0, 0.45), location=(0, 0, 0.75)); b.data.materials.append(make_mat('paint', (0.55, 0.08, 0.08), rough=0.25, metal=0.6))
-    c = add('cube', scale=(1.2, 0.9, 0.35), location=(-0.2, 0, 1.2)); c.data.materials.append(glass)
-    for px in (-1.1, 1.1):
-        for py in (-0.95, 0.95):
-            add('cylinder', radius=0.4, depth=0.3, location=(px, py, 0.4), rotation=(0, math.pi / 2, 0)).data.materials.append(dark)
-    subject_z = 1.2
-elif re.search(r'boat|ship|yacht|sail', desc):
-    h = add('cube', scale=(1.0, 3.0, 0.5), location=(0, 0, 0.5)); h.data.materials.append(white)
-    c = add('cube', scale=(0.7, 1.0, 0.5), location=(0, -0.6, 1.0)); c.data.materials.append(white)
-    subject_z = 1.2
-elif re.search(r'building|house|tower|skyscraper|city|castle', desc):
-    b1 = add('cube', scale=(1.5, 1.5, 2.2), location=(0, 0, 2.2)); b1.data.materials.append(make_mat('wall', (0.75, 0.7, 0.62), rough=0.8))
-    b2 = add('cube', scale=(0.9, 0.9, 1.4), location=(1.8, 0.4, 1.4)); b2.data.materials.append(make_mat('wall2', (0.6, 0.58, 0.55), rough=0.75))
-    subject_z = 3.0
-else:   # abstract monument (honest default: no subject keyword matched)
-    p = add('cube', scale=(1.6, 1.6, 0.3), location=(0, 0, 0.3)); p.data.materials.append(make_mat('plinth', (0.4, 0.38, 0.34), rough=0.85))
-    m = add('cube', scale=(0.5, 0.5, 2.6), location=(0, 0, 1.7)); m.data.materials.append(make_mat('mono', (0.25, 0.26, 0.3), rough=0.2, metal=0.7))
-    s = add('sphere', radius=0.55, location=(0, 0, 3.3)); s.data.materials.append(glass)
-    subject_z = 2.4
-
-# sky: Nishita sky if this Blender has it, else a gradient-tinted background
-world = bpy.data.worlds.new('sky'); scene.world = world
-world.use_nodes = True
-wnodes = world.node_tree.nodes
-bg = wnodes['Background']
-sky = None
-try:
-    sky = wnodes.new('ShaderNodeTexSky')
-    sky.sky_type = 'NISHITA'
-    sky.sun_elevation = math.radians(8)      # dusk: sun low
-    sky.sun_rotation = math.radians(220)
-    wnodes.links.new(sky.outputs['Color'], bg.inputs['Color'])
-    bg.inputs['Strength'].default_value = 0.35
-except Exception:
-    bg.inputs[0].default_value = (0.18, 0.22, 0.34, 1)   # dusk gradient stand-in
-    bg.inputs[1].default_value = 1.0
-
-# key sun + gentle fill
-sun = bpy.data.lights.new('key', 'SUN'); sun.energy = 4; sun.angle = math.radians(4)
-so = bpy.data.objects.new('key', sun); link(so)
-so.location = (5, -7, 6); so.rotation_euler = (math.radians(55), 0, math.radians(-35))
-fill = bpy.data.lights.new('fill', 'AREA'); fill.energy = 180; fill.size = 6
-fo = bpy.data.objects.new('fill', fill); link(fo)
-fo.location = (-6, 3, 4)
-
-# camera orbit (SPEC-Z006: reuse the scene camera if the scene kept one; guard the link)
-cam = scene.camera or bpy.data.objects.new('cam', bpy.data.cameras.new('cam'))
-scene.camera = cam
-if cam.name not in bpy.context.collection.objects:
-    bpy.context.collection.objects.link(cam)
-for _eng in ('BLENDER_EEVEE_NEXT', 'BLENDER_EEVEE', 'CYCLES'):
-    try:
-        scene.render.engine = _eng
-        break
-    except TypeError:
-        continue
-scene.render.resolution_x = 1280
-scene.render.resolution_y = 720
-scene.render.fps = 24
-scene.frame_end = 96
-ims = scene.render.image_settings
-try:
-    ims.media_type = 'VIDEO'
-except TypeError:
-    pass
-ims.file_format = 'FFMPEG'
-scene.render.ffmpeg.format = 'MPEG4'
-scene.render.ffmpeg.codec = 'H264'
-scene.render.filepath = out
-# slow orbit, camera explicitly AIMED at the subject (a fixed Euler tilt looked past it -
-# Z008 acceptance found sky+ground-only frames; track-quaternion guarantees framing)
-cam.data.lens = 38
-target = mathutils.Vector((0.0, 0.0, subject_z - 0.3))
-for f in range(1, scene.frame_end + 1):
-    a = math.radians(200 + 70 * f / scene.frame_end)
-    cam.location = (11.5 * math.cos(a), -11.5 * math.sin(a), subject_z + 2.0)
-    direction = target - cam.location
-    cam.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()
-    scene.frame_set(f)
-bpy.ops.render.render(animation=True)
-print('BLENDER POC RENDER DONE')
-"""
-
-
+# ------------------------------------------------------------------ local/GPU (blender over MCP)
 def r11_blender_video(desc, aspect, image_path, ctx):
-    exe, where = find_blender()
-    if not exe:
-        raise Blocker("Blender not installed (searched PATH, Program Files, LOCALAPPDATA — "
-                      "installation is a separate approved step)")
-    OUT.mkdir(parents=True, exist_ok=True)
-    script = OUT / "_blender_scene.py"
-    script.write_text(BLENDER_SCRIPT, encoding="utf-8")
+    """Blender driven ONLY through MCP (mcp-for-blender, safe mode on): the description is planned by
+    a local model, the scene is built in a live Blender from Poly Haven assets, Cycles renders on the
+    GPU, Blender is closed afterwards. Quality: env BLENDER_QUALITY=preview|final (default preview)."""
+    from blender_mcp import pipeline
+    quality = os.environ.get("BLENDER_QUALITY", "preview")
+    work = OUT / "r11_blender"
+    try:
+        job = pipeline.render(desc, aspect, work, quality=quality, duration_s=4, log=lambda m: None)
+    except pipeline.Blocked as b:
+        raise Blocker(str(b))
     out_mp4 = OUT / "r11_blender_video.mp4"
-    ctx["card_note"] = (f"blender at: {where} || subject class from description keywords; "
-                        "Principled node materials + Nishita sky + key/fill lights (Z008 §E)")
-    r = subprocess.run([exe, "-b", "-P", str(script), "--", desc, str(out_mp4)],
-                       capture_output=True, text=True, timeout=1800)
-    if not out_mp4.is_file():
-        raise Blocker("blender ran but produced no mp4: " + (r.stderr or r.stdout)[-200:].replace("\n", " "))
+    shutil.copyfile(job["video"], out_mp4)
+    plan = job.get("plan") or {}
+    _note(ctx, f"MCP route ({quality}, {aspect}); plan '{plan.get('title', '')}', camera "
+               f"{(plan.get('camera') or {}).get('move', '?')}; sky {job['assets'].get('sky')}, "
+               f"ground {job['assets'].get('ground')}, models {', '.join(job['assets']['objects'].values()) or 'none'}")
+    if job["status"] == "partial":
+        _note(ctx, "PARTIAL - no photoreal model for: " + ", ".join(job["missing"]))
+    _note(ctx, f"GPU memory peak {job.get('vram_peak_mb', '?')} MB (whole card), "
+               f"after Blender closed {job.get('vram_after_mb', '?')} MB; log output/r11_blender/r11.log")
     return out_mp4
 
 
@@ -936,7 +792,7 @@ ROUTES = [
     {"id": "r8", "name": "flow-video", "proves": "Google Flow prompt -> short video", "fn": r8_flow_video},
     {"id": "r9", "name": "wangp", "proves": "local WanGP still -> image-to-video (incumbent baseline)", "fn": r9_wangp},
     {"id": "r10", "name": "marble-video", "proves": "World Labs Marble world -> recorded walk mp4. WARNING: uses one of the few free generations", "fn": r10_marble_video},
-    {"id": "r11", "name": "blender-video", "proves": "Blender bpy low-poly scene render -> mp4", "fn": r11_blender_video},
+    {"id": "r11", "name": "blender-video", "proves": "Blender over MCP (safe mode): text -> plan -> Poly Haven scene -> Cycles GPU -> mp4; Blender closed after", "fn": r11_blender_video},
 ]
 
 assert len(ROUTES) == 11
