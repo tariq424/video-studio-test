@@ -132,7 +132,7 @@ def build(job, plan, cfg, log, stop=lambda: False):
         if stop(): raise RuntimeError("cancelled")
         progress(job, si + 1, len(secs))
         vo = job / "voice" / f"{s['id']}.wav"; vd = media.dur(vo)
-        D = LEAD + vd + TAIL
+        D = LEAD + vd + TAIL + (float(cfg.get("explainer_pause_secs", 2.5)) if si < len(secs) - 1 else 0.0)   # a pause: picture holds, music comes up
         wt, groups = section_words(cfg, job, s, log)
         vis = list(s["visuals"])
         if si == 0: vis = [{"id": "_title", "type": "chart"}] + vis

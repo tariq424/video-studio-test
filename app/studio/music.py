@@ -6,7 +6,7 @@ Tracks come from your own folder (no downloads, no licences guessed): music_dir 
 Use tracks you are allowed to put on YouTube (YouTube Studio > Audio Library is free and safe). A random track is picked
 per video. No tracks -> no music, the video is unchanged. Any failure leaves the video as it was (never fails the job).
 
-Settings: music_on (true), music_dir, music_hook_db (-4), music_bed_db (-6): the level in the narrator's pauses (breathers); under speech it dips ~10 dB more,
+Settings: music_on (true), music_dir, music_hook_db (-4), music_bed_db (-6): the level in the narrator's pauses (breathers); under speech it sits ~18 dB below the voice (music_duck_threshold 0.015, music_duck_ratio 20, music_duck_boost 4),
 music_long (true: explainers get it too)."""
 import json
 import random
@@ -128,7 +128,7 @@ def mix(mp4, cfg, log, hook_secs=6.0, seed=None, text=""):
         music = "".join(tracks) + (f"amix=inputs={len(tracks)}:normalize=0:duration=longest" if len(tracks) > 1 else "anull") + ",aformat=channel_layouts=stereo[m];"
         # duck the music under the voice (sidechain), then put the two together; the voice level is untouched
         flt = ";".join(parts) + ";" + music + \
-              f"[0:a]asplit=2[v][key];[m][key]sidechaincompress=threshold={float(cfg.get('music_duck_threshold', 0.05))}:ratio={float(cfg.get('music_duck_ratio', 6))}:attack=40:release=500[md];" \
+              f"[0:a]asplit=2[v][key];[m][key]sidechaincompress=threshold={float(cfg.get('music_duck_threshold', 0.015))}:ratio={float(cfg.get('music_duck_ratio', 20))}:level_sc={float(cfg.get('music_duck_boost', 4))}:attack=20:release=900[md];" \
               "[v][md]amix=inputs=2:normalize=0:duration=first[a]"
         tmp = mp4.with_name("_music_" + mp4.name)
         media.ff(*ins, "-filter_complex", flt, "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",

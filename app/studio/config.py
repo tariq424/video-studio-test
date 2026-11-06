@@ -67,7 +67,10 @@ DEFAULTS = {
     "music_on": True,                 # music under Shorts/explainers from your own folder (music_dir\hook, music_dir\bed); none there = none
     "music_dir": "",                  # "" = <jobs folder parent>\music
     "music_hook_db": -4, "music_bed_db": -6, "music_long": True,   # level in the pauses, dB under the narration; dips ~10 dB under speech
-    "breathers": True, "breather_hook_secs": 2.0, "breather_secs": 1.5, "breather_every": 2,   # Shorts: narrator pauses so the music is heard
+    "music_duck_threshold": 0.015, "music_duck_ratio": 20, "music_duck_boost": 4,   # under speech the music sits ~18 dB below the voice (was 0.05 / 6 / 1: ~7 dB, too loud; measured 2026-11-06)
+    "breathers": True, "breather_hook_secs": 2.0, "breather_secs": 2.0, "breather_every": 1,   # Shorts: narrator pauses after every beat; the music comes up
+    "explainer_pause_secs": 2.5,      # explainer: a pause after every section (the last picture holds, the music comes up)
+    "narration_gap_secs": 0.9,        # explainer: silence between narration chunks (~every 85 words; was 0.25 s)
     "music_in_smoke": False,          # smoke-test Shorts get music (and breathers) too
     "music_generate": True, "music_generate_per_day": 0,   # a new Gemini track when no library track fits the mood (0 = no daily cap)
     "short_fit_3min": False,          # True = drop beats / speed up so a Short stays under 3:00; False = a long Short just runs long

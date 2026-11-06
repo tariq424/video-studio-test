@@ -40,7 +40,7 @@ def do_voice(job, plan, cfg, wg, log, stop):
 
 def _do_voice_inner(job, plan, cfg, wg, log, stop):
     d = job / "voice"; d.mkdir(exist_ok=True)
-    gap = d / "_gap.wav"; media.ff("-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", 0.25, gap)
+    gap = d / "_gap.wav"; media.ff("-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", float(cfg.get("narration_gap_secs", 0.9)), gap)
     seed = 9000
     from .pipeline import progress
     from . import tts
