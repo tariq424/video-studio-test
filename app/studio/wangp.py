@@ -80,6 +80,9 @@ def start(cfg, log=print):
         venv = app / "env"
         env["PATH"] = os.pathsep.join(str(x) for x in (venv / "Scripts", venv / "Library" / "bin", venv / "bin")) + os.pathsep + env.get("PATH", "")
         env["VIRTUAL_ENV"] = str(venv); env.pop("PYTHONHOME", None); env["PYTHONUNBUFFERED"] = "1"
+        # WanGP's FastMCP (mcp 1.10) rejects host/port in run() and silently falls back to 127.0.0.1:8000, ignoring
+        # --mcp-port, so every on-demand start used to wait 300 s on the wrong port. Its settings read FASTMCP_HOST / _PORT.
+        env["FASTMCP_HOST"], env["FASTMCP_PORT"] = "127.0.0.1", str(port)
         logf = Path(cfg.get("jobs_dir") or ".").parent / "wangp_on_demand.log"
         try: out = open(logf, "a", encoding="utf-8", errors="replace")
         except OSError: out = subprocess.DEVNULL
