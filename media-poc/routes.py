@@ -32,7 +32,7 @@ HOME_URLS = {
     "meta": "https://meta.ai/",
     "flow": "https://flow.google.com/",
     "marble": "https://marble.worldlabs.ai/",
-    "copilot": "https://copilot.microsoft.com/",   # describes images for the Meta chain (Bing's chat; Microsoft sign-in)
+    "copilot": "https://copilot.com/chat",   # describes images for the Meta chain (Bing's chat; Microsoft sign-in)
 }
 
 
@@ -105,7 +105,8 @@ def _browser(site, headless=False):
     bot walls (Cloudflare challenges headless Chrome on chatgpt.com, verified Nov 3)."""
     from playwright.sync_api import sync_playwright
     prefs = _repair_prefs(site)
-    args = ["--lang=en-US", "--hide-crash-restore-bubble", "--no-default-browser-check",   # Z007 §D: no Restore bubble, no "set as default" popup
+    args = ["--lang=en-US", "--hide-crash-restore-bubble", "--no-default-browser-check", "--no-first-run", "--disable-sync",
+            "--disable-features=SigninInterception,ChromeSigninInterception,ExplicitBrowserSigninUIOnDesktop",   # Z007 §D: no Restore bubble, no "set as default" popup
             "--window-position=-32000,-32000", "--window-size=1440,1000"]
     token = {"pw": sync_playwright().start()}
     ctx = token["pw"].chromium.launch_persistent_context(
@@ -1146,18 +1147,20 @@ _COPILOT_MSGS = "[data-content='ai-message'], [class*='ai-message'], div[role='a
 
 
 def _copilot_answer(page, before_n, timeout_s=150):
-    """Wait for Copilot's reply to stop growing and carry a PROMPT: line. -> its text."""
+    """Wait for Copilot's reply to stop growing and carry a PROMPT: line. -> the reply text. Read from the page text AFTER our
+    own message (Copilot's element names change; our instruction itself also contains "PROMPT:")."""
+    tail = DESCRIBE_COPILOT[-60:]
     last, stable, t0 = "", 0, time.time()
     while time.time() - t0 < timeout_s:
         page.wait_for_timeout(2500)
         try:
-            items = page.locator(_COPILOT_MSGS)
-            txt = items.nth(items.count() - 1).inner_text() if items.count() > before_n else ""
+            body = page.locator("main").first.inner_text() if page.locator("main").count() else page.locator("body").inner_text()
         except Exception:
-            txt = ""
+            body = ""
+        txt = body.split(tail)[-1] if tail in body else ""
         if txt and txt == last:
             stable += 1
-            if stable >= 2 and "PROMPT:" in txt.upper():
+            if stable >= 2 and re.search(r"PROMPT:\s*\S", txt, re.I):
                 return txt
         else:
             stable = 0
@@ -1173,6 +1176,14 @@ def r12_copilot_describe(desc, aspect, image_path, ctx):
     ctx["_page"] = page
     try:
         _goto(page, HOME_URLS["copilot"]); page.wait_for_timeout(6000)
+        if not _visible(page, "textarea, [contenteditable='true']", 1500):
+            # signed out of Copilot itself but signed in to Microsoft: Copilot's own Sign In finishes through that session
+            # (no credentials are ever typed here)
+            try:
+                page.get_by_role("button", name="Sign In").first.click(timeout=5000); page.wait_for_timeout(10000)
+                _note(ctx, "Copilot Sign In clicked (Microsoft session)")
+            except Exception:
+                pass
         _dismiss_popups(page, ctx)
         state, evidence = _signin_state(page, "copilot")
         _note(ctx, f"signin={state}; evidence: {evidence}")
@@ -1181,6 +1192,16 @@ def r12_copilot_describe(desc, aspect, image_path, ctx):
         if state == "unknown":
             raise Blocker("Copilot is not signed in on profiles/copilot: use OPEN LOGIN (copilot), sign in, close the window, RUN again")
         before_n = page.locator(_COPILOT_MSGS).count()
+        def _consent(wait_ms=800):
+            # Copilot's image consent ("you confirm that you have the permission of any people in the images"): Tariq approved
+            # clicking "Confirm and continue" for this route, always (2026-11-06). Never "Not now"; nothing else is accepted here.
+            try:
+                b = page.locator("button:has-text('Confirm and continue')").first
+                b.wait_for(state="visible", timeout=wait_ms)
+                b.click(timeout=3000); page.wait_for_timeout(1500); _note(ctx, "Copilot image consent confirmed (approved by Tariq)")
+            except Exception:
+                pass
+        _consent()
         try:
             page.set_input_files("input[type='file']", image_path, timeout=8000)
         except Exception:
@@ -1190,12 +1211,41 @@ def r12_copilot_describe(desc, aspect, image_path, ctx):
                 page.set_input_files("input[type='file']", image_path, timeout=8000)
             except Exception:
                 _gen_fail(ctx, "copilot", evidence, "no way to attach the image")
-        page.wait_for_timeout(5000)
-        box = _pick(page, ["textarea#userInput", "textarea[placeholder*='Message']", "textarea", "[contenteditable='true']"])
+        _consent(6000)   # the box appears a moment after the image is attached
+        page.wait_for_timeout(2000)
+        _consent(1500)
+        box = _pick(page, ["#m365-chat-editor-target-element", "[contenteditable='true'][aria-label*='Message' i]", "textarea", "[contenteditable='true']"])
         try:
-            box.click(); page.keyboard.insert_text(DESCRIBE_COPILOT); page.wait_for_timeout(800); page.keyboard.press("Enter")
+            box.click(); page.keyboard.insert_text(DESCRIBE_COPILOT); page.wait_for_timeout(1500)
         except Exception:
             _gen_fail(ctx, "copilot", evidence, "prompt box not usable")
+        # Enter alone left the message in the box (Nov 6): click the send arrow, retrying while the image is still uploading
+        sent = False
+        for _try in range(10):
+            _consent()
+            for sel in ("button[aria-label='Send']", "button[type='submit'][aria-label*='Send' i]", "button[aria-label*='Send' i]",
+                        "button[data-testid*='submit' i]"):
+                try:
+                    b = page.locator(sel).last
+                    if b.is_visible(timeout=500) and b.is_enabled():
+                        b.click(timeout=3000); break
+                except Exception:
+                    continue
+            else:
+                page.keyboard.press("Enter")
+            page.wait_for_timeout(2000)
+            try:
+                left = box.inner_text() if box.evaluate("e => !('value' in e)") else box.input_value()
+            except Exception:
+                left = ""
+            if "PROMPT:" not in (left or ""):
+                sent = True; break
+            if _visible(page, "text=Verify you are human", 500) or _visible(page, "text=Verification required", 300):
+                # a CAPTCHA: never clicked by the POC (same rule as Cloudflare checks)
+                raise Blocker("Copilot shows 'Verification required - Verify you are human' on automated sends (never clicked "
+                              "by the POC). Use OPEN LOGIN (copilot) and tick it yourself; the studio falls back to Meta describing")
+        if not sent:
+            _gen_fail(ctx, "copilot", evidence, "message typed but not sent")
         txt = _copilot_answer(page, before_n)
         m = re.search(r"PROMPT:\s*(.+)", txt or "", re.I | re.S)
         prompt = re.sub(r"\s+", " ", (m.group(1) if m else txt or "")).strip(" *\"")[:1500]
@@ -1221,6 +1271,30 @@ def r13_meta_chain(desc, aspect, image_path, ctx):
             _not_signed_in("meta")
         if state == "unknown":
             _blocker_unknown("meta", page, ctx, "r13", state, evidence)
+        if image_path and Path(image_path).is_file() and desc.strip().lower() in ("", "describe"):
+            # fallback describer (Copilot blocked by its human check): Meta describes the snapshot first, in this same chat
+            box = _pick(page, ["textarea[placeholder*='Ask Meta']", "div[contenteditable='true']"])
+            try:
+                box.first.click()
+                page.set_input_files("input[type='file']", image_path, timeout=8000); page.wait_for_timeout(4000)
+                _type_like_human(page, box, DESCRIBE_COPILOT)
+            except Exception:
+                _gen_fail(ctx, "meta", evidence, "could not attach the snapshot to describe")
+            tail, txt, t0 = DESCRIBE_COPILOT[-60:], "", time.time()
+            while time.time() - t0 < 150:
+                page.wait_for_timeout(4000)
+                body = page.locator("body").inner_text()
+                after = body.split(tail)[-1] if tail in body else ""
+                m = re.search(r"PROMPT:\s*\**\s*(.+)", after, re.I)
+                if m and len(m.group(1).split()) >= 12 and after == txt:
+                    break
+                txt = after
+            m = re.search(r"PROMPT:\s*\**\s*(.+)", txt, re.I)
+            desc = re.sub(r"\s+", " ", m.group(1)).strip(" *\"") if m else ""
+            if len(desc.split()) < 12:
+                _gen_fail(ctx, "meta", evidence, "Meta gave no usable description of the snapshot")
+            _note(ctx, f"described by Meta: {desc[:160]}")
+            (OUT / "r13_meta_chain.prompt.txt").write_text(desc, encoding="utf-8")
         imgs0 = _img_srcs(page)
         box = _pick(page, ["textarea[placeholder*='Ask Meta']", "div[contenteditable='true']"])
         try:

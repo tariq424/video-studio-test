@@ -183,6 +183,8 @@ def login(site: str):
     subprocess.Popen([chrome,
                       f"--user-data-dir={prof}",
                       "--hide-crash-restore-bubble", "--no-default-browser-check",
+                      "--no-first-run", "--disable-sync",   # no "Sign in to Chrome" first-run screen on a new profile
+                      "--disable-features=SigninInterception,ChromeSigninInterception,ExplicitBrowserSigninUIOnDesktop",
                       "--window-position=60,60", "--window-size=1280,900",
                       "--lang=en-US",
                       routes.HOME_URLS[site]])
