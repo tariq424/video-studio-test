@@ -263,7 +263,10 @@ async function refresh(){
       if (p.dataset.out !== st.output){
         p.dataset.out = st.output;
         const ext = u.split('.').pop().toLowerCase();
-        p.innerHTML = PRE.includes(ext) ? `<img src="${u}">` : `<video controls src="${u}"></video>`;
+        if (ext === 'txt') {      // meta-describe saves text: show it, not an empty video player
+          p.innerHTML = '<pre style="white-space:pre-wrap;max-height:240px;overflow:auto;font-size:12px;margin:0"></pre>';
+          fetch(u).then(x => x.text()).then(t => { p.querySelector('pre').textContent = t; });
+        } else p.innerHTML = PRE.includes(ext) ? `<img src="${u}">` : `<video controls src="${u}"></video>`;
       }
     } else { p.innerHTML = ''; p.dataset.out = ''; }
   }
