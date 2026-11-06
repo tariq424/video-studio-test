@@ -32,6 +32,7 @@ HOME_URLS = {
     "meta": "https://meta.ai/",
     "flow": "https://flow.google.com/",
     "marble": "https://marble.worldlabs.ai/",
+    "copilot": "https://copilot.microsoft.com/",   # describes images for the Meta chain (Bing's chat; Microsoft sign-in)
 }
 
 
@@ -123,6 +124,7 @@ WALL_URL_MARKERS = {
     "flow": ("accounts.google.com/SignIn", "accounts.google.com/ServiceLogin", "accounts.google.com/v3/signin",
              "flow.google.com/about"),   # signed out, flow.google.com/ redirects to the /about marketing page
     "marble": ("auth.worldlabs.ai", "accounts.google.com/SignIn", "accounts.google.com/ServiceLogin"),
+    "copilot": ("login.live.com", "login.microsoftonline.com", "signup.live.com"),
 }
 
 # Positive signed-in signals per site: (evidence label, check fn -> bool). Two independent
@@ -147,6 +149,9 @@ POSITIVE_SIGNALS = {
     "marble": [
         ("world prompt input visible", lambda p: _any_visible(p, ["input[placeholder*='world']", "input[placeholder*='Imagine']", "[placeholder*='Imagine a world']"])),
         ("Marble world gallery visible", lambda p: _any_visible(p, ["img[src*='world']", "nav", "button:has-text('Create')"])),
+    ],
+    "copilot": [   # signed out, copilot.com is a marketing page with "Sign in" and no composer
+        ("Copilot composer visible", lambda p: _any_visible(p, ["textarea#userInput", "textarea[placeholder*='Message']", "textarea", "[contenteditable='true']"])),
     ],
 }
 
@@ -685,7 +690,7 @@ def r6_meta_image(desc, aspect, image_path, ctx):
 
 def r7_meta_video(desc, aspect, image_path, ctx):
     src = image_path
-    if not src:
+    if not src and not ctx.get("no_fallback"):   # the 42054 page reuses an earlier output; the studio ladder never does
         prev = sorted(OUT.glob("r6_meta_image.jpg")) + sorted(OUT.glob("r2_hf_flux.jpg")) + sorted(OUT.glob("r1_cloudflare_flux.jpg"))
         src = str(prev[-1]) if prev else None
     pw, cctx, page, prefs = _browser("meta")
@@ -701,15 +706,16 @@ def r7_meta_video(desc, aspect, image_path, ctx):
         if state == "unknown":
             _blocker_unknown("meta", page, ctx, "r7", state, evidence)
         box = _pick(page, ["textarea[placeholder*='Ask Meta']", "div[contenteditable='true']"])
-        prompt = "Animate this image with a slow cinematic camera push-in. " + desc
+        prompt = ("Animate this image with a slow cinematic camera push-in. " + desc) if src else \
+                 ("Create a short video: " + _prompt(desc, "photorealistic, slow cinematic camera move, no text"))
         try:
             box.first.click()
-            # attach the source image if the composer offers a file input, else describe it
-            try:
-                page.set_input_files("input[type='file']", src, timeout=4000)
-                page.wait_for_timeout(4000)
-            except Exception:
-                pass
+            if src:   # attach the source image if the composer offers a file input
+                try:
+                    page.set_input_files("input[type='file']", src, timeout=4000)
+                    page.wait_for_timeout(4000)
+                except Exception:
+                    pass
             _type_like_human(page, box, prompt)
         except Exception:
             _gen_fail(ctx, "meta", evidence, "prompt box not usable")
@@ -720,7 +726,20 @@ def r7_meta_video(desc, aspect, image_path, ctx):
         vidsrc = page.locator("video source, video").first.get_attribute("src") or ""
         if not vidsrc:
             _gen_fail(ctx, "meta", evidence, "video download")
-        return _save(requests.get(vidsrc, timeout=120).content, "r7_meta_video.mp4")
+        data = None
+        try:
+            data = requests.get(vidsrc, timeout=120).content if vidsrc.startswith("http") else None
+        except Exception:
+            data = None
+        if not _is_video(data) and vidsrc.startswith("http"):
+            try:
+                data = cctx.request.get(vidsrc, timeout=120000).body()   # signed-in cookies
+            except Exception:
+                data = None
+        if not _is_video(data):
+            _gen_fail(ctx, "meta", evidence, "video download (not a video file)")
+        _note(ctx, "image-to-video" if src else "text-to-video (no image given)")
+        return _save(data, "r7_meta_video.mp4")
     finally:
         cctx.close()
         pw.stop()
@@ -1115,6 +1134,139 @@ def r11_blender_video(desc, aspect, image_path, ctx):
     return out_mp4
 
 
+# ------------------------------------------------------------------ describe -> Meta image -> Meta video (Tariq, 2026-11-06)
+# For a beat whose source has no public media: a snapshot of the source video is described by Copilot (Bing's chat), Meta
+# makes an image from that description and then animates THAT image in the same conversation. Never for a known person
+# (the studio checks that before calling); the describe prompt also keeps every person anonymous.
+DESCRIBE_COPILOT = ("Describe this image so I can recreate it with an AI image generator. Do not identify or name anyone: "
+                    "describe any person only as an anonymous figure (clothing, pose, framing), never their face or identity. "
+                    "Cover the setting, objects, lighting, colours, camera angle and framing. No brands, logos or text. "
+                    "Put the final prompt on its own line starting with PROMPT:")
+_COPILOT_MSGS = "[data-content='ai-message'], [class*='ai-message'], div[role='article'], [data-testid*='message']"
+
+
+def _copilot_answer(page, before_n, timeout_s=150):
+    """Wait for Copilot's reply to stop growing and carry a PROMPT: line. -> its text."""
+    last, stable, t0 = "", 0, time.time()
+    while time.time() - t0 < timeout_s:
+        page.wait_for_timeout(2500)
+        try:
+            items = page.locator(_COPILOT_MSGS)
+            txt = items.nth(items.count() - 1).inner_text() if items.count() > before_n else ""
+        except Exception:
+            txt = ""
+        if txt and txt == last:
+            stable += 1
+            if stable >= 2 and "PROMPT:" in txt.upper():
+                return txt
+        else:
+            stable = 0
+        last = txt
+    return last
+
+
+def r12_copilot_describe(desc, aspect, image_path, ctx):
+    """Copilot (signed-in Microsoft profile) describes an image -> a recreate prompt (saved as text). Needs --image."""
+    if not image_path or not Path(image_path).is_file():
+        raise Blocker("needs an image to describe (upload one, or the studio passes the source snapshot)")
+    pw, cctx, page, prefs = _browser("copilot")
+    ctx["_page"] = page
+    try:
+        _goto(page, HOME_URLS["copilot"]); page.wait_for_timeout(6000)
+        _dismiss_popups(page, ctx)
+        state, evidence = _signin_state(page, "copilot")
+        _note(ctx, f"signin={state}; evidence: {evidence}")
+        if state == "login_wall":
+            _not_signed_in("copilot")
+        if state == "unknown":
+            raise Blocker("Copilot is not signed in on profiles/copilot: use OPEN LOGIN (copilot), sign in, close the window, RUN again")
+        before_n = page.locator(_COPILOT_MSGS).count()
+        try:
+            page.set_input_files("input[type='file']", image_path, timeout=8000)
+        except Exception:
+            try:
+                page.locator("button[aria-label*='Upload' i], button[aria-label*='Add' i], button[title*='Upload' i]").first.click(timeout=4000)
+                page.wait_for_timeout(1000)
+                page.set_input_files("input[type='file']", image_path, timeout=8000)
+            except Exception:
+                _gen_fail(ctx, "copilot", evidence, "no way to attach the image")
+        page.wait_for_timeout(5000)
+        box = _pick(page, ["textarea#userInput", "textarea[placeholder*='Message']", "textarea", "[contenteditable='true']"])
+        try:
+            box.click(); page.keyboard.insert_text(DESCRIBE_COPILOT); page.wait_for_timeout(800); page.keyboard.press("Enter")
+        except Exception:
+            _gen_fail(ctx, "copilot", evidence, "prompt box not usable")
+        txt = _copilot_answer(page, before_n)
+        m = re.search(r"PROMPT:\s*(.+)", txt or "", re.I | re.S)
+        prompt = re.sub(r"\s+", " ", (m.group(1) if m else txt or "")).strip(" *\"")[:1500]
+        if len(prompt.split()) < 12:
+            _gen_fail(ctx, "copilot", evidence, f"no usable description (got: {prompt[:120]!r})")
+        _note(ctx, f"described: {prompt[:160]}")
+        return _save(prompt.encode("utf-8"), "r12_copilot_describe.txt")
+    finally:
+        cctx.close()
+        pw.stop()
+
+
+def r13_meta_chain(desc, aspect, image_path, ctx):
+    """meta.ai, ONE conversation: make an image from the description, then animate that image. -> the video (the image is
+    saved too as output/r13_meta_chain.jpg). `desc` is the description (from r12 / the studio)."""
+    pw, cctx, page, prefs = _browser("meta")
+    ctx["_page"] = page
+    try:
+        _goto(page, HOME_URLS["meta"]); page.wait_for_timeout(4000)
+        state, evidence = _signin_state(page, "meta")
+        _note(ctx, f"signin={state}; evidence: {evidence}")
+        if state == "login_wall":
+            _not_signed_in("meta")
+        if state == "unknown":
+            _blocker_unknown("meta", page, ctx, "r13", state, evidence)
+        imgs0 = _img_srcs(page)
+        box = _pick(page, ["textarea[placeholder*='Ask Meta']", "div[contenteditable='true']"])
+        try:
+            _type_like_human(page, box, "Imagine: " + _prompt(desc, "photorealistic, no text"))
+        except Exception:
+            _gen_fail(ctx, "meta", evidence, "prompt box not usable")
+        img_data, t0 = None, time.time()
+        while time.time() - t0 < 180 and not img_data:   # step 1: the image
+            page.wait_for_timeout(5000)
+            for s in [x for x in _img_srcs(page) if x not in imgs0 and x.startswith("http")]:
+                try:
+                    d = cctx.request.get(s, timeout=60000).body()
+                except Exception:
+                    continue
+                if _is_image(d) and len(d) > 30000:
+                    img_data = d; break
+        if not img_data:
+            _gen_fail(ctx, "meta", evidence, "no image within 180s")
+        _save(img_data, "r13_meta_chain.jpg")
+        _note(ctx, f"image made in {time.time() - t0:.0f}s")
+        vids0 = set(page.evaluate("() => [...document.querySelectorAll('video')].map(v => v.currentSrc || v.src).filter(Boolean)"))
+        try:                                         # step 2: animate THAT image, same conversation
+            box = _pick(page, ["textarea[placeholder*='Ask Meta']", "div[contenteditable='true']"])
+            _type_like_human(page, box, "Animate this image with a slow cinematic camera move. Keep everything in it exactly the same.")
+        except Exception:
+            _gen_fail(ctx, "meta", evidence, "follow-up box not usable")
+        data, t0 = None, time.time()
+        while time.time() - t0 < 300 and not data:
+            page.wait_for_timeout(8000)
+            srcs = page.evaluate("() => [...document.querySelectorAll('video')].map(v => v.currentSrc || v.src).filter(Boolean)")
+            for s in [x for x in srcs if x not in vids0 and x.startswith("http")]:
+                try:
+                    d = cctx.request.get(s, timeout=120000).body()
+                except Exception:
+                    continue
+                if _is_video(d):
+                    data = d; break
+        if not data:
+            _gen_fail(ctx, "meta", evidence, "image made, but no video within 300s")
+        _note(ctx, f"video made in {time.time() - t0:.0f}s (image-to-video, same chat)")
+        return _save(data, "r13_meta_chain.mp4")
+    finally:
+        cctx.close()
+        pw.stop()
+
+
 # ------------------------------------------------------------------ registry
 ROUTES = [
     {"id": "r1", "name": "cloudflare-flux", "proves": "Cloudflare Workers AI REST image (FLUX.1-schnell)", "fn": r1_cloudflare_flux},
@@ -1128,6 +1280,8 @@ ROUTES = [
     {"id": "r9", "name": "wangp", "proves": "local WanGP still -> image-to-video (incumbent baseline)", "fn": r9_wangp},
     {"id": "r10", "name": "marble-video", "proves": "World Labs Marble world -> recorded walk mp4. WARNING: uses one of the few free generations", "fn": r10_marble_video},
     {"id": "r11", "name": "blender-video", "proves": "Blender over MCP (safe mode): text -> plan -> Poly Haven scene -> Cycles GPU -> mp4; Blender closed after", "fn": r11_blender_video},
+    {"id": "r12", "name": "copilot-describe", "proves": "Copilot (Bing chat) describes an image -> recreate prompt, people kept anonymous", "fn": r12_copilot_describe, "needs_image": True},
+    {"id": "r13", "name": "meta-chain", "proves": "meta.ai one chat: image from the description, then animate that image -> video", "fn": r13_meta_chain},
 ]
 
-assert len(ROUTES) == 11
+assert len(ROUTES) == 13
