@@ -4,3 +4,4 @@ python-multipart
 requests
 gradio_client
 playwright
+mcp>=1.20
