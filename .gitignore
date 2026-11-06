@@ -30,3 +30,8 @@ app/kenv/
 # ladder v2: Claude-written Remotion components (temporary, deleted after each render)
 remotion/src/gen/
 models/
+
+# media routes run outside the repo (media_routes data folder); a stray run without VS_MEDIA_DATA writes here
+app/studio/routelib/output/
+app/studio/routelib/profiles/
+app/studio/routelib/secrets/

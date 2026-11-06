@@ -33,9 +33,9 @@ DEFAULTS = {
     "imagegen_providers": ["cloudflare", "hf", "chatgpt", "bing", "meta", "gemini"],
     "cloudflare_account_id": "",
     "cloudflare_api_token": "",       # a permanent Cloudflare API token (Account > Workers AI); kept in the Windows vault
-    # media routes (2026-11-06): the routes proven on the Media Routes page (port 42054) run through its own Python, signed-in
-    # browser profiles and secrets: media-poc\run_route.py. "" = <repo>\media-poc (which has no signed-in profiles by itself)
-    "media_routes_dir": "",
+    # media routes (2026-11-06): studio/routelib (moved in from the media-poc setup page) runs on this app's Python; signed-in browser
+    # profiles + route outputs live here. "" = <jobs_dir parent>\media_routes. Sign in to a site: scripts\media-login.ps1 <site>
+    "media_routes_data": "",
     "media_routes_timeout": 900,      # seconds per route call (Blender renders, Flow queues)
     "meta_chain_on": True,            # rung 3a: source snapshot -> Copilot describes -> Meta image -> Meta animates it (never a known person)
     "meta_video_on": True,            # rung 5a: meta.ai video (free) for a beat nothing above filled, before Flow

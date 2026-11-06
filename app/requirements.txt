@@ -13,3 +13,4 @@ keyring
 imageio-ffmpeg
 pypdf
 python-docx
+mcp>=1.20   # Blender rung (studio/routelib/blender_mcp) talks to Blender over MCP

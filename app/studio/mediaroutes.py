@@ -1,45 +1,48 @@
-"""Media routes for the visual ladder (2026-11-06): the routes proven on the Media Routes page (port 42054, media-poc/) run as
-a subprocess through media-poc's own Python, signed-in browser profiles and secrets:
+"""Media routes for the visual ladder (2026-11-06). The route code lives in Video Studio (studio/routelib, moved in from the
+media-poc setup page) and runs in its own process on Video Studio's Python, so a stuck browser can be timed out and killed:
 
-    <media_routes_dir>\\venv\\Scripts\\python.exe run_route.py <route> --desc ... --aspect ... [--image ...] --out <file>
+    python -m studio.routelib.run_route <route> --desc ... --aspect ... [--image ...] --out <file>      (cwd: app)
 
-Used by: imagegen ("meta" service = r6), render / short rung 5 (r7 Meta video, r8 Flow), rung 3b (r11 Blender).
-run() never raises (cancel aside): it returns the output path or None, and logs why."""
-import json, subprocess, sys, time
+Signed-in browser profiles, route outputs and logs live in the data folder (setting media_routes_data; default
+<jobs_dir parent>\\media_routes). OPEN LOGIN for a site = scripts\\media-login.ps1 <site>.
+Used by: imagegen ("meta" service = r6), rung 3a chain (r12 Copilot describe, r13 Meta image -> video), rung 3b (r11 Blender),
+rung 5 (r7 Meta video, r8 Flow). run() never raises (cancel aside): it returns the output or None, and logs why."""
+import json, os, subprocess, sys, time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent.parent
-_down = {}   # route -> reason it is off for the rest of this process (not installed, signed out ...)
+APP = Path(__file__).resolve().parent.parent
+_down = {}   # route -> reason it is off for the rest of this process (signed out ...)
 
 
-def routes_dir(cfg):
-    return Path(cfg.get("media_routes_dir") or (ROOT / "media-poc"))
+def data_dir(cfg):
+    if cfg.get("media_routes_data"): return Path(cfg["media_routes_data"])
+    jobs = cfg.get("jobs_dir")
+    return (Path(jobs).parent if jobs else APP.parent) / "media_routes"
 
 
-def _python(d):
-    for c in (d / "venv" / "Scripts" / "python.exe", d / "venv" / "bin" / "python"):
-        if c.is_file(): return c
-    return None
+def routes_dir(cfg):   # where a route leaves its own output files (r13_meta_chain.jpg ...)
+    return data_dir(cfg)
 
 
 def available(cfg, route=None):
-    d = routes_dir(cfg)
-    return (d / "run_route.py").is_file() and _python(d) is not None and not (route and route in _down)
+    return (APP / "studio" / "routelib" / "run_route.py").is_file() and (data_dir(cfg) / "profiles").is_dir() \
+        and not (route and route in _down)
 
 
 def run(cfg, route, desc, aspect, out, log, image=None, timeout=None):
     """-> {"output": Path, "note": str} or None."""
-    d = routes_dir(cfg); py = _python(d)
-    if not (d / "run_route.py").is_file() or py is None:
-        log(f"  {route}: media routes not installed at {d} (setting media_routes_dir)"); return None
+    d = data_dir(cfg)
+    if not available(cfg):
+        log(f"  {route}: no signed-in browser profiles at {d / 'profiles'} (setting media_routes_data)"); return None
     if route in _down:
         log(f"  {route} skipped ({_down[route]})"); return None
-    cmd = [str(py), "run_route.py", route, "--desc", str(desc)[:1500], "--aspect", aspect, "--out", str(out)]
+    cmd = [sys.executable, "-m", "studio.routelib.run_route", route, "--desc", str(desc)[:1500], "--aspect", aspect, "--out", str(out)]
     if image: cmd += ["--image", str(image)]
+    env = dict(os.environ, VS_MEDIA_DATA=str(d), PYTHONIOENCODING="utf-8")
     t0 = time.time()
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
     try:
-        p = subprocess.run(cmd, cwd=str(d), capture_output=True, text=True, encoding="utf-8", errors="replace",
+        p = subprocess.run(cmd, cwd=str(APP), env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
                            timeout=int(timeout or cfg.get("media_routes_timeout", 900)), creationflags=flags)
     except subprocess.TimeoutExpired:
         log(f"  {route}: no answer within {timeout or cfg.get('media_routes_timeout', 900)} s; next rung"); return None
@@ -50,7 +53,7 @@ def run(cfg, route, desc, aspect, out, log, image=None, timeout=None):
         log(f"  {route}: done in {time.time() - t0:.0f}s" + (f" ({res['note'][:160]})" if res.get("note") else ""))
         return {"output": Path(res["output"]), "note": res.get("note", "")}
     note = str(res.get("note") or "")
-    if any(k in note.lower() for k in ("login wall", "sign-in needed", "not installed", "no token", "signed out")):
+    if any(k in note.lower() for k in ("login wall", "sign-in needed", "not installed", "no token", "signed out", "verify you are human")):
         _down[route] = note[:160]   # needs a person: don't retry it for every beat
     log(f"  {route}: {res.get('status', 'failed')} ({note[:200]}); next rung")
     return None
@@ -82,7 +85,18 @@ def chain_rung(cfg, sd, sec, key, log, snapshot, aspect="16:9", ents=()):
     if media.ok(vid) and img.is_file(): return {"video": vid, "image": img, "prompt": txt.read_text(encoding="utf-8") if txt.is_file() else ""}
     if not txt.is_file():
         r = run(cfg, "r12", "describe", aspect, txt, log, image=snapshot, timeout=300)
-        if not r: return None
+        if not r:   # Copilot blocked (its human check) or failed: Meta describes the snapshot itself, in the chain's own chat
+            log("  chain: Copilot gave no description; Meta describes the snapshot instead")
+            r = run(cfg, "r13", "describe", aspect, vid, log, image=snapshot, timeout=720)
+            if not r or not media.ok(vid): return None
+            pf = routes_dir(cfg) / "output" / "r13_meta_chain.prompt.txt"
+            prompt = pf.read_text(encoding="utf-8").strip() if pf.is_file() else ""
+            if prompt: txt.write_text(prompt, encoding="utf-8")
+            src_img = routes_dir(cfg) / "output" / "r13_meta_chain.jpg"
+            if src_img.is_file():
+                import shutil
+                shutil.copyfile(src_img, img)
+            return {"video": vid, "image": img if img.is_file() else None, "prompt": prompt, "describer": "meta"}
     prompt = txt.read_text(encoding="utf-8").strip()
     try:
         if known_person({"vo": prompt}, ents):   # the describer named someone after all: not this method

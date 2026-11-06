@@ -77,6 +77,22 @@ class Ladder(unittest.TestCase):
                 self.assertTrue(r["video"].exists())
                 self.assertIn("trawler", r["prompt"])
 
+    def test_runs_inside_video_studio(self):
+        """The routes are Video Studio's own (studio/routelib, this Python), never the media-poc setup folder."""
+        import subprocess as sp
+        with tempfile.TemporaryDirectory() as data:
+            (Path(data) / "profiles").mkdir()
+            seen = {}
+            def fake(cmd, **kw):
+                seen.update(cmd=cmd, env=kw.get("env"), cwd=kw.get("cwd"))
+                return sp.CompletedProcess(cmd, 2, stdout='{"status": "blocker", "note": "x"}', stderr="")
+            with patch("subprocess.run", side_effect=fake):
+                mediaroutes.run({"media_routes_data": data}, "r6", "a jet", "16:9", Path(data) / "o.jpg", lambda _: None)
+            self.assertEqual(seen["cmd"][0], sys.executable)
+            self.assertEqual(seen["cmd"][1:3], ["-m", "studio.routelib.run_route"])
+            self.assertEqual(seen["env"]["VS_MEDIA_DATA"], data)
+            self.assertNotIn("media-poc", " ".join(seen["cmd"]) + str(seen["cwd"]))
+
     def test_flow_off_spends_nothing(self):
         with tempfile.TemporaryDirectory() as sd:
             calls = []
