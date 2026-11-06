@@ -18,6 +18,16 @@ Branch `feature/blender-mcp` (from main ca4cfb0). Tariq's requirement: Blender m
 |---|---|---|
 | 1 | vintage camera on a wooden table, studio, dolly in (16:9) | ok - 1280x720, 96 frames H.264; camera sits on the table, nothing blocks the lens; render 554 s |
 | 2 | mossy boulders and ferns, misty forest, sunrise, crane up (9:16) | partial (one boulder query had no model) - 720x1280, 96 frames; render 186 s |
+| 3 | barrel and crates on a dock at golden hour, orbit, haze (16:9, **final**) | ok - 1920x1080, 256 samples, motion blur, 96 frames, 2.4 MB; render 1108 s (11.5 s/frame); clean, noise-free |
+
+Final quality GPU memory: peak 10.3 GB whole card (Blender about 7.1 GB of it), back to 3.2 GB after
+Blender closed. The 10 GB free-VRAM gate for final fits that.
+
+Run 3 content weaknesses (judged from frame 48):
+- "dock" became an endless plank floor with no water edge;
+- the barrel asset is a scattered set with broken pieces;
+- "rusted metal crate" matched a 0.26 m ammo box. The relevance check passed it on the word "metal" -
+  a stricter noun match is a follow-up.
 
 Run 1 was slow because Cycles persistent data was off (the scene was re-uploaded every frame). It was
 turned on for run 2, giving about 3x the speed. That is safe because Blender is closed after the job.
@@ -42,7 +52,6 @@ Safe mode facts found on the way:
 Suite: 157 passed, 4 skipped, 1 failed - the known WSL `test_bash_syntax` environment failure only.
 
 ## Open / not done
-- 1080p `final` quality has not been run live yet (`BLENDER_QUALITY=final`).
 - Blender still shows its quit prompt after saving (probably the unsaved Render Result image), so the close
   is forced after 5 s. Nothing is lost.
 - Distant ground shows texture tiling. The Poly Haven library has no people, animals, aircraft or buildings
