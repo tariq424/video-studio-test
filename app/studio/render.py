@@ -337,6 +337,20 @@ def do_stills(job, plan, cfg, wg, log, stop):
         seed += 1; out = d / f"{v['id']}.jpg"
         if out.exists(): continue
         if stop(): raise RuntimeError("cancelled")
+        if cfg.get("ladder_v2") and cfg.get("meta_chain_on", True):   # rung 3a: snapshot -> Copilot describes -> Meta image -> Meta video
+            from . import mediaroutes
+            snap = section_snapshot(sec_of[v["id"]]) if v["id"] in sec_of else None
+            if snap and snap.get("path"):
+                try: ch = mediaroutes.chain_rung(cfg, _ws(job), {"id": v["id"], "vo": vo, "subject": v.get("subject")}, "L_" + v["id"], log,
+                                                 snap["path"], aspect="16:9", ents=_ents(job))
+                except Exception as e:
+                    if str(e) == "cancelled": raise
+                    log(f"  {v['id']}: describe -> Meta chain failed ({str(e)[:100]}); next rung"); ch = None
+                if ch:
+                    md = job / "motion"; md.mkdir(exist_ok=True)
+                    shutil.copy(ch["video"], md / f"{v['id']}.mp4"); v["type"] = "motion"; v["tag"] = "GENERATED · META"; v.pop("g", None)
+                    if ch.get("image"): shutil.copy(ch["image"], out)   # the still Meta animated, for thumbnails / the editor
+                    log(f"  {v['id']}: snapshot described, Meta image animated"); n += 1; continue
         if cfg.get("ladder_v2") and cfg.get("imagegen_on", True):   # rung 3: free image generators, rung 4: rembg parallax
             from . import imagegen, depth
             snap = section_snapshot(sec_of[v["id"]]) if v["id"] in sec_of else None
@@ -352,17 +366,27 @@ def do_stills(job, plan, cfg, wg, log, stop):
                     v["layers"] = [str(Path(x).relative_to(job)).replace("\\", "/") for x in lay]
                 except Exception as e: log(f"  {v['id']}: parallax failed ({str(e)[:100]}); the image is shown as a still")
                 log(f"  {v['id']}: new image from {site}" + (" (described from the source)" if snap else "")); n += 1; continue
-        if cfg.get("ladder_v2") and cfg.get("flow_on", True):   # rung 5: Google Flow (paid credits), last resort for AI video
-            from . import flow
-            try: clip = flow.generate(cfg, _ws(job), {"id": v["id"], "vo": vo, "still_prompt": v.get("prompt", ""), "queries": v.get("queries") or []},
-                                      "L_" + v["id"], log, aspect="16:9")
+        beat5 = {"id": v["id"], "vo": vo, "still_prompt": v.get("prompt", ""), "queries": v.get("queries") or []}
+        if cfg.get("ladder_v2") and cfg.get("blender_on", True) and (v.get("subject") or v.get("v2") == "image ladder"):
+            from . import mediaroutes   # rung 3b: a Blender scene for a subject-locked shot the image services missed (complete scenes only)
+            try: clip = mediaroutes.blender_rung(cfg, _ws(job), beat5, "L_" + v["id"], log, aspect="16:9")
             except Exception as e:
                 if str(e) == "cancelled": raise
-                log(f"  {v['id']}: flow failed ({str(e)[:100]}); next rung"); clip = None
+                log(f"  {v['id']}: Blender failed ({str(e)[:100]}); next rung"); clip = None
             if clip:
                 md = job / "motion"; md.mkdir(exist_ok=True)
-                shutil.copy(clip, md / f"{v['id']}.mp4"); v["type"] = "motion"; v["tag"] = "GENERATED · FLOW"; v.pop("g", None)
-                log(f"  {v['id']}: Google Flow clip"); n += 1; continue
+                shutil.copy(clip, md / f"{v['id']}.mp4"); v["type"] = "motion"; v["tag"] = "GENERATED · BLENDER"; v.pop("g", None)
+                log(f"  {v['id']}: Blender scene"); n += 1; continue
+        if cfg.get("ladder_v2") and (cfg.get("meta_video_on", True) or cfg.get("flow_on", True)):   # rung 5: Meta video (free) -> Flow (paid)
+            from . import mediaroutes
+            try: clip, vtag, vrung = mediaroutes.video_rung(cfg, _ws(job), beat5, "L_" + v["id"], log, aspect="16:9")
+            except Exception as e:
+                if str(e) == "cancelled": raise
+                log(f"  {v['id']}: AI video failed ({str(e)[:100]}); next rung"); clip = None
+            if clip:
+                md = job / "motion"; md.mkdir(exist_ok=True)
+                shutil.copy(clip, md / f"{v['id']}.mp4"); v["type"] = "motion"; v["tag"] = vtag; v.pop("g", None)
+                log(f"  {v['id']}: {vrung} clip"); n += 1; continue
         if cloud_still(cfg, job, v, vo, log): continue   # cloud first
         if cfg.get("ladder_v2"):   # v2: WanGP still for atmospheric beats, then graphics -> physics -> illustration -> headline
             from . import illustrate

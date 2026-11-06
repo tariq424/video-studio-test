@@ -29,7 +29,19 @@ DEFAULTS = {
     "imagegen_delay_secs": [15, 30],  # human pacing: a random 15-30 s between requests to the same service
     # fixed priority, every beat (2026-10-22): Hugging Face (free) -> ChatGPT -> Bing -> Gemini only when all three fail,
     # to keep automation away from Tariq's main Google account. imagegen_rotate: true brings back the per-video rotation.
-    "imagegen_providers": ["hf", "chatgpt", "bing", "gemini"],
+    # 2026-11-06: Cloudflare Workers AI (FLUX.1-schnell, cheapest, ~5 s) first; Meta (meta.ai, via the media routes) before Gemini.
+    "imagegen_providers": ["cloudflare", "hf", "chatgpt", "bing", "meta", "gemini"],
+    "cloudflare_account_id": "",
+    "cloudflare_api_token": "",       # a permanent Cloudflare API token (Account > Workers AI); kept in the Windows vault
+    # media routes (2026-11-06): the routes proven on the Media Routes page (port 42054) run through its own Python, signed-in
+    # browser profiles and secrets: media-poc\run_route.py. "" = <repo>\media-poc (which has no signed-in profiles by itself)
+    "media_routes_dir": "",
+    "media_routes_timeout": 900,      # seconds per route call (Blender renders, Flow queues)
+    "meta_chain_on": True,            # rung 3a: source snapshot -> Copilot describes -> Meta image -> Meta animates it (never a known person)
+    "meta_video_on": True,            # rung 5a: meta.ai video (free) for a beat nothing above filled, before Flow
+    "flow_via_routes": True,          # rung 5b: Flow through the proven route (flow.google.com) instead of flow.py (old labs.google URL)
+    "blender_on": True,               # rung 3b: Blender scene (MCP) for a subject-locked beat the image services missed; complete scenes only
+    "blender_quality": "preview",
     "imagegen_rotate": False,
     "imagegen_first": "hf",   # one service per video, rotating; the others are the fallback
     "source_snapshot_max_uses": 2,    # source screenshots taken just for describing (rung-2 clips/screenshots are reused free)
@@ -142,7 +154,7 @@ DEFAULTS = {
     "aisstream_api_key": "",          # optional (aisstream.io, free): live AIS position for ship_route when the narration gives an MMSI
 }
 
-SECRETS = ("anthropic_api_key", "zai_api_key", "deepseek_api_key", "aisstream_api_key", "hf_token")
+SECRETS = ("anthropic_api_key", "zai_api_key", "deepseek_api_key", "aisstream_api_key", "hf_token", "cloudflare_api_token")
 
 VAULT = "ExplainerStudio"   # shared with Explainer Studio so saved keys carry over
 

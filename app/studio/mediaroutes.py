@@ -1,0 +1,151 @@
+"""Media routes for the visual ladder (2026-11-06): the routes proven on the Media Routes page (port 42054, media-poc/) run as
+a subprocess through media-poc's own Python, signed-in browser profiles and secrets:
+
+    <media_routes_dir>\\venv\\Scripts\\python.exe run_route.py <route> --desc ... --aspect ... [--image ...] --out <file>
+
+Used by: imagegen ("meta" service = r6), render / short rung 5 (r7 Meta video, r8 Flow), rung 3b (r11 Blender).
+run() never raises (cancel aside): it returns the output path or None, and logs why."""
+import json, subprocess, sys, time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent.parent
+_down = {}   # route -> reason it is off for the rest of this process (not installed, signed out ...)
+
+
+def routes_dir(cfg):
+    return Path(cfg.get("media_routes_dir") or (ROOT / "media-poc"))
+
+
+def _python(d):
+    for c in (d / "venv" / "Scripts" / "python.exe", d / "venv" / "bin" / "python"):
+        if c.is_file(): return c
+    return None
+
+
+def available(cfg, route=None):
+    d = routes_dir(cfg)
+    return (d / "run_route.py").is_file() and _python(d) is not None and not (route and route in _down)
+
+
+def run(cfg, route, desc, aspect, out, log, image=None, timeout=None):
+    """-> {"output": Path, "note": str} or None."""
+    d = routes_dir(cfg); py = _python(d)
+    if not (d / "run_route.py").is_file() or py is None:
+        log(f"  {route}: media routes not installed at {d} (setting media_routes_dir)"); return None
+    if route in _down:
+        log(f"  {route} skipped ({_down[route]})"); return None
+    cmd = [str(py), "run_route.py", route, "--desc", str(desc)[:1500], "--aspect", aspect, "--out", str(out)]
+    if image: cmd += ["--image", str(image)]
+    t0 = time.time()
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+    try:
+        p = subprocess.run(cmd, cwd=str(d), capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=int(timeout or cfg.get("media_routes_timeout", 900)), creationflags=flags)
+    except subprocess.TimeoutExpired:
+        log(f"  {route}: no answer within {timeout or cfg.get('media_routes_timeout', 900)} s; next rung"); return None
+    line = next((l for l in reversed((p.stdout or "").splitlines()) if l.startswith("{")), "")
+    try: res = json.loads(line)
+    except ValueError: res = {"status": "failed", "note": ((p.stderr or p.stdout or "no output").strip().splitlines() or ["?"])[-1][:200]}
+    if res.get("status") == "ok" and res.get("output") and Path(res["output"]).is_file():
+        log(f"  {route}: done in {time.time() - t0:.0f}s" + (f" ({res['note'][:160]})" if res.get("note") else ""))
+        return {"output": Path(res["output"]), "note": res.get("note", "")}
+    note = str(res.get("note") or "")
+    if any(k in note.lower() for k in ("login wall", "sign-in needed", "not installed", "no token", "signed out")):
+        _down[route] = note[:160]   # needs a person: don't retry it for every beat
+    log(f"  {route}: {res.get('status', 'failed')} ({note[:200]}); next rung")
+    return None
+
+
+def known_person(sec, ents=()):
+    """Why the describe -> Meta chain must not run ("" = it may): the beat is about a known, named person."""
+    from .cloudgen import has_person
+    if (sec.get("subject") or {}).get("kind") == "person": return "the beat's subject is a person"
+    try:
+        if has_person(str(sec.get("vo") or ""), ents): return "the narration names a real person"
+    except Exception:
+        pass
+    return ""
+
+
+def chain_rung(cfg, sd, sec, key, log, snapshot, aspect="16:9", ents=()):
+    """Rung 3a (Tariq, 2026-11-06), for a beat with a source snapshot and no public media: Copilot describes the snapshot
+    (people kept anonymous) -> Meta makes an image from it -> Meta animates THAT image in the same chat.
+    Never for a known person. -> {"video", "image", "prompt"} or None."""
+    from . import media
+    if not cfg.get("meta_chain_on", True) or not snapshot or not Path(snapshot).is_file(): return None
+    why = known_person(sec, ents)
+    if why:
+        log(f"  {sec.get('id', key)}: describe -> Meta chain skipped ({why})"); return None
+    if not (available(cfg, "r12") and available(cfg, "r13")): return None
+    d = Path(sd) / "chain"; d.mkdir(parents=True, exist_ok=True)
+    vid, img, txt = d / f"{key}.mp4", d / f"{key}.jpg", d / f"{key}.prompt.txt"
+    if media.ok(vid) and img.is_file(): return {"video": vid, "image": img, "prompt": txt.read_text(encoding="utf-8") if txt.is_file() else ""}
+    if not txt.is_file():
+        r = run(cfg, "r12", "describe", aspect, txt, log, image=snapshot, timeout=300)
+        if not r: return None
+    prompt = txt.read_text(encoding="utf-8").strip()
+    try:
+        if known_person({"vo": prompt}, ents):   # the describer named someone after all: not this method
+            log("  chain: the description names a real person; skipped"); return None
+    except Exception:
+        pass
+    r = run(cfg, "r13", prompt, aspect, vid, log, timeout=600)
+    if not r or not media.ok(vid): return None
+    src_img = routes_dir(cfg) / "output" / "r13_meta_chain.jpg"   # the image Meta animated (saved by the route)
+    if src_img.is_file():
+        import shutil
+        shutil.copyfile(src_img, img)
+    return {"video": vid, "image": img if img.is_file() else None, "prompt": prompt}
+
+
+def blender_rung(cfg, sd, sec, key, log, aspect="16:9"):
+    """Rung 3b: a Blender scene (Media Routes r11: MCP, Poly Haven assets, Cycles) for a subject-locked beat the image services
+    missed. Only a COMPLETE scene counts: a "partial" one (the subject had no model, e.g. an aircraft) drops to the next rung.
+    -> clip path or None."""
+    from . import media
+    from .flow import visual_prompt
+    if not cfg.get("blender_on", True) or not available(cfg, "r11"): return None
+    d = Path(sd) / "blender"; d.mkdir(parents=True, exist_ok=True)
+    out = d / f"{key}.mp4"
+    if media.ok(out): return out
+    if (d / f"{key}.partial").exists(): return None   # already tried for this beat
+    r = run(cfg, "r11", visual_prompt(cfg, sec, log), aspect, out, log, timeout=int(cfg.get("media_routes_timeout", 900)))
+    if not r: return None
+    if "PARTIAL" in (r.get("note") or "").upper():
+        log("  blender: partial scene (" + r["note"].split("PARTIAL", 1)[1][:120].strip(" -") + "); not used, next rung")
+        (d / f"{key}.partial").write_text(r["note"], encoding="utf-8"); out.unlink(missing_ok=True)
+        return None
+    return out if media.ok(out) else None
+
+
+def video_rung(cfg, sd, sec, key, log, aspect="16:9"):
+    """Visual ladder rung 5 for a beat nothing above could fill: 5a Meta video (meta.ai, free) -> 5b Google Flow (paid credits,
+    capped by flow_max_per_video). -> (clip path, tag, rung) or (None, None, None). Never raises (cancel aside)."""
+    from . import media
+    from .flow import visual_prompt
+    d = Path(sd) / "flow"; d.mkdir(parents=True, exist_ok=True)
+    prompt = None
+    if cfg.get("meta_video_on", True) and available(cfg, "r7"):
+        out = d / f"{key}_meta.mp4"
+        if media.ok(out): return out, "GENERATED · META", "meta video"
+        prompt = prompt or visual_prompt(cfg, sec, log)
+        r = run(cfg, "r7", prompt, aspect, out, log, timeout=600)
+        if r and media.ok(out): return out, "GENERATED · META", "meta video"
+    if cfg.get("flow_on", True):
+        out = d / f"{key}.mp4"
+        if media.ok(out): return out, "GENERATED · FLOW", "flow"
+        if cfg.get("flow_via_routes", True) and available(cfg, "r8"):
+            cap = int(cfg.get("flow_max_per_video", 1))
+            made = [x for x in d.glob("*.mp4") if not x.stem.endswith("_meta")]
+            if len(made) >= cap:
+                log(f"  flow: {cap} clip(s) already made for this video; next rung"); return None, None, None
+            prompt = prompt or visual_prompt(cfg, sec, log)
+            r = run(cfg, "r8", prompt, aspect, out, log, timeout=int(cfg.get("flow_timeout", 480)) + 240)
+            if r and media.ok(out):
+                log(f"  flow: {r.get('note', '')[-80:]}")
+                return out, "GENERATED · FLOW", "flow"
+        else:
+            from . import flow
+            clip = flow.generate(cfg, sd, sec, key, log, aspect=aspect)
+            if clip: return clip, "GENERATED · FLOW", "flow"
+    return None, None, None

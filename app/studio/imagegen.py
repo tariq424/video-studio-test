@@ -54,7 +54,8 @@ CAPTCHA = re.compile(r"(captcha|unusual traffic|verify (that )?you('| a)re (a )?
 REFUSED = re.compile(r"(can.t (create|generate|make) (images|that|this)|couldn.t (create|generate)|i can.t help with (that|this)|"
                      r"against (my|our) (policies|guidelines)|unable to (create|generate))", re.I)
 
-PROVIDERS = ("gemini", "chatgpt", "bing", "hf")
+PROVIDERS = ("gemini", "chatgpt", "bing", "hf", "cloudflare", "meta")
+CF_MODEL = "@cf/black-forest-labs/flux-1-schnell"   # Cloudflare Workers AI (REST; account id + API token in settings / vault)
 GOOGLE_IMAGE_PROVIDERS = ("gemini",)
 FIT_AUDIT = "fit_audit.json"
 HF_SPACE = "black-forest-labs/FLUX.1-schnell"   # Hugging Face's free hosted FLUX (ZeroGPU): runs on their GPUs, not this PC
@@ -648,6 +649,60 @@ def _session_hf(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
     return prompt
 
 
+def _text_prompt(cfg, sec, log, limit=700):
+    from .flow import visual_prompt
+    prompt = re.sub(r"(?i)slow (cinematic )?camera move[^.]*\.?", "", sec.get("described_prompt") or visual_prompt(cfg, sec, log))
+    return re.sub(r"\s+", " ", prompt).strip()[:limit] + " Photorealistic. No text, no logos. No real or recognizable people."
+
+
+def _session_cloudflare(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
+    """Cloudflare Workers AI FLUX.1-schnell over REST (2026-11-06: the cheapest service, ~5 s). No browser, no account login."""
+    import requests, base64
+    acct, tok = cfg.get("cloudflare_account_id"), cfg.get("cloudflare_api_token")
+    if not (acct and tok): raise Skip("Cloudflare account id / API token not set")
+    prompt = _text_prompt(cfg, sec, log, 1800)
+    log(f"  cloudflare: prompt ({len(prompt.split())} words): \"{prompt[:140]}...\"")
+    url = f"https://api.cloudflare.com/client/v4/accounts/{acct}/ai/run/{CF_MODEL}"   # square 1024 image; the ladder crops it
+    from PIL import Image
+    import io
+    for k, dest in enumerate([out] + list(extras)):
+        r = requests.post(url, headers={"Authorization": "Bearer " + tok},
+                          json={"prompt": prompt + ("" if not k else f" Variation {k + 1}."), "steps": 4},   # schnell: prompt + steps only
+                          timeout=min(timeout, 180))
+        if r.status_code in (401, 403): raise Skip(f"Cloudflare refused the token (HTTP {r.status_code}): renew it in settings")
+        if r.status_code == 429: raise Skip("Cloudflare rate limit / daily allowance", -1)
+        if r.status_code != 200: raise RuntimeError(f"Cloudflare HTTP {r.status_code}: {r.text[:160]}")
+        data = r.content
+        if not (data[:3] == b"\xff\xd8\xff" or data[:4] == b"\x89PNG"):
+            img = ((r.json() or {}).get("result") or {}).get("image")
+            data = base64.b64decode(img) if img else b""
+        if not data: raise RuntimeError("Cloudflare returned no image")
+        with Image.open(io.BytesIO(data)) as im: im.convert("RGB").save(dest, "JPEG", quality=93)
+        why = _has_text(cfg, dest, log)
+        if why:
+            Path(dest).unlink(missing_ok=True)
+            if k == 0: raise RuntimeError(f"Cloudflare image looks wrong ({why})")
+    _answered("cloudflare")
+    return prompt
+
+
+def _session_meta(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
+    """meta.ai image (Media Routes r6, through media-poc's signed-in Meta profile)."""
+    from . import mediaroutes
+    if not mediaroutes.available(cfg, "r6"): raise Skip("media routes not installed (setting media_routes_dir)")
+    prompt = _text_prompt(cfg, sec, log)
+    _pause(cfg, log, "this beat's image", "meta")
+    log(f"  meta: prompt ({len(prompt.split())} words): \"{prompt[:140]}...\"")
+    tmp = Path(out).with_suffix(".meta_raw")
+    r = mediaroutes.run(cfg, "r6", prompt, aspect, tmp, log, timeout=max(timeout, 300))
+    if not r: raise RuntimeError("meta.ai made no image (see the line above)")
+    from PIL import Image
+    with Image.open(r["output"]) as im: im.convert("RGB").save(out, "JPEG", quality=93)
+    tmp.unlink(missing_ok=True)
+    _answered("meta")
+    return prompt
+
+
 TEXT_CHECK = ('Check this AI-generated image for obvious physical mistakes only: an object with the wrong number of parts (a plane '
               'with extra wings or engines, a car with extra wheels, a bike with three pedals), malformed hands or limbs, or impossible, '
               'melted or fused structures. Ignore any text, lettering, signs or license plates. Reply with JSON only: '
@@ -915,10 +970,11 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
                 prompt = _session(cfg, image, aspect, vo, out, timeout, log, evidence, extras)
             elif site == "chatgpt":
                 prompt = _session_chatgpt(cfg, image, aspect, vo, out, timeout, log, evidence, extras)
-            elif site in ("hf", "bing"):
+            elif site in ("hf", "bing", "cloudflare", "meta"):
                 if image and described is None: described = describe_local(cfg, image, vo, log)
                 s2 = dict(sec, described_prompt=described) if described else sec
-                prompt = (_session_hf if site == "hf" else _session_bing)(cfg, s2, aspect, out, timeout, log, evidence, extras)
+                fn = {"hf": _session_hf, "bing": _session_bing, "cloudflare": _session_cloudflare, "meta": _session_meta}[site]
+                prompt = fn(cfg, s2, aspect, out, timeout, log, evidence, extras)
         except Skip as s_:
             cool = int(float(cfg.get("imagegen_cooldown_hours", 6)) * 3600) if s_.cool == -1 else s_.cool
             _job_skip[site] = s_.why

@@ -456,9 +456,18 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
             _safe(log, f"{s['id']} stock", lambda: stock_beat(s))
             return
         snap = None
+        if v2 and len(items) < n and cfg.get("meta_chain_on", True):   # rung 3a: snapshot -> Copilot describes -> Meta image -> Meta animates it
+            from . import mediaroutes
+            snap = _safe(log, f"{s['id']} source screenshot", lambda: source_visuals.snapshot(cfg, job, sd, s, log, source_item=raw_source))
+            if snap and snap.get("path"):
+                ch = _safe(log, "describe -> Meta chain", lambda: mediaroutes.chain_rung(cfg, sd, s, f"{s['id']}_chain", log, snap["path"],
+                                                                                     aspect="9:16", ents=ents))
+                if ch:
+                    items.append({"type": "video", "src": _rel_sd(ch["video"], sd), "secs": round(media.dur(ch["video"]), 2), "rate": 1.0,
+                                  "freeze": True, "tag": "GENERATED · META", "rung": "meta chain"})
         if v2 and len(items) < n and cfg.get("imagegen_on", True):   # rung 3: free image generators (describe the source screenshot -> new image)
             from . import imagegen
-            snap = _safe(log, f"{s['id']} source screenshot", lambda: source_visuals.snapshot(cfg, job, sd, s, log, source_item=raw_source))
+            snap = snap or _safe(log, f"{s['id']} source screenshot", lambda: source_visuals.snapshot(cfg, job, sd, s, log, source_item=raw_source))
             want = n - len(items)   # a beat that needs several visuals gets a second Gemini image (another angle / close-up), not Flow
             imgs = _safe(log, "image generators", lambda: imagegen.generate_many(cfg, sd, s, s["id"], log, aspect="9:16",
                                                                                 image=(snap or {}).get("path"), count=want), []) or []
@@ -469,12 +478,18 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                                   "rung": "imagegen", "site": imagegen.last_site(), "described": bool(snap), "variant": k})
                 else:
                     items.append({"type": "image", "src": _rel_sd(img, sd), "tag": imagegen.tag(), "rung": "imagegen", "site": imagegen.last_site(), "variant": k})
-        if v2 and cfg.get("flow_on", True) and not items:   # rung 5: Google Flow (paid, Google account): only a beat nothing else could fill
-            from . import flow
-            clip = _safe(log, "flow", lambda: flow.generate(cfg, sd, s, f"{s['id']}_flow", log, aspect="9:16"))
+        if v2 and cfg.get("blender_on", True) and s.get("subject") and not items:   # rung 3b: Blender scene for a subject-locked beat (complete scenes only)
+            from . import mediaroutes
+            clip = _safe(log, "blender", lambda: mediaroutes.blender_rung(cfg, sd, s, f"{s['id']}_blender", log, aspect="9:16"))
             if clip:
                 items.append({"type": "video", "src": _rel_sd(clip, sd), "secs": round(media.dur(clip), 2), "rate": 1.0, "freeze": True,
-                              "tag": "GENERATED · FLOW", "rung": "flow"})
+                              "tag": "GENERATED · BLENDER", "rung": "blender"})
+        if v2 and (cfg.get("meta_video_on", True) or cfg.get("flow_on", True)) and not items:   # rung 5: Meta video (free) -> Flow (paid): only a beat nothing else could fill
+            from . import mediaroutes
+            clip, vtag, vrung = _safe(log, "AI video", lambda: mediaroutes.video_rung(cfg, sd, s, f"{s['id']}_flow", log, aspect="9:16")) or (None, None, None)
+            if clip:
+                items.append({"type": "video", "src": _rel_sd(clip, sd), "secs": round(media.dur(clip), 2), "rate": 1.0, "freeze": True,
+                              "tag": vtag, "rung": "flow" if vrung == "flow" else "meta video"})
         bd = s.get("backdrop") or {"kind": "headline", "kicker": "", "text": s["vo"][:60], "sub": ""}
         if bd.get("kind") == "map" and len(items) < n: items.append({"type": "graphic", "g": bd, "rung": "map"})
         have = len(pick.get(s["id"], []))
@@ -531,6 +546,12 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                              + (", rembg parallax" if item["type"] == "layers" else ""))
             elif item.get("rung") == "flow":
                 lines.append("Google Flow clip")
+            elif item.get("rung") == "meta video":
+                lines.append("Meta video clip")
+            elif item.get("rung") == "meta chain":
+                lines.append("snapshot described by Copilot, Meta image animated")
+            elif item.get("rung") == "blender":
+                lines.append("Blender scene (MCP)")
         vb = {"g": False, "hard": False, "p": False, "pok": False, "capcut": "", "f": False}   # v2, once per beat: graphics tried / hard-failed, physics tried / fitted
         if v2:
             from . import capcut
