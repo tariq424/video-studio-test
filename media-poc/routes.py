@@ -426,6 +426,13 @@ def _is_image(data):
             or (data[:4] == b"RIFF" and data[8:12] == b"WEBP"))
 
 
+def _is_video(data, min_bytes=50000):
+    """True only for a real MP4/MOV ('ftyp' box) or WebM file. Nov 6: a 920 KB sign-in page was saved as r8's 'video'."""
+    if not data or len(data) < min_bytes:
+        return False
+    return data[4:8] == b"ftyp" or data[:4] == bytes.fromhex("1a45dfa3")
+
+
 def _img_srcs(page):
     """Every <img> src on the page now: taken BEFORE submitting, so images already on the page never count as results."""
     try:
@@ -569,17 +576,27 @@ def r4_chatgpt_image(desc, aspect, image_path, ctx):
             _not_signed_in("chatgpt")
         if state == "unknown":
             _blocker_unknown("chatgpt", page, ctx, "r4", state, evidence)
-        box = _pick(page, ["#prompt-textarea", "[placeholder*='Ask ChatGPT']", "textarea[data-id='root']", "div[contenteditable='true']"])
+        # Nov 6: #prompt-textarea is gone; the composer is a ProseMirror div labelled "Ask ChatGPT"
+        sels = ["div.ProseMirror[contenteditable='true']", "div[contenteditable='true'][aria-label*='ChatGPT']",
+                "#prompt-textarea", "div[contenteditable='true']", "textarea"]
+        _dismiss_popups(page, ctx)
+        box = None
+        for _ in range(10):                       # the composer can render a few seconds after sign-in evidence
+            box = next((page.locator(s).first for s in sels if _visible(page, s, 800)), None)
+            if box:
+                break
+            page.wait_for_timeout(1500)
+        if box is None:
+            _gen_fail(ctx, "chatgpt", evidence, "prompt box not found (none of: " + ", ".join(sels) + ")")
         before = _img_srcs(page)
         start_url = page.url
-        _dismiss_popups(page, ctx)
         try:
-            box.first.click()
+            box.click()
             page.keyboard.press("Control+A")      # ChatGPT keeps an unsent draft: clear it so only this prompt goes out
             page.keyboard.press("Backspace")
             _type_like_human(page, box, "Create an image: " + _prompt(desc, "photorealistic, no text"), submit=False)
-        except Exception:
-            _gen_fail(ctx, "chatgpt", evidence, "prompt box not usable")
+        except Exception as e:
+            _gen_fail(ctx, "chatgpt", evidence, f"prompt box not usable ({type(e).__name__}: {str(e)[:120]})")
         page.wait_for_timeout(800)
         # sent = the chat moved to its own /c/ address, a Stop button appeared, or our message is in the thread
         _submit(page, ["button[data-testid='send-button']", "#composer-submit-button", "button[aria-label*='Send']"],
@@ -791,27 +808,64 @@ def r8_flow_video(desc, aspect, image_path, ctx):
             still = (box.input_value() if box.evaluate("e => 'value' in e") else box.inner_text()).strip()
         except Exception:
             still = ""
-        if still:
+        # the arrow can ignore clicks while the agent is still writing its welcome message: retry for ~15 s
+        for _try in range(8):
+            if not still:
+                break
             for sel in ("button[aria-label='Start generation']", "button[aria-label*='Send' i]", "button[aria-label*='Submit' i]", "button:has-text('arrow_forward')",
                         "button:has(i:text('arrow_forward'))", "button[type='submit']"):
                 try:
                     b = box_frame.locator(sel).last
-                    if b.is_visible(timeout=600):
-                        b.click(timeout=4000); _note(ctx, f"sent with {sel}"); break
+                    if b.is_visible(timeout=600) and b.is_enabled():
+                        b.click(timeout=4000); _note(ctx, f"sent with {sel} (try {_try + 1})"); break
                 except Exception:
                     continue
-            page.wait_for_timeout(1500)
+            page.wait_for_timeout(2000)
             try:
                 still = (box.input_value() if box.evaluate("e => 'value' in e") else box.inner_text()).strip()
             except Exception:
                 still = ""
-            if still:
-                _gen_fail(ctx, "flow", evidence, "prompt typed but not sent")
+        if still:
+            _gen_fail(ctx, "flow", evidence, "prompt typed but not sent (send arrow ignored 8 tries)")
         _note(ctx, "prompt sent")
-        t0, vidsrc = time.time(), ""
+        def _approve_once():
+            """Flow's agent asks "kick off this 1 video generation, costing 15 credits?" with Approve / Always approve /
+            Reject. Tariq OK'd (Nov 6) clicking plain Approve once per run. Never 'Always approve': that is an account setting."""
+            # the button's accessible name is "check Approve" (icon-font ligature), so match the visible label text
+            # exactly: "Always approve" never matches
+            for fr in page.frames:
+                try:
+                    b = fr.get_by_text("Approve", exact=True)
+                    if b.count() and b.last.is_visible(timeout=500):
+                        try:
+                            m = re.search(r"costing\s+(\d+)\s+credits", fr.locator("body").inner_text())
+                            ctx["_flow_cost"] = m.group(1) if m else "?"
+                        except Exception:
+                            ctx["_flow_cost"] = "?"
+                        b.last.click(timeout=4000)
+                        return True
+                except Exception:
+                    continue
+            return False
+        t0, vidsrc, approved = time.time(), "", False
         while time.time() - t0 < 480 and not vidsrc:          # Flow queues at busy times
-            page.wait_for_timeout(15000)
+            page.wait_for_timeout(5000 if not approved else 15000)
+            if not approved and _approve_once():
+                approved = True
+                _note(ctx, f"approved Flow's 1-video generation ({ctx.get('_flow_cost', '?')} credits)")
             new = [s for s in _videos() if s not in before]
+            if not new and approved:
+                # a finished clip shows as a thumbnail; Flow only creates its <video> when the tile is hovered
+                tiles = page.evaluate("""() => [...document.images].filter(i => i.naturalWidth >= 200)
+                    .map(i => { const r = i.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })""")
+                for c in tiles[:4]:
+                    try:
+                        page.mouse.move(*c); page.wait_for_timeout(2500)
+                    except Exception:
+                        continue
+                    new = [s for s in _videos() if s not in before]
+                    if new:
+                        break
             vidsrc = new[0] if new else ""
         if not vidsrc:
             _gen_fail(ctx, "flow", evidence, "no generated clip within 480s")
@@ -821,7 +875,12 @@ def r8_flow_video(desc, aspect, image_path, ctx):
                 data = requests.get(vidsrc, timeout=180).content
             except Exception:
                 data = None
-        if not data or len(data) < 50000:                     # signed/blob links: fetch inside the browser
+        if (not _is_video(data)) and vidsrc.startswith("http"):
+            try:                                              # flow.google.com/asb links need the signed-in cookies
+                data = cctx.request.get(vidsrc, timeout=180000).body()
+            except Exception:
+                data = None
+        if not _is_video(data):                     # blob links: fetch inside the page
             try:
                 b64 = page.evaluate("""async (u) => { const r = await fetch(u); const b = new Uint8Array(await r.arrayBuffer());
                     let s = ''; for (let i = 0; i < b.length; i += 32768) s += String.fromCharCode.apply(null, b.subarray(i, i + 32768));
@@ -829,7 +888,7 @@ def r8_flow_video(desc, aspect, image_path, ctx):
                 data = base64.b64decode(b64)
             except Exception:
                 data = None
-        if not data or len(data) < 50000:
+        if not _is_video(data):
             _gen_fail(ctx, "flow", evidence, f"video download ({vidsrc[:80]})")
         return _save(data, "r8_flow_video.mp4")
     finally:
