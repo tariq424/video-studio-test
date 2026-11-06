@@ -1,0 +1,8 @@
+output/
+profiles/
+secrets/
+venv/
+__pycache__/
+*.pyc
+_noise/
+*.log
