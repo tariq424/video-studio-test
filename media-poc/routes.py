@@ -30,7 +30,7 @@ HOME_URLS = {
     "chatgpt": "https://chatgpt.com/",
     "bing": "https://www.bing.com/images/create",
     "meta": "https://meta.ai/",
-    "flow": "https://labs.google/fx/tools/flow",
+    "flow": "https://flow.google.com/",
     "marble": "https://marble.worldlabs.ai/",
 }
 
@@ -120,7 +120,8 @@ WALL_URL_MARKERS = {
     "chatgpt": ("auth.openai.com", "auth0.openai.com", "/auth/login"),
     "bing": ("login.live.com", "signup.live.com", "login.microsoftonline.com"),
     "meta": ("login.facebook.com", "facebook.com/login"),
-    "flow": ("accounts.google.com/SignIn", "accounts.google.com/ServiceLogin", "accounts.google.com/v3/signin"),
+    "flow": ("accounts.google.com/SignIn", "accounts.google.com/ServiceLogin", "accounts.google.com/v3/signin",
+             "flow.google.com/about"),   # signed out, flow.google.com/ redirects to the /about marketing page
     "marble": ("auth.worldlabs.ai", "accounts.google.com/SignIn", "accounts.google.com/ServiceLogin"),
 }
 
@@ -140,7 +141,7 @@ POSITIVE_SIGNALS = {
         ("signed-in account row present", lambda p: _any_visible(p, ["[data-testid*='profile']", "img[alt='']", "button[aria-label*='account']"])),
     ],
     "flow": [
-        ("Flow editor/create UI visible", lambda p: _any_visible(p, ["textarea", "button:has-text('Create')", "[contenteditable='true']"])),
+        ("Flow editor/create UI visible", lambda p: _any_visible(p, ["button:has-text('New project')", "[contenteditable='true']"])),
         ("Google account avatar present", lambda p: _any_visible(p, ["img[alt*='Google Account']", "a[aria-label*='Google Account']", "img[src*='googleusercontent']"])),
     ],
     "marble": [
@@ -168,6 +169,11 @@ def _any_visible(page, selectors, timeout=1200):
 
 def _cloudflare_challenge(page):
     try:
+        # the checkbox lives in a challenges.cloudflare.com iframe, so the page's own text often doesn't show it
+        if any("challenges.cloudflare.com" in (f.url or "") for f in page.frames):
+            return True
+        if "just a moment" in (page.title() or "").lower():
+            return True
         body = page.locator("body").inner_text()[:1200].lower()
         return ("verify you are human" in body) or ("cloudflare" in body and "verify" in body)
     except Exception:
@@ -220,6 +226,10 @@ def _blocker_unknown(site, page, ctx, rid, state, evidence):
     except Exception:
         body = "(page text unavailable)"
     _note(ctx, f"signin={state}; evidence: {evidence}; url={page.url[:90]}; page: {body[:300]}")
+    if "Cloudflare" in evidence:
+        raise Blocker(f"Cloudflare 'Verify you are human' check (never clicked by the POC): use OPEN LOGIN "
+                      f"to open profiles/{site}, tick the box yourself, close the window, then RUN again; "
+                      f"screenshot {rid}_state.png")
     raise Blocker(f"state unknown — no login wall and no signed-in evidence on profiles/{site} "
                   f"(checked: {evidence}); screenshot {rid}_state.png; use OPEN LOGIN if the "
                   f"profile is actually signed out")
@@ -352,12 +362,59 @@ def _pick(page, selectors):
     return page.locator(selectors[0]).first      # fall through: let the step-fail path report it
 
 
-def _type_like_human(page, locator, text):
+def _prompt(desc, extra):
+    """desc + only the words of `extra` it doesn't already have ("photorealistic" was being sent twice)."""
+    low = desc.lower()
+    add = [w.strip() for w in extra.split(",") if w.strip() and w.strip().lower() not in low]
+    return desc.rstrip(" .,") + (", " + ", ".join(add) if add else "")
+
+
+def _type_like_human(page, locator, text, submit=True):
     locator.first.wait_for(state="visible", timeout=15000)
     locator.first.click()
     for chunk in text.split(" "):
         page.keyboard.type(chunk + " ", delay=40)
-    page.keyboard.type("\n")
+    if submit:
+        page.keyboard.type("\n")
+
+
+def _is_image(data):
+    """True only for real image bytes (JPEG/PNG/GIF/WebP). Bing once returned an HTML page that passed as 'ok'."""
+    if not data or len(data) < 12:
+        return False
+    return (data[:3] == b"\xff\xd8\xff" or data[:8] == b"\x89PNG\r\n\x1a\n" or data[:6] in (b"GIF87a", b"GIF89a")
+            or (data[:4] == b"RIFF" and data[8:12] == b"WEBP"))
+
+
+def _img_srcs(page):
+    """Every <img> src on the page now: taken BEFORE submitting, so images already on the page never count as results."""
+    try:
+        return set(page.evaluate("() => [...document.images].map(i => i.currentSrc || i.src).filter(Boolean)"))
+    except Exception:
+        return set()
+
+
+def _submit(page, selectors, ctx, evidence, site, sent_check):
+    """Click the send/generate button (Enter as a fallback), then confirm the prompt really went out."""
+    how = "Enter key"
+    for sel in selectors:
+        try:
+            b = page.locator(sel).first
+            if b.is_visible(timeout=1500) and b.is_enabled():
+                b.click(timeout=5000); how = f"clicked {sel}"; break
+        except Exception:
+            continue
+    else:
+        page.keyboard.press("Enter")
+    for _ in range(20):
+        page.wait_for_timeout(500)
+        try:
+            if sent_check(page):
+                _note(ctx, f"prompt sent ({how})")
+                return
+        except Exception:
+            pass
+    _gen_fail(ctx, site, evidence, f"prompt typed but not sent ({how})")
 
 
 def _first_image_bytes(page, url_hint=""):
@@ -370,14 +427,14 @@ def _first_image_bytes(page, url_hint=""):
             if url_hint and url_hint not in src:
                 continue
             data = requests.get(src, timeout=30).content
-            if len(data) > 20000:
+            if len(data) > 20000 and _is_image(data):
                 return data
         except Exception:
             continue
     return None
 
 
-def _poll_generation(page, ctx, rid, site, evidence, selectors, out_name, deadline_s=480, every=15, min_bytes=20000):
+def _poll_generation(page, ctx, rid, site, evidence, selectors, out_name, deadline_s=480, every=15, min_bytes=20000, baseline=None):
     """SPEC-Z008 §A/§B2: poll up to `deadline_s` for a generated image, ~every `every` s.
     Each poll logs (elapsed, img count) into the card note. Downloads via requests first;
     if that returns nothing usable, fetches the bytes inside the browser context, and as a
@@ -393,6 +450,8 @@ def _poll_generation(page, ctx, rid, site, evidence, selectors, out_name, deadli
         for i in range(min(n, 30)):
             try:
                 s = imgs.nth(i).get_attribute("src") or ""
+                if baseline and s in baseline:
+                    continue           # was on the page before the prompt: not a result
                 if s.startswith("http") and ("blob" in s or "oaiusercontent" in s or "scontent" in s or "th.bing" in s or "bing.net" in s or "rid=" in s or "id=" in s):
                     srcs.append(s)
             except Exception:
@@ -400,7 +459,7 @@ def _poll_generation(page, ctx, rid, site, evidence, selectors, out_name, deadli
         for s in srcs:
             try:
                 d = requests.get(s, timeout=30).content
-                if len(d) >= min_bytes:
+                if len(d) >= min_bytes and _is_image(d):
                     data = d
                     break
             except Exception:
@@ -423,7 +482,7 @@ def _poll_generation(page, ctx, rid, site, evidence, selectors, out_name, deadli
                     }
                     return null;
                 }""", srcs[:10])
-                if d_b64:
+                if d_b64 and _is_image(base64.b64decode(d_b64)):
                     data = base64.b64decode(d_b64)
             except Exception:
                 pass
@@ -468,15 +527,20 @@ def r4_chatgpt_image(desc, aspect, image_path, ctx):
             _not_signed_in("chatgpt")
         if state == "unknown":
             _blocker_unknown("chatgpt", page, ctx, "r4", state, evidence)
-        box = _pick(page, ["[placeholder*='Ask ChatGPT']", "#prompt-textarea", "textarea[data-id='root']", "div[contenteditable='true']"])
+        box = _pick(page, ["#prompt-textarea", "[placeholder*='Ask ChatGPT']", "textarea[data-id='root']", "div[contenteditable='true']"])
+        before = _img_srcs(page)
         try:
-            _type_like_human(page, box, desc + " photorealistic, no text")
+            _type_like_human(page, box, "Create an image: " + _prompt(desc, "photorealistic, no text"), submit=False)
         except Exception:
             _gen_fail(ctx, "chatgpt", evidence, "prompt box not usable")
+        page.wait_for_timeout(800)
+        _submit(page, ["button[data-testid='send-button']", "#composer-submit-button", "button[aria-label*='Send']"],
+                ctx, evidence, "chatgpt",
+                lambda p: p.locator("[data-message-author-role='user']").count() > 0)
         # SPEC-Z008 §A: generation may simply take longer than one fixed wait — poll 480s
         return _poll_generation(page, ctx, "r4", "chatgpt", evidence,
                                 ["img[src*='oaiusercontent']", "img[alt*='Generated']", "img[src*='blob']"],
-                                "r4_chatgpt_image.jpg", deadline_s=480)
+                                "r4_chatgpt_image.jpg", deadline_s=480, baseline=before)
     finally:
         cctx.close()
         pw.stop()
@@ -497,6 +561,7 @@ def r5_bing_image(desc, aspect, image_path, ctx):
             _blocker_unknown("bing", page, ctx, "r5", state, evidence)
         # the redesigned create page: type into the composer, click Generate
         box = _pick(page, ["input[placeholder*='Describe the image']", "textarea[placeholder*='Describe']", "#sb_form_i"])
+        before = _img_srcs(page)
         try:
             _type_like_human(page, box, desc[:900])
         except Exception:
@@ -508,7 +573,7 @@ def r5_bing_image(desc, aspect, image_path, ctx):
         # SPEC-Z008 §B2: poll up to 480s for the results grid / generated images
         return _poll_generation(page, ctx, "r5", "bing", evidence,
                                 ["li img", "img[class*='mimg']", "div.gimg img", "img[src*='th.bing.com']"],
-                                "r5_bing_image.jpg", deadline_s=480)
+                                "r5_bing_image.jpg", deadline_s=480, baseline=before)
     finally:
         cctx.close()
         pw.stop()
@@ -529,7 +594,7 @@ def r6_meta_image(desc, aspect, image_path, ctx):
             _blocker_unknown("meta", page, ctx, "r6", state, evidence)
         box = _pick(page, ["textarea[placeholder*='Ask Meta']", "textarea[placeholder*='meta.ai']", "div[contenteditable='true']"])
         try:
-            _type_like_human(page, box, desc + " photorealistic, no text")
+            _type_like_human(page, box, _prompt(desc, "photorealistic, no text"))
         except Exception:
             _gen_fail(ctx, "meta", evidence, "prompt box not usable")
         try:
