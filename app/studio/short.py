@@ -495,6 +495,13 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
             _safe(log, f"{s['id']} stock", lambda: stock_beat(s))
             return
         snap = None
+        if v2 and cfg.get("storyboard_rung", False) and n >= 2 and not items and not pick.get(s["id"]):
+            # rung 3 in storyboard mode (owner, 2026-11-07; default OFF): a beat with no stock and no source clip that needs 2+
+            # pictures gets a style-locked storyboard (one picture every ~4 s, one look for the whole video)
+            from . import storyboard
+            story = " ".join(x.get("vo", "") for x in plan["sections"] if not x.get("cta"))
+            for it in _safe(log, f"{s['id']} storyboard", lambda: storyboard.beat(cfg, sd, s, story, log, aspect="9:16", max_shots=n), []) or []:
+                items.append({k: v for k, v in it.items() if k not in ("text", "motion", "piece")})
         if v2 and len(items) < n and cfg.get("meta_chain_on", True):   # rung 3a: snapshot -> Copilot describes -> Meta image -> Meta animates it
             from . import mediaroutes
             snap = _safe(log, f"{s['id']} source screenshot", lambda: source_visuals.snapshot(cfg, job, sd, s, log, source_item=raw_source))

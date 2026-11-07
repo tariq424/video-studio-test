@@ -26,6 +26,46 @@ APP = Path(__file__).resolve().parent.parent
 WORKER = APP / "kokoro_worker.py"
 DEFAULT_VOICE = "am_michael"
 
+# Owner, 2026-11-07: until the owner's own voice is wired in (OpenVoice tone-colour conversion over Kokoro), each job gets a
+# Kokoro voice that suits its subject. All American English. pace = words per minute relative to am_michael, measured on one
+# 82-word paragraph at speed 1.0 (michael 179.9, fenrir 240.0, puck 248.5, heart 193.1, bella 192.8, sarah 197.0), so a
+# Short's length budget (kokoro_wpm x pace) stays right whichever voice reads it.
+VOICE_MENU = {
+    "am_michael": {"sound": "steady, authoritative male", "for": "politics, world news, diplomacy, current affairs", "pace": 1.00},
+    "am_fenrir": {"sound": "deep, grave male", "for": "war, conflict, disasters, crime, investigations", "pace": 1.334},
+    "am_puck": {"sound": "lively, playful male", "for": "comedy, satire, pop culture, sports, entertainment", "pace": 1.381},
+    "af_heart": {"sound": "warm, clear female", "for": "science, health, human interest, education, nature", "pace": 1.073},
+    "af_bella": {"sound": "bright, energetic female", "for": "technology, AI, startups, business, the future", "pace": 1.072},
+    "af_sarah": {"sound": "calm, measured female", "for": "finance, economy, history, explainers", "pace": 1.095},
+}
+PICK = """Pick the narrator voice that best suits this video's subject and tone. Voices:
+{menu}
+Video title: "{title}"
+Opening of the source: "{text}"
+Reply with JSON only: {{"voice": "<one id from the list>", "why": "a few words"}}"""
+
+
+def pick_voice(cfg, title, text, log=print):
+    """-> a VOICE_MENU id for this job's subject (voice_by_subject, default on), or the configured kokoro_voice. Never raises."""
+    base = cfg.get("kokoro_voice") or DEFAULT_VOICE
+    if not cfg.get("voice_by_subject", True) or engine(cfg) != "kokoro": return base
+    allowed = [v for v in (cfg.get("voice_menu") or list(VOICE_MENU)) if v in VOICE_MENU]
+    if not allowed: return base
+    menu = "\n".join(f'- {v}: {VOICE_MENU[v]["sound"]}; suits {VOICE_MENU[v]["for"]}' for v in allowed)
+    try:
+        from .llm import LLM
+        with LLM(cfg, log, lambda: False) as llm:
+            j = llm.chat_json("You are a careful video producer. Reply with JSON only.",
+                              PICK.format(menu=menu, title=str(title or "")[:200].replace('"', "'"), text=str(text or "")[:1500].replace('"', "'")),
+                              max_tokens=80)
+        v = str(j.get("voice") or "").strip()
+        if v in allowed:
+            log(f"Narrator voice: {v} ({VOICE_MENU[v]['sound']}; {str(j.get('why') or '')[:80]})"); return v
+        log(f"Narrator voice: the script AI answered {v[:30]!r}; keeping {base}")
+    except Exception as e:
+        log(f"Narrator voice: pick failed ({str(e)[:100]}); keeping {base}")
+    return base
+
 
 def engine(cfg):
     return "kokoro" if str(cfg.get("tts_engine", "kokoro")).strip().lower() == "kokoro" else "wanGP"
@@ -44,7 +84,9 @@ def try_kokoro(cfg, items, log, tag, stop):
 
 def wpm(cfg):
     """Speaking pace used to size a Short's script: the cloned narrator's measured voice_wpm, or kokoro_wpm for Kokoro."""
-    return float(cfg.get("kokoro_wpm", 140) if engine(cfg) == "kokoro" else cfg.get("voice_wpm", 155))
+    if engine(cfg) != "kokoro": return float(cfg.get("voice_wpm", 155))
+    pace = VOICE_MENU.get(cfg.get("kokoro_voice") or DEFAULT_VOICE, {}).get("pace", 1.0)   # a faster voice fits more words
+    return float(cfg.get("kokoro_wpm", 140)) * pace
 
 
 def kokoro_python(cfg):

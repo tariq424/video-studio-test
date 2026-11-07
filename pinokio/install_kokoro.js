@@ -6,7 +6,7 @@ module.exports = {
       "python -m pip install --upgrade pip",
       "pip install torch --index-url https://download.pytorch.org/whl/cu128",
       "pip install \"kokoro>=0.9.2\" soundfile",
-      "python -c \"from kokoro import KPipeline; p=KPipeline(lang_code='a'); [None for _ in p('Kokoro is ready.', voice='am_michael')]; print('kokoro ok')\""
+      "python -c \"from kokoro import KPipeline; p=KPipeline(lang_code='a'); [None for v in ['am_michael','am_fenrir','am_puck','af_heart','af_bella','af_sarah'] for _ in p('Kokoro is ready.', voice=v)]; print('kokoro ok')\""
     ] } },
     { method: "fs.write", params: { path: "kokoro.flag", text: "ok" } }
   ]

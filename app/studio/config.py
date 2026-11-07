@@ -143,6 +143,9 @@ DEFAULTS = {
     # v2 order: 1 stock -> 2 real photos -> 3 cloud still -> 4 WanGP still (atmospheric only) -> 5 Remotion graphics (GRAPHICS)
     # -> 6 physics module (SIMULATION) -> 7 CapCut (CAPCUT) -> 8 parallax -> 9 illustration / silhouette -> 10 headline card.
     # The 3D reconstruction rung (incl. the generic "object" spinning top) is not part of v2.
+    "storyboard_rung": False,         # Shorts rung 3 in storyboard mode (storyboard.py): beats with no stock / source clip that need 2+ pictures
+    "storyboard_max_shots": 6,        # pictures per storyboarded beat (one per ~4 s of narration)
+    "voice_by_subject": True,         # Kokoro narrator picked per job to suit the subject (tts.VOICE_MENU)
     "ladder_v2": False,               # master switch for the v2 order (Shorts: short.do_fallback; explainers: render.do_stills / do_motion)
     "graphics_secs": 8,               # length of a rendered GRAPHICS clip (6-10 s)
     "graphics_claude": True,          # v2: when no template fits, Claude writes a Remotion composition for the beat

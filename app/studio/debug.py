@@ -187,6 +187,8 @@ The editor says: "{text}"
 Actions:
 - "refine": make a new AI still (and stock searches) with a change; "instruction" = the change in plain words (e.g. "plane diving nose-down").
 - "more_stock": search more stock footage; "queries" = 1-3 searches of 3-5 words; "count" = how many clips (1-4).
+- "storyboard": a storyboard for this beat: a new AI picture every ~4 s of its narration, all in the video's own locked visual
+  style ("storyboard this beat", "more pictures, same look", "one picture per sentence").
 - "use": use option(s) in this beat; "options" = list of option numbers in play order.
 - "thumbnails": generate the thumbnails.
 - "skip": use the headline card for this beat.
@@ -274,7 +276,7 @@ def chat(studio, jid, bid, text, cfg, edit=False):
             'Rewriting the NARRATION itself is not possible here (it changes the timing of everything after it; that needs a new render): say so and offer a card instead.' if _v2() else ''))
         prompt = prompt.replace('vertical news Short.', 'finished video (a vertical news Short or a 16:9 explainer).')
     def chk(x):
-        if x.get("action") not in ("refine", "more_stock", "use", "thumbnails", "skip", "continue", "simulate", "apply", "none") + (("supply", "card") if edit and _v2() else ()): raise ValueError("unknown action")
+        if x.get("action") not in ("refine", "more_stock", "storyboard", "use", "thumbnails", "skip", "continue", "simulate", "apply", "none") + (("supply", "card") if edit and _v2() else ()): raise ValueError("unknown action")
     backend = "none"
     try:
         with LLM(c, j.log, lambda: False) as llm:
@@ -298,6 +300,8 @@ def chat(studio, jid, bid, text, cfg, edit=False):
             err = review.start(studio, jid, bid, "refine", {"text": x.get("instruction") or text}, ws=ws)
         elif act == "more_stock":
             err = review.start(studio, jid, bid, "more_stock", {"queries": x.get("queries") or [], "count": x.get("count") or 2}, ws=ws)
+        elif act == "storyboard":
+            err = review.start(studio, jid, bid, "storyboard", {}, ws=ws)
         elif act == "use":
             cids = [ids[int(k) - 1] for k in (x.get("options") or []) if str(k).isdigit() and 0 < int(k) <= len(ids)]
             if not cids: err = "no matching option number"

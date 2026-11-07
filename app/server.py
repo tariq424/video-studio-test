@@ -181,8 +181,9 @@ def review_beat(jid, bid):
             from studio import interview_edit; interview_edit.supply(j.dir, bid, b.get("src", "")); j.log(f"Edit {bid}: your file added")
         elif a == "supply": review.supply(ws, bid, b.get("src", ""), b.get("tag", ""), cfg, j.log); j.log(f"Visual review {bid}: your file added")
         elif _interview(jid): return jsonify(error="For an interview piece: pick a picture, supply a file, or ask in the chat."), 400
-        elif a in ("expand", "refine", "animate"):
-            err = review.start(studio, jid, bid, a, {"text": b.get("text", ""), "tag": b.get("tag", "")}, ws=ws)
+        elif a in ("expand", "refine", "animate", "storyboard", "more_stock"):
+            err = review.start(studio, jid, bid, a, {"text": b.get("text", ""), "tag": b.get("tag", ""), "check": bool(b.get("check")),
+                                                     "go": bool(b.get("go"))}, ws=ws)
             if err: return jsonify(error=err), 409
         else: return jsonify(error="unknown action"), 400
     except Exception as e: return jsonify(error=str(e)[:300]), 400

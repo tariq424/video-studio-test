@@ -483,14 +483,16 @@ def start(studio, jid, bid, kind, payload=None, ws=None):
     # finish its current GPU stage if it holds it. Stock and the image services need no lock.
     if not _gpu.acquire(blocking=False): return "Already working on a beat; wait for it to finish."
     job = ws or studio.job(jid).dir
-    _busy(job, bid, {"expand": "Generating options...", "animate": "Animating (several minutes)...", "more_stock": "Searching more stock footage..."}.get(kind, "Working on your instruction..."))
+    _busy(job, bid, {"expand": "Generating options...", "animate": "Animating (several minutes)...", "more_stock": "Searching more stock footage...",
+                     "storyboard": "Storyboarding this beat..."}.get(kind, "Working on your instruction..."))
     def run():
         log = studio.job(jid).log
         try:
             from . import config
             from .wangp import WanGP
             cfg = config.load(); wg = WanGP(cfg)
-            {"expand": expand, "refine": refine, "animate": add_animation, "more_stock": more_stock}[kind](job, bid, cfg, wg, log, payload or {})
+            {"expand": expand, "refine": refine, "animate": add_animation, "more_stock": more_stock,
+             "storyboard": storyboard_beat}[kind](job, bid, cfg, wg, log, payload or {})
         except Exception as e:
             log(f"  {bid}: {kind} failed: {str(e)[:300]}")
             with _lock(job):
@@ -587,6 +589,41 @@ def more_stock(job, bid, cfg, wg, log, payload):
     with _lock(job):
         rv = load(job); new = _stock_cands(rv, sec, picked, rejected, _story_subjects(job))
         rv["beats"][bid]["msg"] = f"{len(picked)} more stock clip(s) found" + (f", {len(rejected)} rejected" if rejected else "") + "."
+        save(job, rv)
+    thumbs(job, cfg, log)
+
+def storyboard_beat(job, bid, cfg, wg, log, payload):
+    """Panel chat: a style-locked storyboard for this beat (storyboard.py): one picture per ~4 s of narration, all in the video's
+    locked style, from the image services. No GPU, no WanGP. Each picture becomes an option; pick them in play order."""
+    from . import storyboard
+    sd, rd = _p(job); sp, sec = _section(job, bid)
+    story = " ".join(x.get("vo", "") for x in sp["sections"] if not x.get("cta"))
+    if payload.get("check") and not payload.get("go"):   # editor option "check prompts first": plan only, nothing generated
+        _busy(job, bid, "Storyboard: locking the style and writing the prompts...")
+        try: p = storyboard.plan(cfg, sd, sec, story, log)
+        except Exception as e:
+            if str(e) == "cancelled": raise
+            p = None; log(f"  {bid}: storyboard plan failed ({str(e)[:120]})")
+        with _lock(job):
+            rv = load(job)
+            rv["beats"][bid]["storyboard"] = ({"status": "planned", "style": {k: v for k, v in p["style"].items() if not k.startswith("_")},
+                                               "shots": [{"text": s["text"], "prompt": s["prompt"]} for s in p["shots"]]} if p else None)
+            rv["beats"][bid]["msg"] = (f"Storyboard planned: {len(p['shots'])} picture(s). Check the prompts, then press Generate." if p
+                                       else "Storyboard plan failed (see the log).")
+            save(job, rv)
+        return
+    _busy(job, bid, "Storyboarding this beat (style lock, prompts, pictures)...")
+    items = storyboard.beat(cfg, sd, sec, story, log, aspect="9:16" if _sp(sd)["orient"] == "portrait" else "16:9",
+                            use_saved=bool(payload.get("go")))
+    with _lock(job):
+        rv = load(job); rv["beats"][bid]["storyboard"] = None; save(job, rv)
+    with _lock(job):
+        rv = load(job)
+        for it in items:
+            _add(rv, bid, {k: v for k, v in it.items() if k not in ("text", "motion", "piece", "rung", "site")}, "storyboard", True,
+                 f"storyboard {it['piece']}: \"{it['text'][:60]}\"")
+        rv["beats"][bid]["msg"] = (f"Storyboard: {len(items)} picture(s) in the video's locked style; tick them in play order." if items
+                                   else "Storyboard made no pictures (see the log).")
         save(job, rv)
     thumbs(job, cfg, log)
 

@@ -415,6 +415,7 @@ class Studio:
     def _run(self, jid):
         j = self.job(jid); s = j.state; cfg = config.load()
         if s.get("tts_engine") in ("kokoro", "wanGP"): cfg["tts_engine"] = s["tts_engine"]   # the job's own narration choice
+        if s.get("kokoro_voice"): cfg["kokoro_voice"] = s["kokoro_voice"]   # picked by subject once (tts.pick_voice), kept on resume
         if s.get("audience") in writer.AUDIENCE: cfg["audience"] = s["audience"]; cfg["_audience_from"] = "job"   # the job's own audience (script prompts)
         if s.get("cancelled") and s.get("status") == "stopped": return   # cancelled while it waited in the queue
         self.current = jid
@@ -500,12 +501,14 @@ class Studio:
                 if prov in ("zai", "deepseek") and not cfg.get(prov + "_api_key"): raise RuntimeError(f"Add your {prov} API key in Settings (or pick another Script AI).")
                 meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
                 text = (j.dir / "src" / "transcript.txt").read_text(encoding="utf-8")
+                _pick_voice(j, cfg, meta, text, log)
                 plan = writer.write_plan(cfg, meta, text, s["minutes"], log, stop, j.dir / "src")
                 plan = short.verify_quotes(plan, text, log); j.save_plan(plan)
             elif st == "short_script":
                 if s.get("provider"): cfg["script_provider"] = s["provider"]
                 meta = json.loads((j.dir / "src" / "meta.json").read_text(encoding="utf-8"))
                 text = (j.dir / "src" / "transcript.txt").read_text(encoding="utf-8")
+                _pick_voice(j, cfg, meta, text, log)   # before the script: its length budget uses the voice's pace
                 lp = j.plan()
                 sp = short.write_short(cfg, meta, text, s.get("short_secs", 165), mode, lp["title"] if lp else "", log, stop, j.dir / "src",
                                        smoke=bool(s.get("smoke")))
@@ -685,6 +688,14 @@ def _need_tts(wg, cfg):
         if not cfg.get("tts_fallback", True): raise RuntimeError(f"Narration engine is Kokoro but {why}. Install it, or set tts_engine back to wanGP.")
         cfg["tts_engine"] = "wanGP"   # fallback: this job narrates with WanGP
     _need_wangp(wg)
+
+def _pick_voice(j, cfg, meta, text, log):
+    """Once per job (owner, 2026-11-07): a Kokoro narrator that suits the subject, saved on the job so every stage and a
+    resume use the same voice. A job that already has one keeps it."""
+    if j.state.get("kokoro_voice"): cfg["kokoro_voice"] = j.state["kokoro_voice"]; return
+    from . import tts
+    v = tts.pick_voice(cfg, meta.get("title", ""), text, log)
+    cfg["kokoro_voice"] = v; j.save(kokoro_voice=v)
 
 def _want_wangp(wg, cfg, log):
     """Long-video motion / stills: with ladder v2 a missing WanGP is not fatal - each visual drops down its ladder
