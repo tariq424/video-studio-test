@@ -689,7 +689,7 @@ def _session_cloudflare(cfg, sec, aspect, out, timeout, log, evidence, extras=()
 def _session_meta(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
     """meta.ai image (route r6 in studio/routelib, on the signed-in Meta profile in the media_routes data folder)."""
     from . import mediaroutes
-    if not mediaroutes.available(cfg, "r6"): raise Skip("no signed-in Meta profile (media_routes data folder; scripts\media-login.ps1 meta)")
+    if not mediaroutes.available(cfg, "r6"): raise Skip("no signed-in Meta profile (media_routes data folder; scripts/media-login.ps1 meta)")
     prompt = _text_prompt(cfg, sec, log)
     _pause(cfg, log, "this beat's image", "meta")
     log(f"  meta: prompt ({len(prompt.split())} words): \"{prompt[:140]}...\"")

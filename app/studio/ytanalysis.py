@@ -58,7 +58,8 @@ def analyze(cfg, url, srcdir, log, stop=lambda: False):
         why = getattr(e, "why", None) or str(e).splitlines()[0][:200]
         log(f"  YouTube analysis by Gemini skipped ({why}); the script uses the transcript only"); return None
     summary, comments, commentary = (answers + ["", "", ""])[:3]
-    if len(summary.split()) < 30:
+    if len(summary.split()) < 30 or re.search(r"can(no|')t (directly )?(access|stream|watch|view)|unable to (access|watch|view)|"
+                                               r"paste a transcript|encountered an error", summary, re.I):   # Gemini declined to watch it
         log("  YouTube analysis by Gemini: no usable summary; not used"); return None
     saw = bool(comments.strip()) and not NO_COMMENTS.search(comments)
     parts = [
