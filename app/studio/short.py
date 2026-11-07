@@ -21,9 +21,10 @@ People in the source (use these full names and spellings; captions often mishear
 NOTES ON THE SOURCE (use only these facts):
 {notes}
 
-Write {nb} beats that tell one story. Each beat is 30-48 words (about 11-17 seconds spoken). Aim for about {words} words in total.
-That is a target, not a cap: going over is fine when the audience needs a term explained - never cut an explanation to hit it.
-Hard limit: {wmax} words (YouTube Shorts are cut off at 3 minutes). If the notes run out sooner, stop sooner; never pad.
+Write {nb} beats that tell one story. Each beat is 30-40 words (about 11-15 seconds spoken). About {words} words in total.
+That is the length budget for the requested {secs} seconds: a joke is added to every beat afterwards and the music pauses
+between beats, so that time is already taken. Explain terms briefly rather than dropping them; cut the weakest point instead.
+Hard limit: {wmax} words. If the notes run out sooner, stop sooner; never pad.
 - Beat 1 is the hook: one short line framing what this is (who is talking, about what), then the most surprising claim or number,
   in plain words (no jargon in the first sentence). No greetings, no "in this video".
 - Tell events in the order they happened. Once the story has moved on (e.g. the plane has landed), don't go back to an earlier
@@ -183,13 +184,48 @@ def protected_of(section):
     return protected(section)
 
 
+JOKE_WORDS = 14   # the punch-up joke appended to every content beat (4-22 words; ~14 on average)
+
+
+def breather(cfg, i, nb, secs=None):
+    """Seconds of musical pause after content beat i of nb (0 = none). All pauses together take at most 15% of the requested
+    length, so a 60 s Short isn't a third music (the build and the script budget use this same number)."""
+    if not (cfg.get("music_on", True) and cfg.get("breathers", True)): return 0.0
+    every = int(cfg.get("breather_every", 2) or 0)
+    def raw(k): return float(cfg.get("breather_hook_secs", 2.0)) if k == 0 else (float(cfg.get("breather_secs", 1.5)) if every and k % every == 0 else 0.0)
+    full = sum(raw(k) for k in range(nb))
+    scale = min(1.0, 0.15 * secs / full) if secs and full else 1.0
+    return round(raw(i) * scale, 2)
+
+
+def _pauses(cfg, nb, secs=None):
+    return sum(breather(cfg, i, nb, secs) for i in range(nb))
+
+
+def budget(cfg, secs, nb, wpm=None):
+    """Word budget of a Short of `secs` seconds with `nb` content beats -> (total, script):
+    total = all narration words of the content beats (jokes included; the closing line, gaps, tail and musical pauses excluded),
+    script = what the script writer gets once the punch-up joke of each beat is set aside (Nov 7: a 120 s Short came out at 224 s
+    because the jokes and 21 s of pauses were never in the budget)."""
+    wpm = wpm or tts.wpm(cfg)
+    total = int((secs - TAIL - GAP * (nb + 1) - _pauses(cfg, nb, secs) - 16 / wpm * 60) * wpm / 60)
+    jokes = JOKE_WORDS * nb if cfg.get("punch_up", True) else 0
+    return max(0, total), max(0, total - jokes)
+
+
+def plan_length(cfg, secs, wpm=None):
+    """-> (beats, total words, script words, script hard limit): as many beats as keep each at 30+ words of story (3 to 12)."""
+    nb = 12
+    while nb > 3 and budget(cfg, secs, nb, wpm)[1] / nb < 30: nb -= 1
+    total, words = budget(cfg, secs, nb, wpm)
+    return nb, total, words, int(words * 1.15)
+
+
 def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir, smoke=False):
     wpm = tts.wpm(cfg)
-    # target = narration + a pause after each beat + the end tail + the closing line (~16 words); size the story to fill the rest
-    words = int((secs - TAIL - GAP * 9 - 16 / wpm * 60) * wpm / 60)
-    wmax = int((SHORT_MAX - TAIL - GAP * 9 - 16 / wpm * 60) * wpm / 60)   # what still fits in 3:00
-    nb = max(7, min(12, round(words / 38)))
-    minb, lo, hi = 6, 0.95, 1.05
+    # the requested length is the budget: narration + the punch-up jokes + a gap and a musical pause per beat + the closing line + tail
+    nb, total, words, wmax = plan_length(cfg, secs, wpm)
+    minb, lo, hi = min(5, nb), 0.95, 1.05   # (smoke tests set their own below)
     if smoke: words, nb, minb, lo, hi = SMOKE_WORDS, 2, 2, 0.8, 1.1   # smoke test: ~48 words in all with the closing line (~30 s spoken)
     title, channel = meta.get("title") or "the source", meta.get("channel") or meta.get("uploader") or "the creator"
     with LLM(cfg, log, stop) as llm:
@@ -207,8 +243,8 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             tries.append((abs(n - words), j))
             if smoke:   # the 30-second test is trimmed in code afterwards (trim_smoke); only a runaway length is re-asked
                 if n > words * 3: raise ValueError(f"narration is {n} words in total; keep it near {words}")
-            elif n > wmax: raise ValueError(f"narration is {n} words in total; the hard limit is {wmax} (YouTube's 3:00): cut the weakest point, keep the explanations of terms")
-            # shorter than the target, or longer but within 3:00: accepted as written (no padding, no trimming)
+            elif n > wmax: raise ValueError(f"narration is {n} words in total; the limit is {wmax} for a {int(secs)}-second Short (jokes are added later): cut the weakest point, keep the explanations of terms")
+            # shorter than the target, or a little over it: accepted as written (no padding, no trimming)
         prompt = SHORT.format(secs=int(secs), words=words, wmax=wmax if not smoke else int(words * hi), title=title, channel=channel, notes=notes[:24000], nb=nb, audience=audience_line(cfg),
                               people=(meta.get("description") or "")[:1200] or "(see notes)",
                               cta_rule=("\nThis Short has NO longer companion video: never mention, promise or point to a longer / full video, "
@@ -231,7 +267,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                 j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=lambda x: None if x.get("beats") else (_ for _ in ()).throw(ValueError("no beats")))
         nw0 = sum(len(x["vo"].split()) for x in j["beats"])
         if j.get("covered") is True and nw0 < words * lo: log(f"  the AI says the source is fully covered at {nw0} of {words} words; kept short (no padding)")
-        if not smoke: log(f"  script: {nw0} words (target {words}; 3:00 = {wmax} words){'; over the target, accepted' if nw0 > words * 1.05 else ''}")
+        if not smoke: log(f"  script: {nw0} words (target {words}, limit {wmax}; {total} with the jokes){'; over the target, accepted' if nw0 > words * 1.05 else ''}")
         if smoke: j["beats"] = j["beats"][:2]   # a smoke test stays ~30 s even if the length check gave up
         elif cfg.get("short_fit_3min", False):   # off by default (owner 2026-10-23): a long Short just isn't classed as a Short
             while len(j["beats"]) > minb and sum(len(x["vo"].split()) for x in j["beats"]) > wmax:
@@ -267,7 +303,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             editorial_review(llm, plan, meta, transcript, cfg, log, stop)
             if plan.get("editorial_warnings"):
                 jargon_check(llm, plan, cfg, log, source_notes=notes)   # the review gave up: explanations still go in (protected)
-        punch_up(cfg, plan, log, force=smoke, budget=wmax if (not smoke and cfg.get("short_fit_3min", False)) else None)   # smoke: every beat gets its joke here; otherwise only beats still without one
+        punch_up(cfg, plan, log, force=smoke, budget=None if smoke else int(total * 1.05))   # smoke: every beat gets its joke here; otherwise only beats still without one; extra asides only while the budget allows
         from . import coherence
         ents = coherence.entities(cfg, Path(srcdir).parent, title, notes, log, stop, llm=llm)
         nl = 0
@@ -278,12 +314,14 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             nl += bool(s.get("subject"))
         if nl: log(f"  {nl} beat(s) locked to a story subject")
     plan = verify_quotes(plan, transcript, log)
+    w3 = budget(cfg, SHORT_MAX, len(plan["sections"]), wpm)[0]   # every narration word that still fits in 3:00, jokes included
     if not smoke and cfg.get("short_fit_3min", False):   # the fact-check can lengthen the script: cut again (only when fitting 3:00 is on)
-        while len(plan["sections"]) > minb and sum(len(x["vo"].split()) for x in plan["sections"]) > wmax:   # only past 3:00
+        while len(plan["sections"]) > minb and sum(len(x["vo"].split()) for x in plan["sections"]) > w3:   # only past 3:00
             cut = plan["sections"].pop(-2); log(f"  script grew past the 3:00 limit in the fact-check; dropped a middle beat ({len(cut['vo'].split())} words)")
         for i, x in enumerate(plan["sections"]): x["id"], x["title"] = f"b{i}", f"Beat {i + 1}"
     n = sum(len(x["vo"].split()) for x in plan["sections"])
-    if not smoke and n > wmax: log(f"  NOTE: script is {n} words (target {words}); past 3:00" + ("; it will be sped up to fit" if cfg.get("short_fit_3min", False) else "; kept as is (YouTube will treat it as a regular video, not a Short)"))
+    if not smoke and n > total * 1.15: log(f"  NOTE: script is {n} words with the jokes, over the {total}-word budget for {int(secs)}s")
+    if not smoke and n > w3: log(f"  NOTE: script is {n} words (budget {total}); past 3:00" + ("; it will be sped up to fit" if cfg.get("short_fit_3min", False) else "; kept as is (YouTube will treat it as a regular video, not a Short)"))
     if mode != "both":   # no companion explainer: a promise of one must not survive (the model sometimes adds it anyway)
         promise = re.compile(r"[^.!?]*\b(full (breakdown|video|episode|explainer)|longer video|link(ed)? below|part two|watch the full)\b[^.!?]*[.!?]?\s*", re.I)
         for x in plan["sections"]:
@@ -945,8 +983,7 @@ def build(job, plan, cfg, log):
         d = (tm[s["id"]]["dur"] + (TAIL if last else GAP)) / speed
         if music and not last and cfg.get("breathers", True) and not s.get("cta"):
             # a breather: the narrator pauses and the music comes up (after the hook, then after every Nth beat)
-            every = int(cfg.get("breather_every", 2) or 0)
-            b = float(cfg.get("breather_hook_secs", 2.0)) if i == 0 else (float(cfg.get("breather_secs", 1.5)) if every and i % every == 0 else 0.0)
+            b = breather(cfg, i, sum(1 for x in secs if not x.get("cta")), tgt)
             if b: d += b; log(f"  {s['id']}: {b:.1f}s musical pause after this beat")
         words = [[w, round(a / speed, 3), round(b / speed, 3)] for w, a, b in tm[s["id"]]["words"]]
         clips = list(pick.get(s["id"]) or [])
