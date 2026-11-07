@@ -126,6 +126,46 @@ class Ladder(unittest.TestCase):
             self.assertEqual(v["g"]["kind"], "headline")
             self.assertTrue(any("ladder failed" in l for l in logs))
 
+    def test_chain_cap_per_video(self):
+        with tempfile.TemporaryDirectory() as sd:
+            snap = Path(sd) / "snap.jpg"; snap.write_bytes(b"x")
+            for k in range(3): _fake_clip(Path(sd) / "chain" / f"old{k}.mp4")
+            calls, logs = [], []
+            with patch.object(mediaroutes, "available", return_value=True), \
+                    patch.object(mediaroutes, "run", side_effect=lambda *a, **k: calls.append(a[1])), \
+                    patch("studio.media.ok", side_effect=lambda p: Path(p).exists()):
+                self.assertIsNone(mediaroutes.chain_rung({}, sd, {"id": "b9", "vo": "A trawler in a harbour."}, "new", logs.append, snap))
+            self.assertEqual(calls, [])
+            self.assertTrue(any("already made" in l for l in logs))
+
+    def test_meta_fallback_description_naming_a_person_is_dropped(self):
+        with tempfile.TemporaryDirectory() as sd, tempfile.TemporaryDirectory() as data:
+            snap = Path(sd) / "snap.jpg"; snap.write_bytes(b"x")
+            (Path(data) / "output").mkdir()
+            (Path(data) / "output" / "r13_meta_chain.prompt.txt").write_text("Donald Trump at a podium in a navy suit, low angle", encoding="utf-8")
+            def fake_run(cfg, route, desc, aspect, out, log, image=None, timeout=None):
+                if route == "r12": return None   # Copilot blocked
+                _fake_clip(out); return {"output": Path(out), "note": ""}
+            ents = [{"name": "Donald Trump", "kind": "person"}]
+            with patch.object(mediaroutes, "available", return_value=True), patch.object(mediaroutes, "run", side_effect=fake_run), \
+                    patch("studio.media.ok", side_effect=lambda p: Path(p).exists()):
+                r = mediaroutes.chain_rung({"media_routes_data": data}, sd, {"id": "b1", "vo": "A rally took place."}, "k",
+                                           lambda _: None, snap, ents=ents)
+            self.assertIsNone(r)
+            self.assertFalse((Path(sd) / "chain" / "k.mp4").exists())
+
+    def test_meta_video_cap_falls_to_flow(self):
+        with tempfile.TemporaryDirectory() as sd:
+            for k in range(3): _fake_clip(Path(sd) / "flow" / f"o{k}_meta.mp4")
+            calls = []
+            def fake_run(cfg, route, desc, aspect, out, log, image=None, timeout=None):
+                calls.append(route); _fake_clip(out); return {"output": Path(out), "note": ""}
+            with patch.object(mediaroutes, "available", return_value=True), patch.object(mediaroutes, "run", side_effect=fake_run), \
+                    patch("studio.flow.visual_prompt", return_value="x"), patch("studio.media.ok", side_effect=lambda p: Path(p).exists()):
+                clip, tag, rung = mediaroutes.video_rung({"flow_on": True, "flow_max_per_video": 1}, sd, {"id": "b"}, "new", lambda _: None)
+            self.assertEqual(calls, ["r8"])
+            self.assertEqual(rung, "flow")
+
     def test_flow_off_spends_nothing(self):
         with tempfile.TemporaryDirectory() as sd:
             calls = []

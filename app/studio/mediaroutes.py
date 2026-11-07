@@ -93,6 +93,9 @@ def chain_rung(cfg, sd, sec, key, log, snapshot, aspect="16:9", ents=()):
     d = Path(sd) / "chain"; d.mkdir(parents=True, exist_ok=True)
     vid, img, txt = d / f"{key}.mp4", d / f"{key}.jpg", d / f"{key}.prompt.txt"
     if media.ok(vid) and img.is_file(): return {"video": vid, "image": img, "prompt": txt.read_text(encoding="utf-8") if txt.is_file() else ""}
+    cap = int(cfg.get("meta_chain_max_per_video", 3))   # ~6 min each: a story with little public footage must not add an hour
+    if len([x for x in d.glob("*.mp4") if media.ok(x)]) >= cap:
+        log(f"  chain: {cap} snapshot clip(s) already made for this video; next rung"); return None
     if not txt.is_file():
         r = run(cfg, "r12", "describe", aspect, txt, log, image=snapshot, timeout=300)
         if not r:   # Copilot blocked (its human check) or failed: Meta describes the snapshot itself, in the chain's own chat
@@ -101,6 +104,8 @@ def chain_rung(cfg, sd, sec, key, log, snapshot, aspect="16:9", ents=()):
             if not r or not media.ok(vid): return None
             pf = routes_dir(cfg) / "output" / "r13_meta_chain.prompt.txt"
             prompt = pf.read_text(encoding="utf-8").strip() if pf.is_file() else ""
+            if known_person({"vo": prompt}, ents):   # Meta named someone despite the instruction: never this method for a person
+                log("  chain: Meta's description names a real person; clip not used"); vid.unlink(missing_ok=True); return None
             if prompt: txt.write_text(prompt, encoding="utf-8")
             src_img = routes_dir(cfg) / "output" / "r13_meta_chain.jpg"
             if src_img.is_file():
@@ -149,7 +154,9 @@ def video_rung(cfg, sd, sec, key, log, aspect="16:9"):
     from .flow import visual_prompt
     d = Path(sd) / "flow"; d.mkdir(parents=True, exist_ok=True)
     prompt = None
-    if cfg.get("meta_video_on", True) and available(cfg, "r7"):
+    meta_cap = int(cfg.get("meta_video_max_per_video", 3))
+    meta_made = len([x for x in d.glob("*_meta.mp4") if media.ok(x)])
+    if cfg.get("meta_video_on", True) and available(cfg, "r7") and (meta_made < meta_cap or media.ok(d / f"{key}_meta.mp4")):
         out = d / f"{key}_meta.mp4"
         if media.ok(out): return out, "GENERATED · META", "meta video"
         prompt = prompt or visual_prompt(cfg, sec, log)

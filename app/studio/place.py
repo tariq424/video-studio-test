@@ -141,9 +141,13 @@ def colour(cfg, video, work, log=print):
             if f and f not in notes: notes.append(f)
         for s in sights:
             if len(notes) >= int(cfg.get("place_max_notes", 6)): break
+            if re.match(r"(places of interest|list of|tourism in)", s["name"], re.I): continue
             f = wiki_fact(s["wikipedia"]) if s["wikipedia"] else None
+            if f and s.get("m") is None:   # found by name, not by map: its own summary must place it here
+                here = [x for x in (r["area"], r["name"]) if x]
+                if not any(h.lower() in f["fact"].lower() for h in here): f = None
             if f:
-                f["fact"] = (f"Nearby ({s['m']} m away): " if s.get("m") else f"Also at {r['area'] or r['name']}: ") + f["fact"]
+                f["fact"] = (f"Nearby ({s['m']} m away): " if s.get("m") else f"Connected to {r['area'] or r['name']}: ") + f["fact"]
                 if f not in notes: notes.append(f)
         if not notes:
             log(f"  place colour: {r['label']} found, but no checked facts about it; skipped"); return None

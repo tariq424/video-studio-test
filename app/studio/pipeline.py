@@ -478,6 +478,10 @@ class Studio:
                 if not s.get("url"):
                     up = j.dir / "src" / s["upload"] if s.get("upload") else None
                     meta, text = sources.load(j.dir / "src", up, s.get("src_title", ""), s.get("src_credit", ""), log)
+                    if up and up.suffix.lower() in (".mov", ".mp4", ".m4v", ".mkv"):   # your own footage: colour it with where it was filmed
+                        from . import place
+                        pc = place.colour(cfg, up, j.dir / "src", log)
+                        if pc: (j.dir / "src" / "place_colour.md").write_text(place.markdown(pc), encoding="utf-8")
                 else:
                     meta, text = self._youtube_transcript(j, s, log)
                     from . import ytanalysis   # Gemini watches the video: summary, comment verdict + top quotes, commentary

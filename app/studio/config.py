@@ -39,7 +39,10 @@ DEFAULTS = {
     "media_routes_timeout": 900,      # seconds per route call (Blender renders, Flow queues)
     "yt_gemini_on": True,             # YouTube jobs: Gemini watches the link -> summary, comment verdict + top quotes, commentary (ytanalysis.py)
     "yt_gemini_timeout": 300,         # seconds per Gemini answer
+    "yt_gemini_model": "Pro",         # Gemini model for watching the video (Flash-Lite declines YouTube links)
     "meta_chain_on": True,            # rung 3a: source snapshot -> Copilot describes -> Meta image -> Meta animates it (never a known person)
+    "meta_chain_max_per_video": 3,    # snapshot -> Meta clips per output (~6 min each)
+    "meta_video_max_per_video": 3,    # Meta video clips per output
     "meta_video_on": True,            # rung 5a: meta.ai video (free) for a beat nothing above filled, before Flow
     "flow_via_routes": True,          # rung 5b: Flow through the proven route (flow.google.com) instead of flow.py (old labs.google URL)
     "blender_on": True,               # rung 3b: Blender scene (MCP) for a subject-locked beat the image services missed; complete scenes only
