@@ -55,9 +55,10 @@ class Ladder(unittest.TestCase):
             with patch.object(mediaroutes, "available", return_value=True), \
                     patch.object(mediaroutes, "run", side_effect=lambda *a, **k: calls.append(a[1])):
                 ents = [{"name": "Donald Trump", "kind": "person"}]
-                self.assertIsNone(mediaroutes.chain_rung({}, sd, {"id": "b0", "vo": "Donald Trump spoke at the rally."}, "k",
+                off = {"meta_chain_named_people": False}   # the setting off: the old rule
+                self.assertIsNone(mediaroutes.chain_rung(off, sd, {"id": "b0", "vo": "Donald Trump spoke at the rally."}, "k",
                                                          lambda _: None, snap, ents=ents))
-                self.assertIsNone(mediaroutes.chain_rung({}, sd, {"id": "b0", "vo": "He spoke.", "subject": {"kind": "person"}}, "k",
+                self.assertIsNone(mediaroutes.chain_rung(off, sd, {"id": "b0", "vo": "He spoke.", "subject": {"kind": "person"}}, "k",
                                                          lambda _: None, snap))
                 self.assertEqual(calls, [])
 
@@ -126,6 +127,22 @@ class Ladder(unittest.TestCase):
             self.assertEqual(v["g"]["kind"], "headline")
             self.assertTrue(any("ladder failed" in l for l in logs))
 
+    def test_named_people_allowed_by_default(self):
+        with tempfile.TemporaryDirectory() as sd:
+            snap = Path(sd) / "snap.jpg"; snap.write_bytes(b"x")
+            calls = []
+            def fake_run(cfg, route, desc, aspect, out, log, image=None, timeout=None):
+                calls.append(route)
+                if route == "r12": Path(out).write_text("A man in a navy suit at a podium, flags behind, low angle, warm light", encoding="utf-8")
+                else: _fake_clip(out)
+                return {"output": Path(out), "note": ""}
+            with patch.object(mediaroutes, "available", return_value=True), patch.object(mediaroutes, "run", side_effect=fake_run), \
+                    patch("studio.media.ok", side_effect=lambda p: Path(p).exists()):
+                r = mediaroutes.chain_rung({}, sd, {"id": "b0", "vo": "Donald Trump spoke at the rally."}, "k", lambda _: None, snap,
+                                           ents=[{"name": "Donald Trump", "kind": "person"}])
+            self.assertEqual(calls, ["r12", "r13"])
+            self.assertTrue(r["video"].exists())
+
     def test_chain_cap_per_video(self):
         with tempfile.TemporaryDirectory() as sd:
             snap = Path(sd) / "snap.jpg"; snap.write_bytes(b"x")
@@ -149,7 +166,7 @@ class Ladder(unittest.TestCase):
             ents = [{"name": "Donald Trump", "kind": "person"}]
             with patch.object(mediaroutes, "available", return_value=True), patch.object(mediaroutes, "run", side_effect=fake_run), \
                     patch("studio.media.ok", side_effect=lambda p: Path(p).exists()):
-                r = mediaroutes.chain_rung({"media_routes_data": data}, sd, {"id": "b1", "vo": "A rally took place."}, "k",
+                r = mediaroutes.chain_rung({"media_routes_data": data, "meta_chain_named_people": False}, sd, {"id": "b1", "vo": "A rally took place."}, "k",
                                            lambda _: None, snap, ents=ents)
             self.assertIsNone(r)
             self.assertFalse((Path(sd) / "chain" / "k.mp4").exists())

@@ -86,7 +86,10 @@ def chain_rung(cfg, sd, sec, key, log, snapshot, aspect="16:9", ents=()):
     Never for a known person. -> {"video", "image", "prompt"} or None."""
     from . import media
     if not cfg.get("meta_chain_on", True) or not snapshot or not Path(snapshot).is_file(): return None
-    why = known_person(sec, ents)
+    # named people (owner, 2026-11-06): allowed by default - synthetic depictions of public figures are common on YouTube; the
+    # clip is tagged GENERATED (burned in) and the Publisher answers YouTube's "Altered content" question with Yes for it
+    named_ok = bool(cfg.get("meta_chain_named_people", True))
+    why = "" if named_ok else known_person(sec, ents)
     if why:
         log(f"  {sec.get('id', key)}: describe -> Meta chain skipped ({why})"); return None
     if not (available(cfg, "r12") and available(cfg, "r13")): return None
@@ -104,7 +107,7 @@ def chain_rung(cfg, sd, sec, key, log, snapshot, aspect="16:9", ents=()):
             if not r or not media.ok(vid): return None
             pf = routes_dir(cfg) / "output" / "r13_meta_chain.prompt.txt"
             prompt = pf.read_text(encoding="utf-8").strip() if pf.is_file() else ""
-            if known_person({"vo": prompt}, ents):   # Meta named someone despite the instruction: never this method for a person
+            if not named_ok and known_person({"vo": prompt}, ents):   # setting off: never this method for a named person
                 log("  chain: Meta's description names a real person; clip not used"); vid.unlink(missing_ok=True); return None
             if prompt: txt.write_text(prompt, encoding="utf-8")
             src_img = routes_dir(cfg) / "output" / "r13_meta_chain.jpg"
@@ -114,7 +117,7 @@ def chain_rung(cfg, sd, sec, key, log, snapshot, aspect="16:9", ents=()):
             return {"video": vid, "image": img if img.is_file() else None, "prompt": prompt, "describer": "meta"}
     prompt = txt.read_text(encoding="utf-8").strip()
     try:
-        if known_person({"vo": prompt}, ents):   # the describer named someone after all: not this method
+        if not named_ok and known_person({"vo": prompt}, ents):   # setting off: the describer named someone, not this method
             log("  chain: the description names a real person; skipped"); return None
     except Exception:
         pass

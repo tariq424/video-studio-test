@@ -41,6 +41,8 @@ DEFAULTS = {
     "yt_gemini_timeout": 300,         # seconds per Gemini answer
     "yt_gemini_model": "Pro",         # Gemini model for watching the video (Flash-Lite declines YouTube links)
     "meta_chain_on": True,            # rung 3a: source snapshot -> Copilot describes -> Meta image -> Meta animates it (never a known person)
+    "meta_chain_named_people": True,  # the snapshot -> Meta chain may run on beats about named public figures (clip tagged GENERATED;
+                                      # the Publisher declares YouTube "Altered content"). False = skip those beats (old behaviour)
     "meta_chain_max_per_video": 3,    # snapshot -> Meta clips per output (~6 min each)
     "meta_video_max_per_video": 3,    # Meta video clips per output
     "meta_video_on": True,            # rung 5a: meta.ai video (free) for a beat nothing above filled, before Flow
