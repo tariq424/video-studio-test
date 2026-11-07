@@ -109,8 +109,11 @@ def _clean(t):
     (only when they come in the last third of the answer, so the text itself is never cut)."""
     t = re.sub(r"^\s*Gemini said\s*", "", str(t or "")).strip()
     m = None
-    for m in re.finditer(r"\n\s*(?:To explore (?:this|these|more|further)|Would you like)[^\n]*", t): pass
-    if m and m.start() > len(t) * 0.66: t = t[:m.start()]
+    while True:   # trailing chips / video cards are short: cut from the marker only when little text follows it
+        cut = None
+        for m in re.finditer(r"\n\s*(?:To explore (?:this|these|more|further)|Would you like|Watch [A-Z])[^\n]*", t): cut = m
+        if not cut or len(t) - cut.start() > 300: break
+        t = t[:cut.start()].rstrip()
     return t.strip()
 
 
