@@ -507,7 +507,24 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
             story = " ".join(x.get("vo", "") for x in plan["sections"] if not x.get("cta"))
             for it in _safe(log, f"{s['id']} storyboard", lambda: storyboard.beat(cfg, sd, s, story, log, aspect="9:16", max_shots=n), []) or []:
                 items.append({k: v for k, v in it.items() if k not in ("text", "motion", "piece")})
-        if v2 and len(items) < n and cfg.get("meta_chain_on", True):   # rung 3a: snapshot -> Copilot describes -> Meta image -> Meta animates it
+        moving = False
+        if v2 and cfg.get("action_video_first", True) and not items and not pick.get(s["id"]) \
+                and (cfg.get("meta_video_on", True) or cfg.get("flow_on", True)):
+            # owner, 2026-11-07: pick by narration fit, then by cost. An action the narration describes (no stock or source shows it,
+            # no physics module animates it from real data) can't be shown by a still: go straight to video - Meta (free), then
+            # Flow (paid, flow_max_per_video). If neither makes a clip, the still rungs below run as before.
+            from . import physics as _ph
+            verb, mod = _ph.action(s)
+            if not verb: verb, mod = _ph.event_action(s.get("vo", "")), None   # people / events: stormed, fled, clashed, set on fire...
+            if verb and not mod:
+                from . import mediaroutes
+                log(f"  {s['id']}: action beat ('{verb}'): a still can't show it; video rung first (Meta, then Flow)")
+                clip, vtag, vrung = _safe(log, "AI video", lambda: mediaroutes.video_rung(cfg, sd, s, f"{s['id']}_flow", log, aspect="9:16")) or (None, None, None)
+                if clip:
+                    items.append({"type": "video", "src": _rel_sd(clip, sd), "secs": round(media.dur(clip), 2), "rate": 1.0, "freeze": True,
+                                  "tag": vtag, "rung": "flow" if vrung == "flow" else "meta video", "action": verb})
+                    moving = True
+        if v2 and len(items) < n and not moving and cfg.get("meta_chain_on", True):   # rung 3a: snapshot -> Copilot describes -> Meta image -> Meta animates it
             from . import mediaroutes
             snap = _safe(log, f"{s['id']} source screenshot", lambda: source_visuals.snapshot(cfg, job, sd, s, log, source_item=raw_source))
             if snap and snap.get("path"):
@@ -516,7 +533,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                 if ch:
                     items.append({"type": "video", "src": _rel_sd(ch["video"], sd), "secs": round(media.dur(ch["video"]), 2), "rate": 1.0,
                                   "freeze": True, "tag": "GENERATED · META", "rung": "meta chain"})
-        if v2 and len(items) < n and cfg.get("imagegen_on", True):   # rung 3: free image generators (describe the source screenshot -> new image)
+        if v2 and len(items) < n and not moving and cfg.get("imagegen_on", True):   # rung 3: free image generators (describe the source screenshot -> new image)
             from . import imagegen
             snap = snap or _safe(log, f"{s['id']} source screenshot", lambda: source_visuals.snapshot(cfg, job, sd, s, log, source_item=raw_source))
             want = n - len(items)   # a beat that needs several visuals gets a second Gemini image (another angle / close-up), not Flow

@@ -65,6 +65,15 @@ def score(jd):
     named = [b for b in tz["beats"] if people.names(by_beat[b["id"]], ents) and not any((x.get("g") or {}).get("kind") == "cta" for x in b.get("graphics", []))]
     r["named_beats"] = len(named)
     r["inset_beats"] = sum(1 for b in named if any(g.get("inset") for g in b["bgs"]))
+    # action beats: the narration describes an action -> it should move (any video, or a physics / motion animation), not a still
+    from studio import physics
+    MOVING = ("sim", "simmap", "motion", "recon")
+    acts = [b for b in tz["beats"] if (physics.action({"vo": by_beat[b["id"]]})[0] or physics.event_action(by_beat[b["id"]]))
+            and not any((x.get("g") or {}).get("kind") == "cta" for x in b.get("graphics", []))]
+    r["action_beats"] = len(acts)
+    r["action_moving"] = sum(1 for b in acts if any(g.get("type") == "video" or (g.get("g") or {}).get("kind") in MOVING for g in b["bgs"]))
+    r["flow_clips"] = sum(1 for b in tz["beats"] for g in b["bgs"] if "FLOW" in str(g.get("tag") or ""))
+    r["meta_video_clips"] = sum(1 for b in tz["beats"] for g in b["bgs"] if str(g.get("tag") or "") == "GENERATED · META")
     # pacing: longest single shot
     r["longest_shot_s"] = round(max(((b["bgs"][i + 1]["from"] if i + 1 < len(b["bgs"]) else b["dur"]) - g["from"]
                                      for b in tz["beats"] for i, g in enumerate(b["bgs"])), default=0), 1)
@@ -94,6 +103,10 @@ ROWS = [  # (key, principle, pass test)
     ("rebuilt_layouts", "Rebuilt screen layouts (split screen / video call)", lambda v: v == 0),
     ("source_pct", "Real source footage (% of screen time)", lambda v: True),
     ("inset_beats", "Beats naming a person that show the speaker inset", lambda v: True),
+    ("action_beats", "Action beats (narration describes motion)", lambda v: True),
+    ("action_moving", "Action beats shown moving (video / physics)", lambda v: True),
+    ("flow_clips", "Flow clips (cap 1)", lambda v: v <= 1),
+    ("meta_video_clips", "Meta video clips (free, cap 3)", lambda v: v <= 3),
     ("longest_shot_s", "Longest single shot (s)", lambda v: v <= 15),
     ("exact_decimals", "Exact decimals read aloud", lambda v: v == 0),
     ("multi_number_sentences", "Sentences with 3+ numbers", lambda v: v == 0),

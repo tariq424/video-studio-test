@@ -281,6 +281,25 @@ ACTION = (r"\b(descen(d|ds|ded|ding|t)|dove|dive[ds]?|diving|nose-?div\w*|plung\
           r"capsiz\w*|collid\w*|slammed|tumbl\w*)\b")
 
 
+# Actions of people and events (owner, 2026-11-07: a beat that narrates one is shown moving - stock, source, or Meta/Flow video -
+# rather than as a still). Kept apart from ACTION, which drives the physics modules.
+EVENT_ACTION = (r"\b(storm(ed|ing)|march(ed|ing)|fled|flee(ing|s)?|chas(ed|ing)|rac(ed|ing) (to|toward|through|across)|"
+                r"charg(ed|ing) (at|into|toward)|stampede\w*|riot(ed|ing)|clash(ed|ing)|fought|brawl\w*|punch(ed|ing)|"
+                r"set (\w+ )?(on )?fire|burn(ed|ing|t) (down|through)|went up in flames|erupt(ed|ing)|flood(ed|ing)|"
+                r"collaps(ed|ing)|toppl(ed|ing)|bomb(ed|ing)|shell(ed|ing)|fired (missiles?|rockets?|shots?)|launch(ed|ing) (a |an )?"
+                r"(missile|rocket|strike|attack|raid|drone)s?|struck|rammed|swarm(ed|ing)|evacuat(ed|ing)|rescu(ed|ing)|"
+                r"dragg(ed|ing)|tore down|bulldoz(ed|ing)|demolish(ed|ing))\b")
+_HYPO = (r"\b(tried|attempt\w*|threaten\w*|nearly|almost|would|could|might|may|plan\w*|want\w*|feared|risk\w*|thought|believed|"
+         r"expected|stopped|prevent\w*|avert\w*|avoid\w*|no)( to)?\s+(\w+\s+)?$")
+
+
+def event_action(text):
+    """-> the event action an actual sentence of the narration describes (not a hypothetical), or ""."""
+    vo = str(text or "")
+    m = next((x for x in re.finditer(EVENT_ACTION, vo, re.I) if not re.search(_HYPO, vo[max(0, x.start() - 30):x.start()], re.I)), None)
+    return m.group(0) if m else ""
+
+
 def action(sec, text=None):
     """-> (verb, module) for a beat whose narration describes an action, else ("", None). module: the physics module that can
     animate it (aircraft_flight / submarine_descent / weather_event / ship_route), or None (no module fits)."""
