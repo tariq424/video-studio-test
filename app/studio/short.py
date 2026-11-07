@@ -23,12 +23,15 @@ NOTES ON THE SOURCE (use only these facts):
 
 Write {nb} beats that tell one story. Each beat is 30-40 words (about 11-15 seconds spoken). About {words} words in total.
 That is the length budget for the requested {secs} seconds: a joke is added to every beat afterwards and the music pauses
-between beats, so that time is already taken. Explain terms briefly rather than dropping them; cut the weakest point instead.
-Hard limit: {wmax} words. If the notes run out sooner, stop sooner; never pad.
+between beats, so that time is already taken. Explain terms briefly rather than dropping them.
+COMPLETENESS COMES FIRST (owner): keep every vital detail - who, what, the numbers that matter, the consequences. The length is
+a guide, not a cap: going over it, even past 3:00, is fine (YouTube then lists it as a normal video, and that is OK). Never drop
+or squeeze a vital point to fit. If the notes run out sooner, stop sooner; never pad.
 - Beat 1 is the hook: one short line framing what this is (who is talking, about what), then the most surprising claim or number,
   in plain words (no jargon in the first sentence). No greetings, no "in this video".
 - One conflict or surprise is the through-line (who is right, what went wrong, what nobody expected): every beat moves it forward,
-  so a viewer at any second wants the next one. Background, bios and study parameters only when the story needs them.
+  so a viewer at any second wants the next one. Background, bios and study parameters only when the story needs them, but
+  never leave out a vital detail for pace.
 - Tell events in the order they happened. Once the story has moved on (e.g. the plane has landed), don't go back to an earlier
   moment (what happened in the air) in a later beat; put background and reactions after the events, clearly as such.
 - Middle beats: the strongest points, ONE idea per beat (never two unrelated topics in one beat), concrete (numbers, names, examples).
@@ -247,7 +250,9 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             tries.append((abs(n - words), j))
             if smoke:   # the 30-second test is trimmed in code afterwards (trim_smoke); only a runaway length is re-asked
                 if n > words * 3: raise ValueError(f"narration is {n} words in total; keep it near {words}")
-            elif n > wmax: raise ValueError(f"narration is {n} words in total; the limit is {wmax} for a {int(secs)}-second Short (jokes are added later): cut the weakest point, keep the explanations of terms")
+            elif n > words * 3: raise ValueError(f"narration is {n} words in total, about three times the {words}-word guide: "
+                                                 "it has run away; tell the story once, completely, without repeating it")
+            # over the guide is accepted (owner, 2026-11-07: complete beats over a 3:00 squeeze; past 3:00 YouTube lists a normal video)
             # shorter than the target, or a little over it: accepted as written (no padding, no trimming)
         prompt = SHORT.format(secs=int(secs), words=words, wmax=wmax if not smoke else int(words * hi), title=title, channel=channel, notes=notes[:24000], nb=nb, audience=audience_line(cfg),
                               people=(meta.get("description") or "")[:1200] or "(see notes)",
@@ -269,7 +274,7 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                 j = llm.chat_json(SYSTEM, prompt, max_tokens=8000, check=lambda x: None if x.get("beats") else (_ for _ in ()).throw(ValueError("no beats")))
         nw0 = sum(len(x["vo"].split()) for x in j["beats"])
         if j.get("covered") is True and nw0 < words * lo: log(f"  the AI says the source is fully covered at {nw0} of {words} words; kept short (no padding)")
-        if not smoke: log(f"  script: {nw0} words (target {words}, limit {wmax}; {total} with the jokes){'; over the target, accepted' if nw0 > words * 1.05 else ''}")
+        if not smoke: log(f"  script: {nw0} words (guide {words}; {total} with the jokes){'; over the target, accepted' if nw0 > words * 1.05 else ''}")
         if smoke: j["beats"] = j["beats"][:2]   # a smoke test stays ~30 s even if the length check gave up
         elif cfg.get("short_fit_3min", False):   # off by default (owner 2026-10-23): a long Short just isn't classed as a Short
             while len(j["beats"]) > minb and sum(len(x["vo"].split()) for x in j["beats"]) > wmax:

@@ -85,3 +85,10 @@ def test_short_never_promises_a_link_and_ends_quickly():
     assert "linked below" not in cta.replace('no "linked below"', "") and "short summary of" not in cta.replace('"that was a short summary"', "")
     assert 'cta_vo = "Follow for more."' in cta
     assert "NUMBERS:" in short.SHORT and "through-line" in short.SHORT
+
+
+def test_short_completeness_over_length():
+    from studio import short, writer
+    assert "COMPLETENESS COMES FIRST" in short.SHORT and "Hard limit" not in short.SHORT and "cut the weakest" not in short.SHORT
+    src = (Path(__file__).resolve().parents[1] / "app" / "studio" / "writer.py").read_text(encoding="utf-8")
+    assert "Cover fewer facts" not in src and "never drop one" in src

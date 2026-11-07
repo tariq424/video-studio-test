@@ -49,7 +49,10 @@ def _length_check(j, out, target, what, log):
         # length policy (2026-10-14): shorter or longer than requested is fine; only a Short past 3:00 or an explainer past the
         # sanity ceiling (25 min for 15, x1.67) is an anomaly
         ceil = 180.0 if what == "Short" else target * 25 / 15
-        if got > ceil + 0.5:
+        if what == "Short" and got > ceil + 0.5:   # owner, 2026-11-07: complete beats over a squeeze; past 3:00 is fine, not an anomaly
+            log(f"Length check: Short {got:.0f}s vs {target:.0f}s requested ({off:+.0%}); past 3:00, so YouTube lists it as a "
+                "normal video (fine: nothing vital was cut)")
+        elif got > ceil + 0.5:
             w = f"{what}: {got:.0f}s vs {target:.0f}s requested ({off:+.0%}); over the {ceil:.0f}s maximum"
             log(f"WARNING: length anomaly. {w}"); warns.append(w)
         else: log(f"Length check: {what} {got:.0f}s vs {target:.0f}s requested ({off:+.0%}); within the {ceil:.0f}s maximum, OK")

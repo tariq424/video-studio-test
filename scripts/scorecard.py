@@ -83,7 +83,7 @@ def score(jd):
 ROWS = [  # (key, principle, pass test)
     ("status", "Job finished", lambda v: v == "finished"),
     ("minutes", "Turnaround (minutes)", lambda v: v is not None and v <= 45),
-    ("length_s", "Length 120-180 s (owner: Shorts stay up to 3 min)", lambda v: 110 <= v <= 185),
+    ("length_s", "Length in s (complete beats; past 180 s is fine)", lambda v: True),
     ("wangp_shots", "WanGP last resort (shots made by WanGP)", lambda v: v == 0),
     ("offstory_first", "Off-story shots found by story QC", lambda v: True),
     ("offstory_last", "Off-story shots left after repair", lambda v: v in (0, None)),

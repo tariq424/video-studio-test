@@ -18,7 +18,8 @@ does not establish that real echoes or live measurements were received; keep obs
 GENERATED NARRATION EDITORIAL RULES (all audiences, including Beginner):
 Write a heavily source-checked TLDR with substantial, original analysis and unique commentary, not a paraphrase montage.
 For EVERY fact selected, explain its significance, a limitation, a critical comparison, or a clearly marked inference
-grounded in the supplied evidence. Cover fewer facts if necessary to leave room for genuine interpretation.
+grounded in the supplied evidence. Never drop a vital fact to make room for interpretation: keep it and add the
+interpretation (a longer script is fine; completeness comes first).
 Distinguish 'the source claims' from 'this suggests' and from established evidence. Checking a transcript establishes
 faithfulness to that source, not independent verification of its claims. Do not claim independent fact-checking unless
 independent evidence is actually supplied. Never invent counterarguments, outside facts, quotes, numbers or certainty.
@@ -609,7 +610,8 @@ def _editorial_review_candidate(llm, plan, meta, transcript, cfg, log, stop=None
                   "step, which is great, unless you're the intern who has to update the documentation'). Punch at companies, "
                   "hype and situations, never at victims or ordinary people; no slapstick. Do not copy the source's jokes. "
                   "Preserve first-use term explanations. A normal factual sentence is not humor, and a joke never changes a fact. "
-                  "and all factual qualifiers; do not add new external facts. Cover fewer facts if needed. "
+                  "and all factual qualifiers; do not add new external facts. Keep every fact and detail the beat already has: never drop one "
+                  "to make room for the opinion or the joke (a longer beat is fine). "
                   "Do not claim copyright clearance or independent verification. " + audience_line(cfg) +
                   "\nReturn JSON {sections:[{id,vo,analysis,humor}]}. analysis (our opinion) and humor (the joke) must be TWO DIFFERENT "
                   "sentences of vo, and each must be an exact excerpt of "
