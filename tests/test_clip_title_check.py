@@ -35,3 +35,20 @@ def test_offstory_title_rejected_with_vetting_off(monkeypatch, tmp_path):
 
 def test_title_check_can_be_turned_off():
     assert footage.title_contradicts({"clip_title_check": False}, "brazilian flag", "Israel line") == ""
+
+
+class FakePlaceLLM(FakeLLM):
+    def chat_json(self, system, prompt, max_tokens=0):
+        seen = prompt.split('shows: "')[1].split('"')[0].lower()
+        return {"outside": any(k in seen for k in ("japan", "us flag", "india"))}
+
+
+def test_place_check_rejects_other_country_maps_but_keeps_every_side(monkeypatch):
+    """Nov 7: maps of Japan / the US / India with pins passed vetting for Gaza lines."""
+    monkeypatch.setattr(footage, "LLM", FakePlaceLLM)
+    footage._PLACE_CACHE.clear()
+    story = "Daniella Weiss wants settlers in Gaza; Bassem Youssef asks what happens to Egypt."
+    assert not footage.place_ok({}, "map of Japan", "Israel", story=story, narration="the whole biblical promise")
+    assert not footage.place_ok({}, "US flag", "Israel", story=story, narration="a new settlement")
+    assert footage.place_ok({}, "Egyptian flag", "Israel", story=story, narration="110 million Egyptians")
+    assert footage.place_ok({}, "Gaza City", "Israel", story=story, narration="settlers in Gaza")   # named in the line: no AI call

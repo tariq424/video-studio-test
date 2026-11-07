@@ -374,7 +374,8 @@ Then answer from what you see:
   or the colour don't matter (a modern apartment block counts for "beachfront property"); only its surroundings without the thing
   (empty sea, cliffs, sky) do not count. "yes", "no" or "unclear".
 - "kind_shown": the kind of {kind} the clip shows, in 1-3 words (e.g. "pickup truck", "sedan", "dog", "ballpoint pen"); "none" if no {kind} is shown.
-- "place_seen": a recognisable city, skyline, landmark or country you can identify (e.g. "London skyline", "Eiffel Tower"); "none" if you can't name one.
+- "place_seen": a recognisable city, skyline, landmark or country you can identify (e.g. "London skyline", "Eiffel Tower"), any national
+  flag (say whose: "US flag", "Indian flag") or a map (say what it shows: "map of Japan", "map of the US"); "none" if you can't name one.
 - "mood_clash": true if the scene's mood plainly contradicts this narration (calm or happy scenes over a disaster, crime or crisis): "{narration}"
 - "unrelated": true if the clip has nothing to do with the narration's topic at all (a washing machine, a spinning coin or wax
   seals for a story about an AI company). Loosely related scenes (offices, screens, money, a city for a business story) are false.
@@ -420,21 +421,37 @@ def beat_mains(cfg, slots, log, cache_file=None):
 def _none(x): return str(x or "").strip().lower() in ("", "none", "no", "n/a", "na", "unknown", "null", "false", "nothing")
 
 
-def place_ok(cfg, seen, story_place, log=print):
-    """Is the recognised place `seen` consistent with the story's place? (no place in the story -> any real place is fine,
-    except on the closing card). Cached; asks the script AI only when the names don't already match."""
+PLACE_JUDGE = """A stock clip for a news video shows: "{seen}" (a place, flag or map the vision model recognised).
+What the whole video is about: "{story}"
+The story is set in: "{place}"
+Narration line it plays over: "{narration}"
+Is that place, flag or map from OUTSIDE the story? Every side of the story counts as inside (Israeli, Palestinian or Egyptian
+flags and maps in a story about Israel, Gaza and Egypt; a place the line itself names). Outside: another country's flag or map
+(the US, Japan, India, Brazil in a story about Israel and Gaza), a city or landmark the story is not about.
+Reply with JSON only: {{"outside": true or false}}"""
+
+
+def place_ok(cfg, seen, story_place, log=print, story="", narration=""):
+    """Is the recognised place / flag / map `seen` consistent with the story? (no place and no story -> any real place is fine,
+    except on the closing card). Cached; asks the script AI only when the names don't already match. Nov 7: flags and maps
+    count (a map of Japan with pins passed for a Gaza line), and every side of the story is inside it."""
     if _none(seen): return True
-    if not story_place: return True
-    if not re.search(r"\b[A-Z][a-z]", seen): return True   # "suburban neighborhood", "a city": not a place anyone can name
-    a, b = _subject_words([seen]), _subject_words([story_place])
+    if not story_place and not story: return True
+    if not re.search(r"\b[A-Z][A-Za-z]", seen): return True   # "suburban neighborhood", "a city": not a place anyone can name ("US flag" is)
+    a, b = _subject_words([seen]), _subject_words([story_place, narration[:300]])
     if a & b: return True
-    key = (seen.lower(), story_place.lower())
+    key = (seen.lower(), story_place.lower(), story[:160].lower())
     if key not in _PLACE_CACHE:
         try:
             with LLM(cfg, log, lambda: False) as llm:
-                j = llm.chat_json("Answer with JSON only.", f'Is "{seen}" located in, or a well-known part of, "{story_place}"? '
-                                  'Reply {"inside": true} or {"inside": false}.', max_tokens=50)
-            _PLACE_CACHE[key] = str(j.get("inside")).strip().lower() in ("true", "yes", "1")
+                if story:
+                    j = llm.chat_json("Answer with JSON only.", PLACE_JUDGE.format(seen=seen.replace('"', "'"), story=story[:600].replace('"', "'"),
+                                      place=story_place or "not stated", narration=narration[:300].replace('"', "'")), max_tokens=50)
+                    _PLACE_CACHE[key] = str(j.get("outside")).strip().lower() not in ("true", "yes", "1")
+                else:
+                    j = llm.chat_json("Answer with JSON only.", f'Is "{seen}" located in, or a well-known part of, "{story_place}"? '
+                                      'Reply {"inside": true} or {"inside": false}.', max_tokens=50)
+                    _PLACE_CACHE[key] = str(j.get("inside")).strip().lower() in ("true", "yes", "1")
         except Exception:
             _PLACE_CACHE[key] = True   # can't tell: not a contradiction we can prove
     return _PLACE_CACHE[key]
@@ -555,7 +572,8 @@ def contra_verdict(cfg, j, mainv, narration_place="", neutral=False, log=print, 
     main, kind, place = (mainv or {}).get("main", ""), (mainv or {}).get("kind", ""), (mainv or {}).get("place", "") or narration_place
     seen_place = str(j.get("place_seen") or "none").strip()
     if neutral and not _none(seen_place): return False, f"shows a recognisable place ({seen_place[:40]}); the closing card stays neutral"
-    if not place_ok(cfg, seen_place, place, log): return False, f"shows {seen_place[:40]}; the story is set in {place}"
+    if not place_ok(cfg, seen_place, place, log, story=story, narration=narration):
+        return False, f"shows {seen_place[:40]}; the story is set in {place or 'elsewhere'}"
     if main and literal(main, kind, narration) and str(j.get("main_visible", "unclear")).strip().lower() == "no" and not kind_match(kind, str(j.get("kind_shown") or "")):
         return False, f"doesn't show {main}"
     if kind_clash(kind, str(j.get("kind_shown") or ""), main): return False, f"shows a {str(j.get('kind_shown'))[:30]}, not {main or kind}"

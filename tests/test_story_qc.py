@@ -47,3 +47,26 @@ def test_long_shots_get_a_second_frame():
     assert all(len(s["ts"]) == 2 and s["a"] < s["ts"][0] < s["ts"][1] < s["b"] for s in sh)
     short = storyqc.shots({"beats": [{"id": "b0", "start": 0, "dur": 3.0, "bgs": [{"src": "a", "from": 0}]}]})
     assert short[0]["ts"] == [short[0]["t"]]
+
+
+def test_verify_pass_checks_only_repaired_spans(tmp_path, monkeypatch):
+    from studio import footage, media
+    import studio.llm as llm_mod
+    monkeypatch.setattr(storyqc, "_timeline", lambda *a: TL)
+    calls = []
+    def ff(*a, **k):
+        from pathlib import Path as P
+        P(a[-1]).write_bytes(b"x")
+    monkeypatch.setattr(media, "ff", ff)
+    monkeypatch.setattr(footage, "_vision", lambda cfg, img, p: calls.append(img) or '{"shows": "a desert road"}')
+    monkeypatch.setattr(footage, "unload_vet_model", lambda cfg: None)
+    class L:
+        name = "fake"
+        def __init__(self, *a, **k): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def chat_json(self, *a, **k): return {"contradicts": False, "why": "ok"}
+    monkeypatch.setattr(llm_mod, "LLM", L)
+    assert storyqc.check(tmp_path / "v.mp4", {}, tmp_path, print, only=[(12.0, 20.0)]) == []
+    assert len(calls) == 2   # one shot (12-20 s), two frames
+    assert (tmp_path / "qc" / "v.story_verify.json").exists() and not (tmp_path / "qc" / "v.story.json").exists()

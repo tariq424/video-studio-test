@@ -649,11 +649,22 @@ class Studio:
                             qc_repair.repair(mp4, cfg, j.dir, log, stop, vert=vert)
                         if cfg.get("story_qc_on", True):   # owner 2026-11-07: every shot checked against what is being said
                             from . import storyqc, qc_repair
-                            for rnd in range(2 if fix else 1):   # a second look after repair: the vision model can miss a flag once
-                                bad = storyqc.check(mp4, cfg, j.dir, log, vert=vert, stop=stop)
-                                if not bad: break
+                            # rounds 1-2 look at every shot (the vision model can miss a flag once); after the last repair a
+                            # third pass checks ONLY the repaired spans, so nothing a repair put in goes out unverified (Nov 7)
+                            rounds, only = (2 if fix else 1), None
+                            for rnd in range(rounds + (1 if fix else 0)):
+                                bad = storyqc.check(mp4, cfg, j.dir, log, vert=vert, stop=stop, only=only)
+                                if not bad:
+                                    if only: log(f"  story QC: the {len(only)} repaired span(s) check out")
+                                    break
                                 if not fix: log(f"  story QC: {len(bad)} off-story shot(s) reported (qc_mode is report; not replaced)"); break
-                                qc_repair.repair(mp4, cfg, j.dir, log, stop, vert=vert, marks=storyqc.marks(bad))
+                                if rnd == rounds:
+                                    left = ", ".join(f"{b['a']:.1f}-{b['b']:.1f}s" for b in bad)
+                                    log(f"  story QC: still off-story after {rounds} repair rounds: {left}; left for review in the editor")
+                                    j.save(story_qc_open=[{"a": b["a"], "b": b["b"], "why": b.get("why", "")} for b in bad]); break
+                                mk = storyqc.marks(bad)
+                                qc_repair.repair(mp4, cfg, j.dir, log, stop, vert=vert, marks=mk)
+                                if rnd == rounds - 1: only = [(a, b) for a, b, _ in mk]
                         qc.qc_final(mp4, cfg, j.dir / "qc", log, every=10.0 if vert else 30.0)
                 else: log("Quality check skipped (the local vision model isn't running)")
             except Exception as e:

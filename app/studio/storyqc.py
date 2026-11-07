@@ -70,13 +70,14 @@ def _script_cfg(cfg):
     return c
 
 
-def check(mp4, cfg, job_dir, log=print, vert=True, stop=lambda: False):
-    """-> list of flagged shots [{beat, a, b, t, shows, why, src}]. Writes <job>/qc/<video>.story.json."""
+def check(mp4, cfg, job_dir, log=print, vert=True, stop=lambda: False, only=None):
+    """-> list of flagged shots [{beat, a, b, t, shows, why, src}]. Writes <job>/qc/<video>.story.json.
+    only: [(a, b), ...] checks just the shots overlapping those spans (the verify pass after a repair)."""
     from . import footage
     from .llm import LLM, parse_json
     mp4 = Path(mp4); job_dir = Path(job_dir)
     rep = {"video": mp4.name, "started": time.strftime("%Y-%m-%d %H:%M:%S"), "shots": [], "flagged": []}
-    rpath = job_dir / "qc" / f"{mp4.stem}.story.json"; rpath.parent.mkdir(parents=True, exist_ok=True)
+    rpath = job_dir / "qc" / f"{mp4.stem}.story{'_verify' if only else ''}.json"; rpath.parent.mkdir(parents=True, exist_ok=True)
     try:
         if not cfg.get("story_qc_on", True): return []
         tl = _timeline(job_dir, vert)
@@ -86,9 +87,12 @@ def check(mp4, cfg, job_dir, log=print, vert=True, stop=lambda: False):
             p = Job(job_dir).short_plan() if vert else Job(job_dir).plan()
             plan = {s["id"]: s.get("vo", "") for s in (p or {}).get("sections", [])}
         except Exception: pass
-        sh = shots(tl, plan)[:int(cfg.get("story_qc_max_shots", 40))]
+        sh = shots(tl, plan)
+        story_all = " ".join(dict.fromkeys(x["vo"] for x in sh))[:600]
+        if only: sh = [x for x in sh if any(x["a"] < b - 0.05 and x["b"] > a + 0.05 for a, b in only)]
+        sh = sh[:int(cfg.get("story_qc_max_shots", 40))]
         if not sh: log("  story QC: no timeline for this video; skipped"); return []
-        story = " ".join(dict.fromkeys(x["vo"] for x in sh))[:600]
+        story = story_all   # the whole video's story, also when only a few shots are checked
         work = job_dir / "qc" / "story"; work.mkdir(parents=True, exist_ok=True)
         vcfg = dict(cfg, vet_provider=cfg.get("vet_provider") if cfg.get("vet_provider") not in (None, "", "off") else "local")
         log(f"Story QC: {len(sh)} shot(s) of {mp4.name} checked against the narration")
