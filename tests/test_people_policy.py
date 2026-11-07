@@ -72,3 +72,16 @@ def test_source_clip_length_and_budget_from_settings(tmp_path):
     (src / "source_cues.json").write_text(json.dumps([{"start": 30.0, "text": "promised land from the Nile to the Euphrates Egypt"}]))
     r = source_visuals.auto_request(tmp_path, {"vo": "Her promised land runs Nile to Euphrates, Egypt too."}, secs=8)
     assert r and r["duration"] == 8
+
+
+def test_sketch_is_a_style_not_a_courtroom():
+    assert "never a courtroom" in people.SKETCH and "style of a courtroom sketch" in people.SKETCH
+
+
+def test_short_never_promises_a_link_and_ends_quickly():
+    from studio import short
+    src = (Path(__file__).resolve().parents[1] / "app" / "studio" / "short.py").read_text(encoding="utf-8")
+    cta = src[src.index("# closing call-to-action beat"):src.index('plan["sections"].append({"id": f"b{len(plan')]
+    assert "linked below" not in cta.replace('no "linked below"', "") and "short summary of" not in cta.replace('"that was a short summary"', "")
+    assert 'cta_vo = "Follow for more."' in cta
+    assert "NUMBERS:" in short.SHORT and "through-line" in short.SHORT

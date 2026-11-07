@@ -27,12 +27,16 @@ between beats, so that time is already taken. Explain terms briefly rather than 
 Hard limit: {wmax} words. If the notes run out sooner, stop sooner; never pad.
 - Beat 1 is the hook: one short line framing what this is (who is talking, about what), then the most surprising claim or number,
   in plain words (no jargon in the first sentence). No greetings, no "in this video".
+- One conflict or surprise is the through-line (who is right, what went wrong, what nobody expected): every beat moves it forward,
+  so a viewer at any second wants the next one. Background, bios and study parameters only when the story needs them.
 - Tell events in the order they happened. Once the story has moved on (e.g. the plane has landed), don't go back to an earlier
   moment (what happened in the air) in a later beat; put background and reactions after the events, clearly as such.
 - Middle beats: the strongest points, ONE idea per beat (never two unrelated topics in one beat), concrete (numbers, names, examples).
   Attribute opinions and predictions to who said them (first name is fine in narration).
 - Last beat: the payoff / biggest takeaway, ending on a strong line.
 Narration: spoken, punchy, short sentences, plain words, numbers written as spoken words ("ten billion dollars", "twenty thirty").
+NUMBERS: at most one number per sentence, rounded the way a person says it ("under a third", "about one in five", "nearly
+forty percent"), never a run of exact decimals; the exact figure goes in that beat's stat graphic on screen instead.
 VOICE: conversational, like a sharp friend, not a narrator. Say what happened plainly and clearly first. Where it fits, add
 one short opinion of ours ("honestly,", "our take:"). Do NOT write jokes: a dry closing joke is added to each beat separately.{cta_rule}
 AUDIENCE: {audience}
@@ -247,10 +251,8 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
             # shorter than the target, or a little over it: accepted as written (no padding, no trimming)
         prompt = SHORT.format(secs=int(secs), words=words, wmax=wmax if not smoke else int(words * hi), title=title, channel=channel, notes=notes[:24000], nb=nb, audience=audience_line(cfg),
                               people=(meta.get("description") or "")[:1200] or "(see notes)",
-                              cta_rule=("\nThis Short has NO longer companion video: never mention, promise or point to a longer / full video, "
-                                        "a full breakdown, a link below or 'part two'." if mode != "both" else
-                                        "\nA full-length explainer goes out with this Short; the closing line pointing to it is added "
-                                        "separately, so don't write your own link or 'watch the full video' line."))
+                              cta_rule=("\nNever mention, promise or point to a longer / full video, a full breakdown, a link below or "
+                                        "'part two': the video never promises a link (the publisher adds the real one when it exists)."))
         from . import source_visuals
         prompt += source_visuals.prompt(srcdir)
         if audience_key(cfg) == 'beginner':
@@ -322,24 +324,22 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
     n = sum(len(x["vo"].split()) for x in plan["sections"])
     if not smoke and n > total * 1.15: log(f"  NOTE: script is {n} words with the jokes, over the {total}-word budget for {int(secs)}s")
     if not smoke and n > w3: log(f"  NOTE: script is {n} words (budget {total}); past 3:00" + ("; it will be sped up to fit" if cfg.get("short_fit_3min", False) else "; kept as is (YouTube will treat it as a regular video, not a Short)"))
-    if mode != "both":   # no companion explainer: a promise of one must not survive (the model sometimes adds it anyway)
+    if True:   # owner, 2026-11-07: the video itself never promises a link (a Short published alone said "linked below" with no link)
         promise = re.compile(r"[^.!?]*\b(full (breakdown|video|episode|explainer)|longer video|link(ed)? below|part two|watch the full)\b[^.!?]*[.!?]?\s*", re.I)
         for x in plan["sections"]:
             cut = promise.sub("", x["vo"]).strip()
             if cut != x["vo"].strip() and len(cut.split()) >= 6:
-                log(f"  {x.get('id', 'beat')}: removed a line promising a longer video (this job makes no long video)"); x["vo"] = cut
-        d = promise.sub("", plan.get("description") or "").strip()
-        if d != (plan.get("description") or "").strip():
-            log("  description: removed a line promising a longer video"); plan["description"] = d
+                log(f"  {x.get('id', 'beat')}: removed a line promising a longer video (the video never promises a link)"); x["vo"] = cut
+        if mode != "both":   # with an explainer the description's link placeholder stays: the publisher fills it or removes it
+            d = promise.sub("", plan.get("description") or "").strip()
+            if d != (plan.get("description") or "").strip():
+                log("  description: removed a line promising a longer video"); plan["description"] = d
     # closing call-to-action beat
-    src_name = plan.get("source_spoken") or title
-    if mode == "both":
-        cta_vo = f"That was a short summary of {src_name}. Big picture, fewer rabbit holes. The full breakdown is linked below."
-        cta = {"kind": "cta", "badge": "FULL BREAKDOWN", "title": long_title or plan["title"], "line": "Watch it, linked below"}
-    else:
-        cta_vo = f"That was a short summary of {src_name}. Big picture, fewer rabbit holes. Follow for more."
-        if smoke: cta_vo = f"That was {src_name}, condensed. Follow for more."   # the 30-second test keeps its closing line short
-        cta = {"kind": "cta", "badge": "SUMMARIZED FROM", "title": title[:80], "line": "Follow for more", "play": False, "arrow": False}
+    # owner, 2026-11-07: no "linked below" in the video (the explainer link goes in the description and YouTube's related-video
+    # link, by the publisher, only once the explainer is live) and no slow "that was a short summary" sign-off (YouTube data:
+    # viewers leave there). The source stays credited on the end card.
+    cta_vo = "Follow for more."
+    cta = {"kind": "cta", "badge": "SUMMARIZED FROM", "title": title[:80], "line": "Follow for more", "play": False, "arrow": False}
     plan["sections"].append({"id": f"b{len(plan['sections'])}", "title": "Call to action", "vo": cta_vo, "queries": [], "cta": cta, "visuals": []})
     w = sum(len(s["vo"].split()) for s in plan["sections"])
     for x in plan["sections"]:   # did the fact-check / jargon passes keep the voice?

@@ -13,8 +13,10 @@
 import json, re
 from pathlib import Path
 
-SKETCH = ("a courtroom sketch artist's drawing: charcoal and soft pastel on cream paper, loose quick strokes, visible paper grain, "
-          "seen from a different angle than any photo of them, clearly a hand-drawn illustration, not a photograph")
+# the STYLE of a courtroom sketch, never the place: the first run put a settler leader "in a courtroom setting"
+SKETCH = ("a hand-drawn illustration in the style of a courtroom sketch artist (charcoal and soft pastel on cream paper, loose quick "
+          "strokes, visible paper grain), seen from a different angle than any photo of them, not a photograph. Only the drawing "
+          "style is borrowed: the scene is where the story happens, never a courtroom, judge or trial")
 
 DESCRIBE_RULE = ("Describe people as they look (age, hair, clothing, expression, what they are doing); do not anonymise anyone. "
                  "Ignore the screen layout: no split screens, video-call panels, picture-in-picture boxes, lower thirds or studio "
