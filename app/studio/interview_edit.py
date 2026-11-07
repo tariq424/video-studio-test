@@ -80,6 +80,18 @@ def _vo(p):
     return m.get("text") or " ".join(w[0] for w in (p.get("words") or []))
 
 
+def _pic_rungs(p):
+    """The scrubber's "Made by" for an interview piece: your footage, a title card, a photo, or the ladder rung of an insert."""
+    src = _pic_source(p) or ""
+    head = src.split(" · ")
+    if head[0] == "Ladder" and len(head) > 1:
+        from .edit import RUNG_NAMES
+        r = head[1].split(": ", 1)[-1]   # "ai_image: AI image (chatgpt) -> image-to-video" -> the readable part
+        return [RUNG_NAMES.get(head[1], r)]
+    if len(head) == 1 and "_narr" in head[0]: return ["Narration over a picture"]
+    return [{"Card": "Title / end card", "Picture": "Narration picture", "Insert": "Insert over blurred footage"}.get(head[0], head[0])] if head[0] else []
+
+
 def _pic_source(p):
     """Editor-only note (owner, 2026-10-27): where this piece's picture came from - the ladder rung that
     supplied it (read from the sibling <k>_insert.json the build wrote), a photo credit, or the footage
@@ -119,7 +131,8 @@ def beats(job):
     for i, p in enumerate(m["parts"]):
         d = float(p.get("dur") or media.dur(p["file"]))
         out.append({"id": f"p{i:02}", "start": round(t, 3), "dur": round(d, 3), "label": _label(p, i), "vo": _vo(p)[:600],
-                    "editable": (p.get("m") or {}).get("type") in ("bite", "fact", "narr"), "own": True, "source": _pic_source(p)})
+                    "editable": (p.get("m") or {}).get("type") in ("bite", "fact", "narr"), "own": True, "source": _pic_source(p),
+                    "rungs": _pic_rungs(p)})
         t += d
     return {"kind": "short" if k == "short" else "long", "beats": out}
 

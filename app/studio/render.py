@@ -221,6 +221,18 @@ def vo_slice(plan, s, v, pad=6):
     return " ".join(words[max(0, a - pad):min(len(words), b + pad)])
 
 def v2_after_wangp(cfg, job, v, vo, log):
+    """-> rung name. Never raises (cancel aside): any failure is logged and the beat gets the headline card (2026-11-06)."""
+    try:
+        return _v2_after_wangp(cfg, job, v, vo, log)
+    except Exception as e:
+        if str(e) == "cancelled": raise
+        log(f"  {v.get('id', '?')}: ladder failed ({type(e).__name__}: {str(e)[:120]}); headline card")
+        v["type"] = "motion"; v["g"] = {"kind": "headline", "kicker": "", "text": " ".join(str(vo).split()[:12]), "sub": ""}
+        v["tag"] = v.get("tag") or "HEADLINE"
+        return "headline"
+
+
+def _v2_after_wangp(cfg, job, v, vo, log):
     """Visual ladder v2 for an explainer visual that the cloud and WanGP didn't cover (WanGP draws atmospheric beats only):
     5 Remotion graphics (motion/<id>.mp4, GRAPHICS burned in) -> 6 physics module (drawn live by the explainer, SIMULATION) ->
     headline card (the illustration rung was removed 2026-10-21). CapCut is Shorts-only for now.
@@ -296,7 +308,13 @@ def _do_motion_inner(job, plan, cfg, wg, log, stop):
                 from . import physics
                 lock = illustrate.wangp_lock({"id": v["id"], "vo": s.get("vo", ""), "still_prompt": v.get("prompt", "")}, _ents(job)) \
                     or ("action" if physics.action({"vo": vs, "subject": v.get("subject")})[0] else "")
-                if lock: v2_after_wangp(cfg, job, v, vs, log); continue
+                if lock:
+                    try: v2_after_wangp(cfg, job, v, vs, log)
+                    except Exception as e:   # a rung never stops the job: log it, the headline card is the floor
+                        if str(e) == "cancelled": raise
+                        log(f"  {v['id']}: ladder failed ({type(e).__name__}: {str(e)[:120]}); headline card")
+                        v["type"] = "motion"; v["g"] = {"kind": "headline", "kicker": "", "text": " ".join(vs.split()[:12]), "sub": ""}
+                    continue
             elif illustration_still(cfg, job, v, s.get("vo", ""), log): continue   # animated illustration clip (motion/<id>.mp4)
             ok = False
             for t in range(2):

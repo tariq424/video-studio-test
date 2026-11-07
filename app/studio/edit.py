@@ -375,6 +375,55 @@ def _vis_source(v):
     return " · ".join(bits)
 
 
+RUNG_NAMES = {"own": "Your footage", "stock": "Stock footage", "photo": "Real photo", "source": "Source clip", "imagegen": "AI image",
+              "meta chain": "Meta image → video (from a snapshot)", "meta video": "Meta video", "flow": "Google Flow video",
+              "blender": "Blender scene", "still": "WanGP still", "animate": "WanGP animation", "parallax": "AI still + parallax",
+              "simulation": "Physics simulation", "graphics": "Remotion graphics", "headline": "Headline card", "map": "Map",
+              "cloud": "Cloud still", "reconstruction": "3D reconstruction", "illustration": "Illustration", "silhouette": "Silhouette"}
+SITES = {"cloudflare": "Cloudflare", "hf": "Hugging Face", "chatgpt": "ChatGPT", "bing": "Bing", "meta": "Meta", "gemini": "Gemini"}
+
+
+def rung_label(it):
+    """Which ladder rung made this picture, in plain words (scrubber, editor, Newsroom), from what a timeline keeps:
+    the item's rung/site when present, else its on-screen tag and file path. "" when unknown."""
+    if not isinstance(it, dict): return ""
+    tag = str(it.get("tag") or "").upper().replace("·", "·")
+    src = str(it.get("src") or (it.get("layers") or [""])[0] or it.get("stock") or "").replace("\\", "/").lower()
+    name = src.split("/")[-1]
+    rung = str(it.get("rung") or ""); g = it.get("g") or {}
+    if it.get("user") or it.get("own_n") or rung in ("own", "supplied"): return "Your footage"
+    if rung == "meta chain" or "chain/" in src: return "Meta image → video (from a snapshot)"
+    if rung == "imagegen" and it.get("site"): return f"{SITES.get(it['site'], it['site'])} image" + (" + parallax" if it.get("type") == "layers" else "")
+    if rung == "source" or tag.startswith("SOURCE") or "source_excerpts/" in src: return "Source clip"
+    if rung == "blender" or "BLENDER" in tag: return "Blender scene"
+    if rung == "flow" or "FLOW" in tag: return "Google Flow video"
+    if rung == "meta video" or (tag.endswith("· META") and it.get("type") == "video"): return "Meta video"
+    if rung == "simulation" or tag in ("SIMULATION", "SYNTHETIC") or src.endswith("_physics.mp4"):
+        return "Physics simulation" + (" (synthetic data)" if tag == "SYNTHETIC" or g.get("synthetic") else "")
+    if rung == "graphics" or tag == "GRAPHICS" or "graphics/" in src: return "Remotion graphics"
+    if rung == "headline" or g.get("kind") == "headline": return "Headline card"
+    if rung == "map" or g.get("kind") in ("map", "route", "simmap"): return "Map"
+    m = re.match(r"GENERATED · (\w+)", tag)
+    if m and m.group(1).lower() in SITES: return f"{SITES[m.group(1).lower()]} image" + (" + parallax" if it.get("type") == "layers" else "")
+    if "PARALLAX" in tag or rung == "parallax": return "AI still + parallax"
+    if tag == "GENERATED" or rung in ("still", "animate"): return "WanGP " + ("animation" if rung == "animate" else "still")
+    if "CLOUD" in tag or rung == "cloud": return "Cloud still"
+    if rung == "photo" or it.get("credit") or "photo" in src: return "Real photo"
+    if rung == "stock" or "stock/" in src or tag == "ILLUSTRATIVE":
+        return "Stock footage" + (" (Pexels)" if name.startswith("px") else " (Pixabay)" if name.startswith("pb") else "")
+    if rung == "reconstruction": return "3D reconstruction"
+    if rung in ("illustration", "silhouette"): return rung.capitalize()
+    return ""
+
+
+def _beat_rungs(items):
+    out = []
+    for it in items:
+        lab = rung_label(it)
+        if lab and lab not in out: out.append(lab)
+    return out
+
+
 def _bg_source(bgs, sec):
     """Editor-only note for a Short beat: its timeline backgrounds (type, tag/credit, file), plus the
     plan section's AI-image prompt when the picture was generated."""
@@ -397,10 +446,13 @@ def _bg_source(bgs, sec):
     return "; ".join(notes)
 
 
-def beats(job):
-    """The timeline for the job page: {kind, beats: [{id, start, dur, label, editable}]}."""
+def beats(job, want=None):
+    """The timeline for the job page: {kind, beats: [{id, start, dur, label, editable, rungs}]}. want: "short" / "long" to read
+    that output's timeline without changing the editor's target (Newsroom's rung strip)."""
     if _iv(job): return _ie().beats(job)
     k = kind(job)
+    if want == "short": k = "short"
+    elif want == "long" and "long" in outputs(job): k = _long_kind(job)
     if k == "short":
         tz = _teaser(job)
         from .pipeline import Job
@@ -409,7 +461,8 @@ def beats(job):
         secs = {s["id"]: s for s in plan["sections"]}
         return {"kind": "short", "beats": [{"id": b["id"], "start": b["start"], "dur": b["dur"], "label": f"Beat {i + 1}", "vo": vo.get(b["id"], ""),
                                              "editable": b["id"] not in cta, "own": any(_is_own(g) for g in b["bgs"]),
-                                             "source": _bg_source(b["bgs"], secs.get(b["id"]))} for i, b in enumerate(tz["beats"])]}
+                                             "source": _bg_source(b["bgs"], secs.get(b["id"])),
+                                             "rungs": _beat_rungs([_bg_item(g) or g for g in b["bgs"]])} for i, b in enumerate(tz["beats"])]}
     if k in ("long", "explainer"):
         tz = _tl_json(job, "explainer") if k == "explainer" else None
         def own(b):
@@ -418,7 +471,8 @@ def beats(job):
             tb = next((x for x in tz["beats"] if x["id"] == b.get("beat")), None)
             idx = next((ix for sl, ix in _slots(tb) if sl == b["vi"]), []) if tb else []
             return any(_is_own(tb["bgs"][i]) for i in idx)
-        return {"kind": k, "beats": [dict({k2: b[k2] for k2 in ("id", "start", "dur", "label", "vo", "editable")}, own=own(b), source=_vis_source(b.get("visual"))) for b in long_layout(job)]}
+        return {"kind": k, "beats": [dict({k2: b[k2] for k2 in ("id", "start", "dur", "label", "vo", "editable")}, own=own(b), source=_vis_source(b.get("visual")),
+                                       rungs=_beat_rungs([b.get("visual") or {}])) for b in long_layout(job)]}
     return {"kind": None, "beats": []}
 
 # ---------------------------------------------------------------- workspaces (where a beat's candidates live)

@@ -18,7 +18,11 @@ def ff(*a, check=True, timeout=900, cwd=None):
 def dur(p, tries=4):
     import time
     for i in range(tries):   # a just-written file can be briefly unreadable
-        o = subprocess.run([_bin("ffprobe"), "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(p)], capture_output=True, text=True).stdout.strip()
+        try:   # a corrupt / half-written file must never stall the ladder
+            o = subprocess.run([_bin("ffprobe"), "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(p)],
+                               capture_output=True, text=True, timeout=60).stdout.strip()
+        except subprocess.TimeoutExpired:
+            o = ""
         try: return float(o)
         except ValueError: time.sleep(3)
     raise RuntimeError(f"can't read duration of {p}")
@@ -26,12 +30,12 @@ def ok(p, mind=0.5):
     try: return os.path.exists(p) and dur(p) >= mind
     except Exception: return False
 def silences(wav, noise="-35dB", d=0.25):
-    e = subprocess.run([_bin("ffmpeg"), "-hide_banner", "-i", str(wav), "-af", f"silencedetect=n={noise}:d={d}", "-f", "null", "-"], capture_output=True, text=True).stderr
+    e = subprocess.run([_bin("ffmpeg"), "-hide_banner", "-i", str(wav), "-af", f"silencedetect=n={noise}:d={d}", "-f", "null", "-"], capture_output=True, text=True, timeout=600).stderr
     st = [float(x) for x in re.findall(r"silence_start: ([\d.]+)", e)]; en = [float(x) for x in re.findall(r"silence_end: ([\d.]+)", e)]
     return list(zip(st, en))
 def mouth_score(video):
     W, H = 832, 448
-    raw = subprocess.run([_bin("ffmpeg"), "-v", "error", "-i", str(video), "-vf", f"scale={W}:{H},format=gray", "-f", "rawvideo", "-"], capture_output=True).stdout
+    raw = subprocess.run([_bin("ffmpeg"), "-v", "error", "-i", str(video), "-vf", f"scale={W}:{H},format=gray", "-f", "rawvideo", "-"], capture_output=True, timeout=600).stdout
     v = np.frombuffer(raw, np.uint8).reshape(-1, H, W).astype(np.float32)
     if len(v) < 3: return 0.0
     m = v[:, int(H * .50):int(H * .66), int(W * .40):int(W * .60)]

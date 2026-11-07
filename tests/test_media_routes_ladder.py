@@ -79,19 +79,52 @@ class Ladder(unittest.TestCase):
 
     def test_runs_inside_video_studio(self):
         """The routes are Video Studio's own (studio/routelib, this Python), never the media-poc setup folder."""
-        import subprocess as sp
         with tempfile.TemporaryDirectory() as data:
             (Path(data) / "profiles").mkdir()
             seen = {}
-            def fake(cmd, **kw):
-                seen.update(cmd=cmd, env=kw.get("env"), cwd=kw.get("cwd"))
-                return sp.CompletedProcess(cmd, 2, stdout='{"status": "blocker", "note": "x"}', stderr="")
-            with patch("subprocess.run", side_effect=fake):
+            class FakeProc:
+                pid, returncode = 4242, 2
+                def __init__(self, cmd, **kw): seen.update(cmd=cmd, env=kw.get("env"), cwd=kw.get("cwd"))
+                def communicate(self, timeout=None): return '{"status": "blocker", "note": "x"}', ""
+            with patch("subprocess.Popen", FakeProc):
                 mediaroutes.run({"media_routes_data": data}, "r6", "a jet", "16:9", Path(data) / "o.jpg", lambda _: None)
             self.assertEqual(seen["cmd"][0], sys.executable)
             self.assertEqual(seen["cmd"][1:3], ["-m", "studio.routelib.run_route"])
             self.assertEqual(seen["env"]["VS_MEDIA_DATA"], data)
             self.assertNotIn("media-poc", " ".join(seen["cmd"]) + str(seen["cwd"]))
+
+    def test_timeout_kills_the_route_and_moves_on(self):
+        """Never hang: a route past its limit is killed with its whole process tree (its Chrome too) and the ladder moves on."""
+        import subprocess as sp
+        with tempfile.TemporaryDirectory() as data:
+            (Path(data) / "profiles").mkdir()
+            killed, logs = [], []
+            class SlowProc:
+                pid, returncode = 4243, None
+                def __init__(self, cmd, **kw): self.n = 0
+                def communicate(self, timeout=None):
+                    self.n += 1
+                    if self.n == 1: raise sp.TimeoutExpired("route", timeout)
+                    return "", ""
+                def kill(self): killed.append("kill")
+            real_run = sp.run
+            def fake_run(cmd, **kw):
+                if cmd and cmd[0] == "taskkill": killed.append(cmd); return sp.CompletedProcess(cmd, 0, "", "")
+                return real_run(cmd, **kw)
+            with patch("subprocess.Popen", SlowProc), patch("subprocess.run", side_effect=fake_run):
+                r = mediaroutes.run({"media_routes_data": data}, "r13", "x", "16:9", Path(data) / "o.mp4", logs.append, timeout=1)
+            self.assertIsNone(r)
+            self.assertTrue(killed)
+            if sys.platform == "win32": self.assertIn("/T", killed[0])
+            self.assertTrue(any("stopped" in l and "next rung" in l for l in logs))
+
+    def test_v2_after_wangp_never_raises(self):
+        from studio import render
+        with tempfile.TemporaryDirectory() as job, patch.object(render, "_v2_after_wangp", side_effect=ValueError("boom")):
+            v, logs = {"id": "v1"}, []
+            self.assertEqual(render.v2_after_wangp({}, Path(job), v, "The plane landed safely", logs.append), "headline")
+            self.assertEqual(v["g"]["kind"], "headline")
+            self.assertTrue(any("ladder failed" in l for l in logs))
 
     def test_flow_off_spends_nothing(self):
         with tempfile.TemporaryDirectory() as sd:

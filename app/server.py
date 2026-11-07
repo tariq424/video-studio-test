@@ -222,6 +222,17 @@ def edit_beats(jid):
                                  target=edit.kind(j.dir), last=j.state.get("edit_last"))
     return jsonify(out)
 
+@app.get("/api/jobs/<jid>/rungs")
+def job_rungs(jid):
+    """Read-only: each beat's start / length and the ladder rung(s) that made its picture (Newsroom's player strip).
+    ?kind=short|long. Never changes the editor's target."""
+    from studio import edit
+    j = studio.job(jid)
+    want = request.args.get("kind") if request.args.get("kind") in ("short", "long") else None
+    try: out = edit.beats(j.dir, want)
+    except Exception as e: return jsonify(error=str(e)[:300], kind=None, beats=[])
+    return jsonify(kind=out.get("kind"), beats=[{k: b.get(k) for k in ("id", "start", "dur", "label", "rungs")} for b in out.get("beats", [])])
+
 def _editor_ns():
     return None if VS_PORT == 42020 else str(VS_PORT)
 

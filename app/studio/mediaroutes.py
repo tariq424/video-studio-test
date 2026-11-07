@@ -41,11 +41,21 @@ def run(cfg, route, desc, aspect, out, log, image=None, timeout=None):
     env = dict(os.environ, VS_MEDIA_DATA=str(d), PYTHONIOENCODING="utf-8")
     t0 = time.time()
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+    limit = int(timeout or cfg.get("media_routes_timeout", 900))
+    proc = subprocess.Popen(cmd, cwd=str(APP), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            encoding="utf-8", errors="replace", creationflags=flags)
     try:
-        p = subprocess.run(cmd, cwd=str(APP), env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           timeout=int(timeout or cfg.get("media_routes_timeout", 900)), creationflags=flags)
+        out_s, err_s = proc.communicate(timeout=limit)
     except subprocess.TimeoutExpired:
-        log(f"  {route}: no answer within {timeout or cfg.get('media_routes_timeout', 900)} s; next rung"); return None
+        # never hang the ladder: kill the route AND the Chrome it started (an orphaned Chrome keeps the profile locked)
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=30)
+        else:
+            proc.kill()
+        try: proc.communicate(timeout=30)
+        except Exception: pass
+        log(f"  {route}: no answer within {limit} s (stopped); next rung"); return None
+    p = subprocess.CompletedProcess(cmd, proc.returncode, out_s, err_s)
     line = next((l for l in reversed((p.stdout or "").splitlines()) if l.startswith("{")), "")
     try: res = json.loads(line)
     except ValueError: res = {"status": "failed", "note": ((p.stderr or p.stdout or "no output").strip().splitlines() or ["?"])[-1][:200]}

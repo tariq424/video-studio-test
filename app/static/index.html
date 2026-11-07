@@ -243,7 +243,8 @@ async function savePlan(ap){planCache.title=$('pt').value;planCache.subtitle=$('
  await j(`/api/jobs/${sel}/plan`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(planCache)});if(ap)await act('approve');else{editing=false;lastKey='';loadDetail()}}
 
 // ---------------- visual review
-const RUNG={own:'Your footage',stock:'Stock footage',photo:'Real photo',cloud:'Cloud still',illustration:'Illustration',silhouette:'Silhouette',simulation:'Simulation',still:'AI still',animate:'AI animation',parallax:'Parallax',reconstruction:'3D reconstruction',headline:'Headline card',map:'Map',supplied:'Your file'};
+const RUNG={own:'Your footage',stock:'Stock footage',photo:'Real photo',cloud:'Cloud still',illustration:'Illustration',silhouette:'Silhouette',simulation:'Simulation',still:'AI still',animate:'AI animation',parallax:'Parallax',reconstruction:'3D reconstruction',headline:'Headline card',map:'Map',supplied:'Your file',source:'Source clip',imagegen:'AI image',graphics:'Remotion graphics','meta chain':'Meta image → video',
+ 'meta video':'Meta video',flow:'Google Flow video',blender:'Blender scene','parallax (fill)':'Parallax'};
 let RV=null,rvSel={},rvTimer=null,rvOpen={};
 async function showReview(){try{RV=await j(`/api/jobs/${sel}/review`)}catch(e){if(!DBG_PAUSED)$('rvp').innerHTML='<p class="mut">Review data not ready yet.</p>';return}drawReview();
  clearTimeout(rvTimer);if(Object.values(RV.beats).some(b=>b.busy))rvTimer=setTimeout(()=>{if($('rvp'))showReview()},4000)}
@@ -428,18 +429,19 @@ function scDraw(){const el=$('scrub'),v=$('ov');if(!el||!v)return;const d=ED.las
   <button class="sec ${tgt=='short'?'on':''}" data-testid="scrub-pick-short" aria-pressed="${tgt=='short'}" ${has('short')&&!d.busy?'':'disabled'} onclick="${tgt=='short'?'':"edTarget('short')"}">Short</button>
   <button class="sec ${tgt!='short'?'on':''}" data-testid="scrub-pick-long" aria-pressed="${tgt!='short'}" ${has('long')&&!d.busy?'':'disabled'} onclick="${tgt!='short'?'':"edTarget('long')"}">Explainer</button></div>`;
  h+=`<input type="range" id="scr_r" data-testid="scrub-range" aria-label="Scrub the video" min="0" max="${D.toFixed(2)}" step="0.05" value="${(v.currentTime||0).toFixed(2)}" oninput="scSeek(this.value)" style="width:100%;margin:0">`;
- if(D>0&&ED.beats.length)h+=`<div class="sc-strip">${ED.beats.map(b=>`<div class="sc-seg ${b.editable?'':'off'}" data-beat="${b.id}" title="${esc(b.label)} (${fmtT(b.start)})" style="left:${(b.start/D*100).toFixed(3)}%;width:${(b.dur/D*100).toFixed(3)}%" onclick="scSeek(${(b.start+Math.min(0.5,b.dur/2)).toFixed(2)})">${ED.kind=='short'?(b.label||'').replace(/^Beat /,''):b.id}</div>`).join('')}</div>`;
+ if(D>0&&ED.beats.length)h+=`<div class="sc-strip">${ED.beats.map(b=>`<div class="sc-seg ${b.editable?'':'off'}" data-beat="${b.id}" title="${esc(b.label)} (${fmtT(b.start)})${(b.rungs||[]).length?' — '+esc(b.rungs.join(', ')):''}" style="left:${(b.start/D*100).toFixed(3)}%;width:${(b.dur/D*100).toFixed(3)}%" onclick="scSeek(${(b.start+Math.min(0.5,b.dur/2)).toFixed(2)})">${ED.kind=='short'?(b.label||'').replace(/^Beat /,''):b.id}</div>`).join('')}</div>`;
  h+=`<div class="row" style="align-items:center;gap:8px;margin-top:6px">
   <button class="sec" data-testid="scrub-play" onclick="$('ov').play()">▶ Play</button><button class="sec" data-testid="scrub-stop" onclick="$('ov').pause()">■ Stop</button>
   <span data-testid="scrub-time" id="scr_t" style="font-variant-numeric:tabular-nums;font-weight:600">0:00.0</span><span class="mut" style="font-size:13px">/ ${fmtTs(D)}</span>
   <span data-testid="scrub-beat" id="scr_b" class="rv-badge">—</span>
-  <button data-testid="scrub-edit" id="scr_e" onclick="scEdit()" disabled>Edit this beat</button></div><div id="scr_source" data-testid="scrub-source" class="src-note" hidden></div></div>`;
+  <button data-testid="scrub-edit" id="scr_e" onclick="scEdit()" disabled>Edit this beat</button></div><div id="scr_rung" data-testid="scrub-rung" class="src-note" style="font-weight:600" hidden></div><div id="scr_source" data-testid="scrub-source" class="src-note" hidden></div></div>`;
  el.innerHTML=h;scTick()}
 function scSeek(t){const v=$('ov');if(!v)return;v.currentTime=+t;scTick()}
 function scTick(){const v=$('ov'),r=$('scr_r');if(!v||!r)return;const t=v.currentTime||0;
  if(document.activeElement!==r)r.value=t.toFixed(2);if(isFinite(v.duration)&&+r.max<v.duration)r.max=v.duration.toFixed(2);
  $('scr_t').textContent=fmtTs(t);const b=edAt(t),busy=(ED.last||{}).busy;
  const source=$('scr_source');if(source){source.hidden=!b?.source;source.textContent=b?.source?'Picture source: '+b.source:''}
+ const rg=$('scr_rung');if(rg){const rs=(b&&b.rungs)||[];rg.hidden=!rs.length;rg.textContent=rs.length?`Made by: ${rs.join(' · ')}`:''}
  $('scr_b').textContent=b?(b.label+(ED.kind!='short'?' · '+b.id:'')+(b.editable?'':' (not editable)')):(ED.beats.length?'between beats':'beats not loaded');
  $('scr_b').dataset.beat=b?b.id:'';
  const e=$('scr_e');e.disabled=!(b&&b.editable)||!!busy||!v.paused;e.title=!v.paused?'Stop the video first':busy?String(busy):'';
