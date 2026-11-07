@@ -427,9 +427,10 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         c = chs.get(sec["id"], {})
         return {"bid": sec["id"], "n": int(sec["id"][1:]) + 1, "vo": sec["vo"], "stock_found": c.get("stock_found", len(pick.get(sec["id"], []))),
                 "uses": c.get("uses", []), "failed": c.get("failed", [])}
-    if v2: log("Visual ladder v2 per beat (1 stock -> 2 source clip -> 3 image generator (Gemini: describe the source screenshot, "
-               "write a prompt, generate a new image) -> 4 source parallax (rembg + Remotion) -> 5 Google Flow (paid, last) -> "
-               "6 WanGP (on demand) -> 7 physics -> 8 Remotion graphics -> 9 headline card):")
+    if v2: log("Visual ladder v2 per beat (1 stock -> 2 source clip -> 3a snapshot described -> Meta image -> Meta video -> "
+               "3 image services (" + " -> ".join(cfg.get("imagegen_providers") or []) + ") -> 3b Blender (subject beats) -> "
+               "4 parallax -> 5 Meta video -> Google Flow" + ("" if cfg.get("flow_on", True) else " (off)") + " -> 6 WanGP (on demand) -> "
+               "7 physics -> 8 Remotion graphics -> 9 headline card):")
     else: log("Visual ladder per beat (1 stock/photo -> 2 cloud still -> 3 WanGP still -> 4 parallax -> 5 illustration / silhouette -> 6 reconstruction / headline; animate on click):")
     for s in beats:   # beats step 1 covered on its own
         if s["id"] in base_needs: continue
