@@ -505,6 +505,36 @@ def text_unrelated(cfg, narration, seen, log=print, story=""):
     return _RELATE_CACHE[key]
 
 
+TITLE = """A news video and the title a stock-footage site gives to a clip that would play over one of its lines.
+What the whole video is about: "{story}"
+The story is set in: "{place}"
+Narration line: "{narration}"
+Clip title: "{title}"
+Does the title show the clip CONTRADICTS the story: it names a different country, city or region than the story's (a Brazilian
+flag over Rio, a Turkish flag, Paris streets for a story set in Israel), another country's flag, or something clearly unrelated
+to both the line and the story? Generic scenes with no named place (a desert road, a hillside, an office) do not contradict.
+Reply with JSON only: {{"contradicts": true or false, "why": "a few words"}}"""
+_TITLE_CACHE = {}
+
+
+def title_contradicts(cfg, title, narration, place="", story="", log=print):
+    """Text check of the stock site's own clip title against the story (Nov 7: with vision vetting off, a "vibrant brazilian
+    flag over rio favela" clip played over a line about Israeli sovereignty). Runs even when vision vetting is off or down.
+    -> reason string, or "" (also when it can't tell)."""
+    if not cfg.get("clip_title_check", True) or not title or not (narration or story): return ""
+    key = (title[:200], narration[:200], place)
+    if key not in _TITLE_CACHE:
+        try:
+            with LLM(cfg, log, lambda: False) as llm:
+                j = llm.chat_json("You are a precise video editor. Reply with JSON only.",
+                                  TITLE.format(story=(story or narration)[:400].replace('"', "'"), place=(place or "not stated").replace('"', "'"),
+                                               narration=(narration or "")[:400].replace('"', "'"), title=title[:200].replace('"', "'")), max_tokens=80)
+            _TITLE_CACHE[key] = (str(j.get("why") or "contradicts the story")[:60]) if str(j.get("contradicts")).strip().lower() in ("true", "yes", "1") else ""
+        except Exception:
+            _TITLE_CACHE[key] = ""
+    return _TITLE_CACHE[key]
+
+
 def literal(main, kind, narration):
     """The beat's main subject only binds when the line actually names it ("beachfront property" for a line about property
     transfers, not "a bank vault" the script AI imagined for a line about money)."""
@@ -544,6 +574,9 @@ def verify(cfg, c, sheet_path, log, subject=None, ref=None, avoid=None, narratio
     from PIL import Image, ImageStat
     if sum(ImageStat.Stat(Image.open(sheet_path).convert("L")).mean) < 28: return False, "too dark", ""
     if sharpness(sheet_path) < 6: return False, "soft/blurry", ""
+    if not subject and not neutral:
+        why = title_contradicts(cfg, c.get("desc", ""), narration or c.get("query", ""), (mainv or {}).get("place") or place, story, log)
+        if why: return False, f"its title contradicts the story ({why})", c.get("desc", "")
     if cfg.get("vet_provider", "local") == "off":
         return (not subject), ("subject can't be confirmed with vetting off" if subject else ""), c["desc"]
     img = sheet_path

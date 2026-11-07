@@ -15,7 +15,6 @@ $Settings.ffmpeg_dir = ''
 $Settings.short_concurrency = '2'
 $Settings.long_renderer = 'remotion'
 $Settings.qa_provider = 'off'
-$Settings.vet_provider = 'off'
 $Settings.cloud_on = $false
 [IO.File]::WriteAllText($SettingsPath, ($Settings | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding($false)))
 $env:PORT = '42020'
