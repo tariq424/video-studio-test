@@ -74,12 +74,12 @@ def create():
     sp = (b.get("src_path") or "").strip().strip('"')
     if sp and not (f and f.filename):   # a file on this PC by path (the /make page can't put a file into an upload field)
         if not Path(sp).is_file(): return jsonify(error=f"File not found on this PC: {sp}"), 400
-        if not kind_of(Path(sp).name): return jsonify(error="Unsupported file type. Use audio (.mp3 .m4a .wav ...) or .txt .md .pdf .docx"), 400
+        if not kind_of(Path(sp).name): return jsonify(error="Unsupported file type. Use video (.mp4 .mov ...), audio (.mp3 .m4a .wav ...) or .txt .md .pdf .docx"), 400
         class _F:   # looks like an uploaded file to Studio.create
             filename = Path(sp).name
             def save(self, dst): import shutil; shutil.copy2(sp, dst)
         f = _F()
-    if f is not None and f.filename and not kind_of(f.filename): return jsonify(error="Unsupported file type. Use audio (.mp3 .m4a .wav ...) or .txt .md .pdf .docx"), 400
+    if f is not None and f.filename and not kind_of(f.filename): return jsonify(error="Unsupported file type. Use video (.mp4 .mov ...), audio (.mp3 .m4a .wav ...) or .txt .md .pdf .docx"), 400
     if b.get("mode") == "smoke" and not b.get("url") and not b.get("transcript") and not (f and f.filename):   # no source: the standard smoke video
         from studio import config as _cfg; b["url"] = _cfg.load().get("smoke_source", "")
     if not b.get("url") and not b.get("transcript") and not (f and f.filename): return jsonify(error="Give a YouTube link, a file, or paste some text."), 400

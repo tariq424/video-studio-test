@@ -103,3 +103,9 @@ def test_action_beats_go_to_video_before_stills():
     assert physics.event_action("Protesters stormed the gate and set the building on fire.") == "stormed"
     assert physics.event_action("They threatened to storm the gate.") == ""   # hypothetical: not shown as happening
     assert physics.event_action("She says settling Gaza is the only way.") == ""
+
+
+def test_own_footage_uploads_are_accepted():
+    from studio import sources
+    for name in ("IMG_0001.MOV", "clip.m4v", "talk.mkv", "a.mp4", "a.mp3"):
+        assert sources.kind_of(name) == "audio", name

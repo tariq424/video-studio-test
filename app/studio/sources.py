@@ -3,7 +3,8 @@ Every source ends up as src/transcript.txt + src/meta.json, so the rest of the p
 import json, re, time
 from pathlib import Path
 
-AUDIO = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac", ".opus", ".webm", ".mp4"}
+AUDIO = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac", ".opus", ".webm", ".mp4",
+         ".mov", ".m4v", ".mkv"}   # video files too: the speech is transcribed and your footage's GPS colours the story (place.py)
 DOCS = {".txt", ".md", ".pdf", ".docx"}
 
 def kind_of(name):

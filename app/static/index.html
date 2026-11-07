@@ -105,7 +105,7 @@ html.popup #detail > :not(video):not(#scrub):not(#edbar):not(#edp){display:none}
   <label>Source</label><select id="srck" data-testid="input-type" aria-label="Source" onchange="srcUI()"><option value="yt">YouTube link</option><option value="file">Upload a file (NotebookLM audio, .mp3/.m4a/.wav, or .pdf/.docx/.txt/.md)</option><option value="text">Paste text (notes, briefing doc)</option></select>
   <div id="s_yt"><label>YouTube link</label><input id="url" data-testid="youtube-url" aria-label="YouTube link" type="text" placeholder="https://www.youtube.com/watch?v=...">
    <details><summary>Paste a transcript too (if the video has no captions)</summary><textarea id="tx" data-testid="transcript-text"></textarea></details></div>
-  <div id="s_file" style="display:none"><label>File</label><input id="upf" data-testid="file-upload" type="file" accept=".mp3,.m4a,.wav,.aac,.ogg,.flac,.opus,.webm,.mp4,.txt,.md,.pdf,.docx">
+  <div id="s_file" style="display:none"><label>File</label><input id="upf" data-testid="file-upload" type="file" accept=".mp4,.mov,.m4v,.mkv,.mp3,.m4a,.wav,.aac,.ogg,.flac,.opus,.webm,.txt,.md,.pdf,.docx">
    <label>…or a file path on this PC</label><input id="upp" data-testid="file-path" aria-label="File path on this PC" type="text" placeholder="F:\notebooklm\briefing.m4a"></div>
   <div id="s_text" style="display:none"><label>Text</label><textarea id="ptx" data-testid="source-text" aria-label="Source text" rows="8" placeholder="Paste NotebookLM notes, a briefing doc, an article..."></textarea></div>
   <div id="s_meta" style="display:none"><label>Title of the source (shown in credits)</label><input id="stt" data-testid="source-title" aria-label="Source title" type="text" placeholder="e.g. The economics of AI agents">
