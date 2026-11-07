@@ -116,6 +116,9 @@ class Studio:
         if not self.live:
             self._refuse_live_jobs_dir()
         try:   # jobs cut off by an app restart or PC reboot: show them as stopped (press Resume) instead of a stale "running"
+            import os, sys
+            if "pytest" in sys.modules and not os.environ.get("VS_TEST_LIVE_SCAN"):
+                raise RuntimeError("under pytest: never touch real jobs")   # a test must not stop a job running on 42020
             for d in self.jobs_dir().iterdir():
                 if d.is_dir() and (d / "state.json").exists():
                     j = Job(d)

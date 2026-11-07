@@ -37,10 +37,15 @@ def test_learn_merge_apply_remove(monkeypatch):
 
 
 def test_endpoints(monkeypatch):
-    import server
+    # Importing server builds the LIVE Studio (port 42020): it marks running jobs in the jobs folder "stopped" and starts a job
+    # worker. Point it at a temporary jobs folder and keep its threads from starting BEFORE the import (Nov 6: this test
+    # stopped a real job running on 42020).
+    import threading
     from studio import config
     tmp = Path(tempfile.mkdtemp())
     monkeypatch.setattr(config, "load", lambda: {"jobs_dir": str(tmp / "jobs")})
+    monkeypatch.setattr(threading.Thread, "start", lambda self: None)
+    import server
     c = server.app.test_client()
     assert c.get("/api/style").get_json() == {"rules": []}
     r = c.post("/api/style", json={"rule": "Keep hooks under 8 words.", "area": "script"}).get_json()["rule"]
