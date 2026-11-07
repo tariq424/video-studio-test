@@ -480,6 +480,11 @@ class Studio:
                     meta, text = sources.load(j.dir / "src", up, s.get("src_title", ""), s.get("src_credit", ""), log)
                 else:
                     meta, text = self._youtube_transcript(j, s, log)
+                    from . import ytanalysis   # Gemini watches the video: summary, comment verdict + top quotes, commentary
+                    try: ytanalysis.analyze(cfg, s["url"], j.dir / "src", log, stop)
+                    except Exception as e:
+                        if str(e) == "cancelled": raise
+                        log(f"  YouTube analysis failed ({str(e)[:120]}); the script uses the transcript only")
                 j.save(title=meta.get("title", ""))
             elif st == "script":
                 if s.get("provider"): cfg["script_provider"] = s["provider"]

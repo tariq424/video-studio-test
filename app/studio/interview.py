@@ -1183,6 +1183,11 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
     main_segs = segs
     for x in segs: x.setdefault("src", 0)
     work = root / version if version else root; work.mkdir(parents=True, exist_ok=True)
+    from . import place   # place colour from the footage's GPS (owner, 2026-11-06): checked facts + where to use them
+    pc = place.colour(cfg, src, root, log)
+    if pc:
+        notes = list(notes or []) + [n for n in pc["notes"] if n not in (notes or [])]
+        context = (str(context or "") + "\n" + pc["context"]).strip()
     bf = root / "broll.json"   # probing every clip in the folder is slow on a busy PC: once per folder
     broll = json.loads(bf.read_text(encoding="utf-8")) if bf.exists() else broll_list(src)
     bf.write_text(json.dumps(broll, indent=1), encoding="utf-8")
