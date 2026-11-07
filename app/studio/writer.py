@@ -275,7 +275,7 @@ def make_notes(llm, meta, transcript, words, log, stop=None, workdir=None):
     cache = workdir / "notes.txt" if workdir else None
     from .ytanalysis import extra_notes   # Gemini's viewer-reaction analysis (YouTube jobs), appended, never cached into notes.txt
     if cache and cache.exists() and len(cache.read_text(encoding="utf-8").split()) > 100:
-        log("  using notes already made for this source"); return cache.read_text(encoding="utf-8") + extra_notes(workdir)
+        log("  using notes already made for this source"); return _with_extra(cache.read_text(encoding="utf-8"), extra_notes(workdir))
     title, channel = meta.get("title") or "the episode", meta.get("channel") or meta.get("uploader") or "the host"
     chunks = _split(transcript, llm.chunk_words)
     note_budget = max(150, min(600, int(words * 1.6 / len(chunks))))
@@ -289,7 +289,13 @@ def make_notes(llm, meta, transcript, words, log, stop=None, workdir=None):
         raise RuntimeError("The AI returned (nearly) empty notes; stopping so the script isn't invented. Check the model/key.")
     notes_txt = "\n\n".join(f"[Part {i}]\n{n}" for i, n in enumerate(notes, 1))
     if workdir: (workdir / "notes.txt").write_text(notes_txt, encoding="utf-8")
-    return notes_txt + extra_notes(workdir)
+    return _with_extra(notes_txt, extra_notes(workdir))
+
+
+def _with_extra(notes, extra):
+    """The viewer-reaction analysis / place colour FIRST: the Short reads only the first ~24,000 characters of the notes, and on a
+    long source the source notes alone fill that (Nov 6: the counted verdict was cut off and never reached the script)."""
+    return (extra.strip() + "\n\n# Source notes\n\n" + notes) if extra.strip() else notes
 
 def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
     words = int(minutes * cfg["wpm"])

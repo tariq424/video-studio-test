@@ -392,7 +392,7 @@ def rung_label(it):
     name = src.split("/")[-1]
     rung = str(it.get("rung") or ""); g = it.get("g") or {}
     if it.get("user") or it.get("own_n") or rung in ("own", "supplied"): return "Your footage"
-    if rung == "meta chain" or "chain/" in src: return "Meta image → video (from a snapshot)"
+    if rung == "meta chain" or "chain/" in src or re.search(r"_chain\.mp4$", name): return "Meta image → video (from a snapshot)"
     if rung == "imagegen" and it.get("site"): return f"{SITES.get(it['site'], it['site'])} image" + (" + parallax" if it.get("type") == "layers" else "")
     if rung == "source" or tag.startswith("SOURCE") or "source_excerpts/" in src: return "Source clip"
     if rung == "blender" or "BLENDER" in tag: return "Blender scene"

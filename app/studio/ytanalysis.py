@@ -87,9 +87,9 @@ def analyze(cfg, url, srcdir, log, stop=lambda: False):
         (f"; {court['counted']} top YouTube comments were read directly)" if court else "; no comments could be read)"),
         f"Source: {url} (analysed {time.strftime('%Y-%m-%d %H:%M')}).",
         "How to use: the summary is a cross-check for the transcript (the transcript wins on any conflict). " +
-        ("Give the court of public opinion with the counted shares (\"of N top comments, about X% sided with ...\"), quote 1 to 3 of "
-         "the top comments word for word with the handle (\"one viewer, @handle, wrote ...\"), and use the commentary's angle for "
-         "colour, never as fact." if court else
+        ("REQUIRED in the script: one beat near the end gives the court of public opinion with the counted shares (\"of N top "
+         "comments, about X% sided with ...\") and quotes 1 or 2 of the top comments word for word with the handle (\"one viewer, "
+         "@handle, wrote ...\"). Use the commentary's angle for colour, never as fact." if court else
          "Do not mention comments or a public verdict: none were read. The commentary's claims about viewers are unverified: don't use them."),
         "## Summary\n" + summary]
     if court:
@@ -148,10 +148,10 @@ VERDICT = """These are the top comments on a YouTube video. What the video is ab
 Comments, numbered:
 {comments}
 
-1. Name 2 to 4 OPPOSING sides a viewer can take on what the video is about: one per main participant or position, phrased as
-   who the viewer sides with (e.g. "sides with Youssef", "sides with Weiss", "blames the host"). The sides must exclude each other:
-   never two sides that mean the same thing (praising one person and attacking their opponent is the SAME side). Include a side
-   for each main participant even if few comments take it.
+1. Find the video's CENTRAL disagreement and name 2 to 4 OPPOSING sides on it, phrased as who or what the viewer sides with
+   (e.g. "sides with Youssef and the critics", "sides with Weiss", "blames the host / the format"). People who argue the same
+   position are ONE side, never split into several (praising one person and attacking their opponent is also the SAME side).
+   Include each opposing position even if few comments take it.
 2. Assign EVERY comment number to exactly one side, or to "neither" (jokes without a position, off-topic, unclear).
 Reply with ONLY JSON: {{"sides": ["side 1", "side 2"], "labels": {{"0": "side 1", "1": "neither"}}}}"""
 

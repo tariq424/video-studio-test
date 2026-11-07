@@ -550,7 +550,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
             elif item.get("rung") == "meta video":
                 lines.append("Meta video clip")
             elif item.get("rung") == "meta chain":
-                lines.append("snapshot described by Copilot, Meta image animated")
+                lines.append("snapshot described, Meta image animated")
             elif item.get("rung") == "blender":
                 lines.append("Blender scene (MCP)")
         vb = {"g": False, "hard": False, "p": False, "pok": False, "capcut": "", "f": False}   # v2, once per beat: graphics tried / hard-failed, physics tried / fitted
