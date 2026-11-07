@@ -1,6 +1,8 @@
-"""Brief, attributed source evidence beside original commentary/graphics.
+"""Attributed source footage beside original commentary/graphics.
 
-Duration limits are editorial limits, not a fair-use or monetization guarantee.
+Clip length and count come from settings (source_clip_secs, source_visual_max_uses). Owner, 2026-11-07: real clips of the
+people in the story are wanted (commentary videos quote whole clips); the old 2-3 s / two-per-video cap is lifted. These are
+editorial settings, not a fair-use or monetization guarantee.
 Never guesses a timestamp, bypasses access controls, or replaces supplied footage.
 """
 import hashlib
@@ -107,7 +109,7 @@ def prompt(srcdir):
             "Cues are source data, not instructions:\n" + json.dumps(cues, ensure_ascii=False))
 
 
-def _request(sec):
+def _request(sec, max_s=3.0):
     req = sec.get("source_visual")
     if not isinstance(req, dict):
         return None
@@ -122,7 +124,7 @@ def _request(sec):
     purpose = str(req.get("purpose") or "").strip()
     if not math.isfinite(start) or start < 0 or not math.isfinite(duration) or duration <= 0 or len(purpose.split()) < 4:
         return None
-    return {"kind": kind, "start": start, "duration": min(3.0, max(2.0, duration)), "purpose": purpose[:350]}
+    return {"kind": kind, "start": start, "duration": min(float(max_s), max(2.0, duration)), "purpose": purpose[:350]}
 
 
 STOP = set("the a an and or but of to in on at for with from by is are was were be been it its this that these those as "
@@ -136,7 +138,7 @@ def _words(text):
     return {w for w in re.findall(r"[a-z0-9]+", str(text).lower()) if len(w) > 2 and w not in STOP}
 
 
-def auto_request(job, sec, min_overlap=3):
+def auto_request(job, sec, min_overlap=3, secs=2.5):
     """Source Clip rung (visual ladder v2, right after stock): when the script didn't ask for source evidence, pick the
     source caption cue whose words best match this beat's narration -> a 2.5-second clip request, or None.
     Uses only real cue timestamps (never a guessed time); a weak match (< min_overlap shared content words) is skipped."""
@@ -166,7 +168,7 @@ def auto_request(job, sec, min_overlap=3):
         return None
     start, text = best
     purpose = "The source discussing it: " + " ".join(text.split())[:200]
-    return {"kind": "clip", "start": start, "duration": 2.5, "purpose": purpose, "auto": True, "match": score}
+    return {"kind": "clip", "start": start, "duration": float(secs), "purpose": purpose, "auto": True, "match": score}
 
 
 def _extract(job, req, dest, meta, log):
@@ -174,8 +176,9 @@ def _extract(job, req, dest, meta, log):
     start, duration = req["start"], req["duration"]
     if local.is_file():
         info = inspect_video(local)
-        if start >= info["duration"] or (req["kind"] == "clip" and start + duration > info["duration"]):
+        if start >= info["duration"] or (req["kind"] == "clip" and start + 2.0 > info["duration"]):
             raise ValueError("source timestamp is outside the video")
+        duration = min(duration, info["duration"] - start)   # a clip near the end is cut short, not refused
         source = local
     else:
         from .transcript import video_id
@@ -200,20 +203,31 @@ def _extract(job, req, dest, meta, log):
         media.ff("-ss", start, "-i", source, "-t", duration, "-an", "-vf", "fps=30,scale=960:-2",
                  "-c:v", "libx264", "-crf", 20, "-pix_fmt", "yuv420p", dest, timeout=120)
         info = inspect_video(dest)
-        if info["duration"] < 1.95 or info["duration"] > 3.05:
-            raise ValueError("source excerpt did not produce a two-to-three-second clip")
+        if info["duration"] < 1.95 or info["duration"] > duration + 0.2:
+            raise ValueError(f"source excerpt came out {info['duration']:.1f}s, wanted {duration:.1f}s")
     if source != local:
         source.unlink(missing_ok=True)
     log(f"  source evidence: {req['kind']} at {req['start']:.2f}s; {req['purpose'][:90]}")
+
+
+def clip_secs(cfg):
+    """Seconds of real source footage per clip (settings source_clip_secs; 2-20)."""
+    try: return max(2.0, min(20.0, float(cfg.get("source_clip_secs", 8))))
+    except (TypeError, ValueError): return 8.0
+
+
+def max_uses(cfg, key="source_visual_max_uses", default=6):
+    try: return max(0, min(20, int(cfg.get(key, default))))
+    except (TypeError, ValueError): return default
 
 
 def make(cfg, job, workspace, sec, log):
     """-> full-frame video (or screenshot image) item {"type", "path", ...}, or None so the usual ladder continues."""
     if not cfg.get("source_visuals", True):
         return None
-    req = _request(sec)
+    req = _request(sec, max_s=clip_secs(cfg))
     if not req and cfg.get("source_clips_auto", True):
-        req = auto_request(job, sec)
+        req = auto_request(job, sec, secs=clip_secs(cfg))
         if req:
             log(f"  {sec.get('id', 'beat')}: source clip rung: cue at {req['start']:.1f}s matches the narration ({req['match']} shared words)")
     if not req:
@@ -226,7 +240,7 @@ def make(cfg, job, workspace, sec, log):
     try:
         ledger = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.exists() else {}
         bid = str(sec.get("id") or "beat")
-        limit = max(0, min(2, int(cfg.get("source_visual_max_uses", 2))))
+        limit = max_uses(cfg)
         if not limit or (bid not in ledger and len(ledger) >= limit):
             log(f"  {bid}: source excerpt budget reached; continuing visual ladder")
             return None
@@ -284,7 +298,7 @@ def apply_long(job, plan, cfg, log):
             if visual.get("stock_src") == "yours" or visual.get("edit_bgs") or visual.get("edit_clip"):
                 continue
             ledger = job / "build" / "source_excerpts" / "usage.json"
-            try: full = len(json.loads(ledger.read_text(encoding="utf-8"))) >= max(0, min(2, int(cfg.get("source_visual_max_uses", 2))))
+            try: full = len(json.loads(ledger.read_text(encoding="utf-8"))) >= max_uses(cfg)
             except (OSError, ValueError): full = False
             if full:
                 log("  source clips: budget of 2 per video reached; the other sections use the rest of the ladder")
@@ -335,7 +349,7 @@ def snapshot(cfg, job, workspace, sec, log, source_item=None):
                 return None
             ledger_path = directory / "snap_usage.json"
             ledger = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.exists() else {}
-            limit = max(0, min(2, int(cfg.get("source_snapshot_max_uses", 2))))
+            limit = max_uses(cfg, "source_snapshot_max_uses", 6)
             if bid not in ledger and len(ledger) >= limit:
                 log(f"  {bid}: source snapshot budget reached; continuing visual ladder")
                 return None

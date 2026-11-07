@@ -58,7 +58,8 @@ def visual_prompt(cfg, sec, log):
     motion = str(sec.get("motion") or "").strip()
     if base:
         p = base + (". " + motion if motion else ". Slow cinematic camera move")
-        return re.sub(r"\s+", " ", p)[:600] + ". Photorealistic, no text, no logos, no real or recognizable people."
+        from . import people
+        return re.sub(r"\s+", " ", p)[:600] + "." + people.tail(sec)
     hint = ("Stock-search ideas for the beat: " + "; ".join(sec.get("queries") or [])) if sec.get("queries") else ""
     try:
         from .llm import LLM

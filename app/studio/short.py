@@ -984,7 +984,8 @@ def build(job, plan, cfg, log):
     pool = [c for v in pick.values() for c in v]
     fbf = sd / "fallback.json"; fallback = json.loads(fbf.read_text(encoding="utf-8")) if fbf.exists() else {}
     ef = job / "entities.json"
-    story_subjects = any(e.get("kind") != "person" for e in (json.loads(ef.read_text(encoding="utf-8")) if ef.exists() else []))
+    ents_all = json.loads(ef.read_text(encoding="utf-8")) if ef.exists() else []
+    story_subjects = any(e.get("kind") != "person" for e in ents_all)
     (pub / "media" / "fb").mkdir(parents=True, exist_ok=True)
     from . import review
     rv = review.load(job)
@@ -1073,6 +1074,8 @@ def build(job, plan, cfg, log):
                     if at < gfx[-1]["at"] + 2.5: at = gfx[-1]["at"] + 2.5
                     if at > d - 1.5: continue
                 gfx.append({"at": round(at, 3), "g": v["chart"]})
+        from . import people   # speaker inset: the real source frame over this beat's other shots when it names a person
+        bgs = _safe(log, f"{s['id']} speaker inset", lambda: people.add_insets(sd, pub, s, bgs, ents_all, used, log, cfg), bgs) or bgs
         gfx, text_bg = _resolve_overlaps(s["id"], bgs, gfx, d, log)
         icons = [] if s.get("cta") else _icons(cfg, sd, s["id"], words, gfx, d, log, extra_busy=text_bg)
         beats.append({"id": s["id"], "start": round(t, 3), "dur": round(d, 3), "words": words, "bgs": bgs, "graphics": gfx, "icons": icons})

@@ -14,10 +14,29 @@ import { TemplateBackdrop } from "./Templates";
 export const Shot: React.FC<{ bg: Bg; dur: number; seed: number }> = (props) => {
   // Rung labels (GENERATED · GEMINI, GENERATED · FLOW, SOURCE · ..., ILLUSTRATIVE, SYNTHETIC...) stay in the timeline data and the job
   // log for debugging; they are never drawn on the video (owner's decision 2026-10-21; YouTube's altered-content flag discloses AI use).
+  const inset = (props.bg as any).inset;
   return (
     <AbsoluteFill>
       <ShotInner {...props} />
+      {inset?.src ? <Inset src={inset.src} dur={props.dur} /> : null}
     </AbsoluteFill>
+  );
+};
+
+// Speaker inset (owner, 2026-11-07; app/studio/people.py): the real source frame of the person the beat talks about, in a small
+// gold-edged box at the top right over a map, graphic or generated shot, with a slow push-in. Graphics draw above it.
+const Inset: React.FC<{ src: string; dur: number }> = ({ src, dur }) => {
+  const f = useCurrentFrame(); const { fps, width, height } = useVideoConfig(); const t = f / fps;
+  const tall = height > width;
+  const w = Math.round(width * (tall ? 0.42 : 0.28));
+  const a = interpolate(t, [0, 0.35], [0, 1], { extrapolateRight: "clamp" });
+  const z = interpolate(t, [0, Math.max(dur, 0.1)], [1.0, 1.08]);
+  return (
+    <div style={{ position: "absolute", top: tall ? 170 : 60, right: tall ? 36 : 60, width: w, height: Math.round((w * 9) / 16), overflow: "hidden",
+      borderRadius: 18, border: "4px solid #ffc83d", boxShadow: "0 18px 50px rgba(0,0,0,0.65)", opacity: a, background: "#000",
+      transform: `translateY(${(1 - a) * -16}px)` }}>
+      <Img src={asset(src)} style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${z})` }} />
+    </div>
   );
 };
 

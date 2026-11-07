@@ -660,6 +660,13 @@ def _tl_props(job, k, sd, bid, lay, dest):
     story = _story(job)
     bgs = [to_bg(sd, it, p, s0, story, dest=dest) for it, p, s0, _ in lay]
     if k == "short":
+        try:   # the speaker inset survives an edit (people.py)
+            from . import people, config
+            tb = next(b for b in tz["beats"] if b["id"] == bid)
+            people.add_insets(sd, pub, {"id": bid, "vo": " ".join(str(w[0]) for w in tb.get("words", []))}, bgs,
+                              people.ents_for(job), cfg=config.load(), log=lambda *_: None)
+        except Exception:
+            pass
         for b in tz["beats"]:
             if b["id"] == bid: b["bgs"] = bgs
         changed = bid
@@ -682,6 +689,7 @@ def _tl_props(job, k, sd, bid, lay, dest):
             pre = base if (b["id"] != bid or dest is not None) else sdbase
             if g.get("src") and not g["src"].startswith("http"): g["src"] = pre + g["src"]
             if g.get("layers"): g["layers"] = [x if x.startswith("http") else pre + x for x in g["layers"]]
+            if (g.get("inset") or {}).get("src") and not g["inset"]["src"].startswith("http"): g["inset"]["src"] = base + g["inset"]["src"]
         for gr in b.get("graphics", []):
             th = gr.get("g", {}).get("thumb")
             if th and not str(th).startswith("http"): gr["g"]["thumb"] = base + th

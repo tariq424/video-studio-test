@@ -710,7 +710,7 @@ def r7_meta_video(desc, aspect, image_path, ctx):
         if state == "unknown":
             _blocker_unknown("meta", page, ctx, "r7", state, evidence)
         box = _pick(page, ["textarea[placeholder*='Ask Meta']", "div[contenteditable='true']"])
-        prompt = ("Animate this image with a slow cinematic camera push-in. " + desc) if src else \
+        prompt = ("Animate this image with a slow cinematic camera push-in. People stay still with their mouths closed: no talking, no lip movement. " + desc) if src else \
                  ("Create a short video: " + _prompt(desc, "photorealistic, slow cinematic camera move, no text"))
         try:
             box.first.click()
@@ -1142,9 +1142,10 @@ def r11_blender_video(desc, aspect, image_path, ctx):
 # ------------------------------------------------------------------ describe -> Meta image -> Meta video (Tariq, 2026-11-06)
 # For a beat whose source has no public media: a snapshot of the source video is described by Copilot (Bing's chat), Meta
 # makes an image from that description and then animates THAT image in the same conversation. Never for a known person
-# (the studio checks that before calling); the describe prompt also keeps every person anonymous.
-DESCRIBE_COPILOT = ("Describe this image so I can recreate it with an AI image generator. Do not identify or name anyone: "
-                    "describe any person only as an anonymous figure (clothing, pose, framing), never their face or identity. "
+# (owner, 2026-11-07: nobody is anonymised; the screen layout is never rebuilt - see studio/people.py).
+DESCRIBE_COPILOT = ("Describe this image so I can recreate it with an AI image generator. Describe people as they look (age, hair, "
+                    "clothing, expression, what they are doing). Ignore the screen layout: no split screens, video-call panels, "
+                    "picture-in-picture boxes, lower thirds or studio graphics - describe ONE real-world scene with the main person. "
                     "Cover the setting, objects, lighting, colours, camera angle and framing. No brands, logos or text. "
                     "Put the final prompt on its own line starting with PROMPT:")
 _COPILOT_MSGS = "[data-content='ai-message'], [class*='ai-message'], div[role='article'], [data-testid*='message']"
@@ -1325,7 +1326,7 @@ def r13_meta_chain(desc, aspect, image_path, ctx):
         vids0 = set(page.evaluate("() => [...document.querySelectorAll('video')].map(v => v.currentSrc || v.src).filter(Boolean)"))
         try:                                         # step 2: animate THAT image, same conversation
             box = _pick(page, ["textarea[placeholder*='Ask Meta']", "div[contenteditable='true']"])
-            _type_like_human(page, box, "Animate this image with a slow cinematic camera move. Keep everything in it exactly the same.")
+            _type_like_human(page, box, "Animate this image with a slow cinematic camera move. People stay still with their mouths closed: no talking, no lip movement. Keep everything else exactly the same.")
         except Exception:
             _gen_fail(ctx, "meta", evidence, "follow-up box not usable")
         data, t0 = None, time.time()

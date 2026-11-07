@@ -82,7 +82,7 @@ def known_person(sec, ents=()):
 
 def chain_rung(cfg, sd, sec, key, log, snapshot, aspect="16:9", ents=()):
     """Rung 3a (Tariq, 2026-11-06), for a beat with a source snapshot and no public media: Copilot describes the snapshot
-    (people kept anonymous) -> Meta makes an image from it -> Meta animates THAT image in the same chat.
+    (people described as they look, never a rebuilt screen layout) -> Meta makes an image from it -> Meta animates THAT image.
     Never for a known person. -> {"video", "image", "prompt"} or None."""
     from . import media
     if not cfg.get("meta_chain_on", True) or not snapshot or not Path(snapshot).is_file(): return None
@@ -121,6 +121,11 @@ def chain_rung(cfg, sd, sec, key, log, snapshot, aspect="16:9", ents=()):
             log("  chain: the description names a real person; skipped"); return None
     except Exception:
         pass
+    from . import people
+    ppl = people.names(sec.get("vo", ""), ents)
+    if people.rebuilds_layout(prompt):   # a split screen / video call of strangers is not a scene (owner, 2026-11-07)
+        log("  chain: the description rebuilds the show's screen layout, not a scene; next rung"); txt.unlink(missing_ok=True); return None
+    prompt = people.scrub(prompt) + (" " + people.rule(ppl) if ppl else "")
     r = run(cfg, "r13", prompt, aspect, vid, log, timeout=600)
     if not r or not media.ok(vid): return None
     src_img = routes_dir(cfg) / "output" / "r13_meta_chain.jpg"   # the image Meta animated (saved by the route)

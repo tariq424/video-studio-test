@@ -49,7 +49,7 @@ class SourceVisualTests(unittest.TestCase):
                 sec2 = {**self.request(kind="screenshot", start=40), "id": "b1", "vo": "A claim needs evidence"}
                 self.assertIsNotNone(source_visuals.make({}, job, job / "short", sec2, print))
                 sec3 = {**self.request(kind="screenshot", start=80), "id": "b2", "vo": "A claim needs evidence"}
-                self.assertIsNone(source_visuals.make({}, job, job / "short", sec3, print))   # budget of 2
+                self.assertIsNone(source_visuals.make({"source_visual_max_uses": 2}, job, job / "short", sec3, print))   # budget (setting) of 2
                 self.assertIsNone(source_visuals.make({"source_visual_max_uses": 0}, job, job / "short", sec, print))
 
     def test_extraction_failure_continues_ladder(self):

@@ -39,10 +39,15 @@ URL = "https://gemini.google.com/app"
 LABEL = "GEMINI"
 DESCRIBE = "Describe this image in detail, then write a prompt to recreate it without brands or text."
 FORMAT = "Put the final prompt on its own line, starting with PROMPT:"
-# Never a real person's likeness (a "US president at a podium" came back looking like a former president, in a story
-# about another one): people only as anonymous figures.
-NO_PEOPLE = ("The prompt must not show any real or recognizable person, politician or celebrity: show people only as "
-             "anonymous figures seen from behind, in silhouette, as hands, or out of focus.")
+# People (owner, 2026-11-07, studio/people.py): nobody is anonymised; a named real person is drawn as a courtroom sketch, never a
+# photo-real look-alike; a describer never rebuilds the source's screen layout. _PPL = the named people of the beat being made.
+_PPL = {"now": []}
+def _people_line():
+    from . import people
+    return people.DESCRIBE_RULE + (" " + people.rule(_PPL["now"]) if _PPL["now"] else "")
+def _rule_now():
+    from . import people
+    return people.rule(_PPL["now"])
 NARRATION = "Write a prompt for a photorealistic image that illustrates this narration, without brands or text: "
 GENERATE = "Generate an image: "
 VARIANTS = ["Generate a second image of the same scene from a different camera angle, same style and lighting.",
@@ -323,10 +328,10 @@ def _session(cfg, image, aspect, vo, out, timeout, log, evidence, extras=()):
                 if not _upload(page, image): raise RuntimeError("Gemini's upload control was not found")
                 page.wait_for_timeout(4000)
                 log(f"  gemini: screenshot uploaded ({Path(image).name}); asking for a description and a prompt")
-                _send(page, box, DESCRIBE + " " + NO_PEOPLE + " " + FORMAT)
+                _send(page, box, DESCRIBE + " " + _people_line() + " " + FORMAT)
             else:
                 log("  gemini: no source screenshot; asking for a prompt from the narration")
-                _send(page, box, NARRATION + vo[:1200] + " " + NO_PEOPLE + " " + FORMAT)
+                _send(page, box, NARRATION + vo[:1200] + " " + _people_line() + " " + FORMAT)
             answer = _wait_answer(page, n0, timeout, step); _answered()
             prompt = extract_prompt(answer)
             if not prompt: raise RuntimeError("no prompt found in Gemini's answer")
@@ -336,7 +341,7 @@ def _session(cfg, image, aspect, vo, out, timeout, log, evidence, extras=()):
             shape = "Tall vertical 9:16 portrait image." if aspect == "9:16" else "Wide horizontal 16:9 landscape image."
             box = _box(page)
             _pause(cfg, log, "the image request")
-            src = _ask_image(page, box, f"{GENERATE}{prompt} {shape} No text, letters, logos or brand names. No real or recognizable people.", timeout, step)
+            src = _ask_image(page, box, f"{GENERATE}{prompt} {shape} No text, letters, logos or brand names. " + _rule_now(), timeout, step)
             # 5: download (Gemini's full-size download button first, else the image source)
             step = "download"
             _download(context, page, src, out)
@@ -345,7 +350,7 @@ def _session(cfg, image, aspect, vo, out, timeout, log, evidence, extras=()):
                 try:
                     _pause(cfg, log, f"image {k + 2}")
                     log(f"  gemini: image {k + 2}: {VARIANTS[k % len(VARIANTS)].split(',')[0].lower()}")
-                    src = _ask_image(page, _box(page), f"{VARIANTS[k % len(VARIANTS)]} {shape} No text, letters, logos or brand names. No real or recognizable people.",
+                    src = _ask_image(page, _box(page), f"{VARIANTS[k % len(VARIANTS)]} {shape} No text, letters, logos or brand names. " + _rule_now(),
                                      timeout, "generate")
                     _download(context, page, src, extra)
                 except Exception as e:   # the first image is already saved: keep it, report the extra one (a limit hit here is
@@ -445,7 +450,8 @@ def _session_chatgpt(cfg, image, aspect, vo, out, timeout, log, evidence, extras
     from playwright.sync_api import sync_playwright
     from .flow import _first
     shape = "Tall vertical 9:16 portrait image." if aspect == "9:16" else "Wide horizontal 16:9 landscape image."
-    rules = "Photorealistic. No text, letters, logos or brand names. " + NO_PEOPLE.replace("The prompt must", "It must")
+    from . import people
+    rules = ("No text, letters, logos or brand names. " + people.rule(_PPL["now"])) if _PPL["now"] else "Photorealistic. No text, letters, logos or brand names."
     with sync_playwright() as pw:
         context, page = _launch(pw, cfg, "chatgpt")
         step = "open"
@@ -516,8 +522,8 @@ def _wait_chatgpt(page, before, timeout, step):
     raise RuntimeError(f"no image from ChatGPT after {timeout}s")
 
 
-LOCAL_DESCRIBE = """Describe this image in detail (setting, objects, people's roles but not who they are, light, mood), then write a
-prompt of 40-80 words to recreate it as a new photorealistic image. No brands, no logos, no text, no real or recognisable people.
+LOCAL_DESCRIBE = """Describe this image in detail (setting, objects, people, light, mood), then write a prompt of 40-80 words to
+recreate it as a new image. No brands, no logos, no text. {people}
 The narration it will illustrate: "{vo}"
 Reply with JSON only: {{"description": "...", "prompt": "..."}}"""
 
@@ -531,7 +537,7 @@ def describe_local(cfg, image, vo, log):
         from .llm import parse_json
         c = dict(cfg)
         if c.get("vet_provider", "local") in ("off", "", None): c["vet_provider"] = "local"
-        j = parse_json(footage._vision(c, image, LOCAL_DESCRIBE.format(vo=str(vo or "")[:300].replace('"', "'"))))
+        j = parse_json(footage._vision(c, image, LOCAL_DESCRIBE.format(vo=str(vo or "")[:300].replace('"', "'"), people=_people_line())))
         pr = re.sub(r"\s+", " ", str(j.get("prompt") or "")).strip()
         if len(pr.split()) >= 12:
             log(f"  screenshot described by the local vision model: \"{pr[:120]}...\"")
@@ -545,7 +551,8 @@ def _session_bing(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
     from playwright.sync_api import sync_playwright
     from .flow import visual_prompt
     prompt = re.sub(r"(?i)slow (cinematic )?camera move[^.]*\.?", "", sec.get("described_prompt") or visual_prompt(cfg, sec, log))
-    prompt = re.sub(r"\s+", " ", prompt).strip()[:420] + " No text, no logos. No real or recognizable people."
+    from . import people
+    prompt = re.sub(r"\s+", " ", people.scrub(prompt)).strip()[:420] + people.tail(sec, photo=False)
     with sync_playwright() as pw:
         context, page = _launch(pw, cfg, "bing")
         step = "open"
@@ -610,7 +617,8 @@ def _session_hf(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
     from .flow import visual_prompt
     import shutil
     prompt = re.sub(r"(?i)slow (cinematic )?camera move[^.]*\.?", "", sec.get("described_prompt") or visual_prompt(cfg, sec, log))
-    prompt = re.sub(r"\s+", " ", prompt).strip()[:700] + " Photorealistic. No text, no logos. No real or recognizable people."
+    from . import people
+    prompt = re.sub(r"\s+", " ", people.scrub(prompt)).strip()[:700] + people.tail(sec)
     w, h = (768, 1344) if aspect == "9:16" else (1344, 768)
     _pause(cfg, log, "this beat's image", "hf")
     log(f"  hf: prompt ({len(prompt.split())} words): \"{prompt[:140]}...\"")
@@ -652,7 +660,8 @@ def _session_hf(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
 def _text_prompt(cfg, sec, log, limit=700):
     from .flow import visual_prompt
     prompt = re.sub(r"(?i)slow (cinematic )?camera move[^.]*\.?", "", sec.get("described_prompt") or visual_prompt(cfg, sec, log))
-    return re.sub(r"\s+", " ", prompt).strip()[:limit] + " Photorealistic. No text, no logos. No real or recognizable people."
+    from . import people
+    return re.sub(r"\s+", " ", people.scrub(prompt)).strip()[:limit] + people.tail(sec)
 
 
 def _session_cloudflare(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
@@ -898,6 +907,8 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
     count = max(1, min(int(count), 1 + len(VARIANTS), int(cfg.get("imagegen_per_beat", 1))))
     if not cfg.get("imagegen_on", True):
         return []
+    from . import people
+    sec = people.with_people(sec, sd); _PPL["now"] = list(sec.get("people") or [])
     order = [x for x in (cfg.get("imagegen_providers") or PROVIDERS) if x in PROVIDERS] or ["gemini"]
     order = _stable_non_google_first(order)
     fit_on = narration_fit_on()
@@ -971,7 +982,10 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
             elif site == "chatgpt":
                 prompt = _session_chatgpt(cfg, image, aspect, vo, out, timeout, log, evidence, extras)
             elif site in ("hf", "bing", "cloudflare", "meta"):
-                if image and described is None: described = describe_local(cfg, image, vo, log)
+                if image and described is None:
+                    described = describe_local(cfg, image, vo, log)
+                    if described and people.rebuilds_layout(described):   # a split screen / video call of strangers: not a scene
+                        log("  the screenshot description rebuilds the show's screen layout; the prompt comes from the narration"); described = ""
                 s2 = dict(sec, described_prompt=described) if described else sec
                 fn = {"hf": _session_hf, "bing": _session_bing, "cloudflare": _session_cloudflare, "meta": _session_meta}[site]
                 prompt = fn(cfg, s2, aspect, out, timeout, log, evidence, extras)

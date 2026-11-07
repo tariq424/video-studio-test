@@ -31,7 +31,7 @@ For EACH piece write one picture. Rules:
 - Standalone: each prompt alone describes subject, setting, camera angle, lighting, mood and action, and restates the locked
   style. Never refer to another prompt ("same man as before").
 - Show what that piece says, in the story's real place; no flags, maps or landmarks from outside the story.
-- No real, named or recognisable people (show hands, crowds from behind, places, objects, documents instead); no text or logos.
+- {people_rule}No text or logos. Never a split screen, video-call panel or studio graphic: one real scene per picture.
 - "motion": one short image-to-video instruction (camera move + subject motion, ~4 s).
 Reply with JSON only: {{"shots": [{{"piece": 1, "prompt": "...", "motion": "..."}}, ...]}} with exactly {n} shots."""
 
@@ -119,6 +119,13 @@ def pieces(text, wpm, secs=4.0, min_words=6):
     return out
 
 
+def _people_rule(sec):
+    from . import people
+    ppl = sec.get("people") or []
+    return (f"The people it names ({', '.join(ppl)}) may appear, never anonymised: draw each as {people.SKETCH}. "
+            if ppl else "People may appear as they are. ")
+
+
 def write_prompts(cfg, sec, parts, prof, story, log=print):
     """-> [{"piece", "text", "prompt", "motion"}] one per piece. Raises on a malformed answer (the caller logs and moves on)."""
     from .llm import LLM
@@ -131,7 +138,8 @@ def write_prompts(cfg, sec, parts, prof, story, log=print):
     with LLM(cfg, log, lambda: False) as llm:
         j = llm.chat_json("You are a precise storyboard artist for news video. Reply with JSON only.",
                           PROMPTS.format(story=str(story)[:600].replace('"', "'"), style=st.replace('"', "'"), n=len(parts),
-                                         pieces="\n".join(f'{i + 1}. "{p}"' for i, p in enumerate(parts)).replace('"', "'")),
+                                         pieces="\n".join(f'{i + 1}. "{p}"' for i, p in enumerate(parts)).replace('"', "'"),
+                                         people_rule=_people_rule(sec)),
                           max_tokens=300 * len(parts) + 200, check=chk)
     out = []
     for i, (p, s) in enumerate(zip(parts, j["shots"])):
@@ -144,7 +152,8 @@ def write_prompts(cfg, sec, parts, prof, story, log=print):
 def plan(cfg, sd, sec, story, log=print, max_shots=None):
     """Style lock + pieces + prompts for one beat, saved as short/storyboard/<beat>.json (status "planned"). -> the plan dict.
     Raises on failure (the callers log it)."""
-    from . import tts
+    from . import tts, people
+    sec = people.with_people(sec, sd)
     prof = style_profile(cfg, sd, log)
     parts = pieces(sec.get("vo", ""), tts.wpm(cfg))[: int(max_shots or cfg.get("storyboard_max_shots", 6))]
     if len(parts) < 2: raise ValueError("narration too short to split")

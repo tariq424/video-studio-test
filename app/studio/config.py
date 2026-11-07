@@ -6,7 +6,9 @@ ROOT = APP.parent
 CFG = ROOT / "settings.json"
 DEFAULTS = {
     "source_visuals": True,           # opt-in per beat via a timestamp + original commentary purpose
-    "source_visual_max_uses": 2,      # editorial cap per output, not a legal safe harbor
+    "source_visual_max_uses": 6,      # real source clips per output (owner, 2026-11-07: was 2); editorial, not a legal safe harbor
+    "source_clip_secs": 8,            # seconds of real source footage per clip (was a fixed 2.5 s)
+    "speaker_inset": True,            # a beat naming a person shows the real source frame as an inset over its other shots (people.py)
     "editorial_attempts": 5,          # editorial review (our analysis + a joke per beat): regenerate with feedback up to this many times
     "source_clips_auto": True,        # Source Clip rung: when the script asked for none, match the beat to a caption cue (2.5 s clip)
     "flow_on": True,                  # Google Flow rung (flow.py): skipped by itself until scripts\flow-login.ps1 has been run once
@@ -51,7 +53,7 @@ DEFAULTS = {
     "blender_quality": "preview",
     "imagegen_rotate": False,
     "imagegen_first": "hf",   # one service per video, rotating; the others are the fallback
-    "source_snapshot_max_uses": 2,    # source screenshots taken just for describing (rung-2 clips/screenshots are reused free)
+    "source_snapshot_max_uses": 6,    # source screenshots taken just for describing (rung-2 clips/screenshots are reused free)
     # WanGP memory policy (wangp.py): never started with the job; launched for a generation, stopped right after
     "wangp_on_demand": True,   # owner: last resort only; stopped after each use, idle copies stopped by wangp-watchdog.ps1
     "wangp_start_timeout": 300,
