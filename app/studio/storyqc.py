@@ -55,7 +55,11 @@ def shots(tl, plan_vo=None):
             a = s0 + float(g.get("from") or 0)
             b = s0 + (float(bgs[i + 1].get("from") or 0) if i + 1 < len(bgs) else d)
             if b - a < 0.8: continue
-            out.append({"beat": bt.get("id"), "t": round(a + min(2.5, (b - a) / 2), 2), "a": round(a, 2), "b": round(b, 2),
+            t = round(a + min(2.5, (b - a) / 2), 2)
+            # Nov 7: one frame missed a VOTE + US flag clip (its first seconds read as "abstract blue design"), so a shot
+            # long enough also gets a frame two thirds in; a shot is off-story when either frame is
+            ts = [t] + ([round(a + (b - a) * 2 / 3, 2)] if b - a >= 4 else [])
+            out.append({"beat": bt.get("id"), "t": t, "ts": ts, "a": round(a, 2), "b": round(b, 2),
                         "tag": tag, "src": str(g.get("src") or ""), "vo": vo})
     return out
 
@@ -91,18 +95,25 @@ def check(mp4, cfg, job_dir, log=print, vert=True, stop=lambda: False):
         with LLM(_script_cfg(cfg), log, lambda: False) as llm:
             for k, s in enumerate(sh):
                 if stop(): raise RuntimeError("cancelled")
-                img = work / f"{mp4.stem[:24]}_{k:03}.jpg"
-                media.ff("-ss", f"{s['t']:.2f}", "-i", mp4, "-frames:v", 1, "-vf", "scale=640:-2", img, check=False, timeout=120)
                 row = dict(s, shows="", contradicts=None, why="")
-                if not img.exists(): row["why"] = "no frame"; rep["shots"].append(row); continue
-                try:
-                    raw = str(footage._vision(vcfg, img, DESCRIBE) or "")
-                    try: pj = parse_json(raw) or {}
-                    except Exception: pj = {}
-                    shows = pj.get("shows") if isinstance(pj, dict) else ""
-                    if not shows and isinstance(pj, dict): shows = " ".join(str(v) for v in pj.values() if isinstance(v, str))
-                    row["shows"] = str(shows or raw.strip().strip("`{}")).strip()[:300]   # a plain-text answer still counts
-                except Exception as e: row["why"] = f"vision model unavailable ({str(e)[:60]})"; rep["shots"].append(row); continue
+                seen, failed = [], ""
+                for m, tt in enumerate(s.get("ts") or [s["t"]]):
+                    img = work / f"{mp4.stem[:24]}_{k:03}_{m}.jpg"
+                    media.ff("-ss", f"{tt:.2f}", "-i", mp4, "-frames:v", 1, "-vf", "scale=640:-2", img, check=False, timeout=120)
+                    if not img.exists(): continue
+                    try:
+                        raw = str(footage._vision(vcfg, img, DESCRIBE) or "")
+                        try: pj = parse_json(raw) or {}
+                        except Exception: pj = {}
+                        shows = pj.get("shows") if isinstance(pj, dict) else ""
+                        if not shows and isinstance(pj, dict): shows = " ".join(str(v) for v in pj.values() if isinstance(v, str))
+                        shows = str(shows or raw.strip().strip("`{}")).strip()[:300]   # a plain-text answer still counts
+                        if shows and shows not in seen: seen.append(shows)
+                    except Exception as e: failed = f"vision model unavailable ({str(e)[:60]})"
+                if not seen and failed: row["why"] = failed; rep["shots"].append(row); continue
+                if not seen and not failed and not any((work / f"{mp4.stem[:24]}_{k:03}_{m}.jpg").exists() for m in range(len(s.get("ts") or [1]))):
+                    row["why"] = "no frame"; rep["shots"].append(row); continue
+                row["shows"] = " / Later in the shot: ".join(seen)[:600]
                 if not row["shows"]: row["contradicts"], row["why"] = False, "nothing identifiable in the frame"
                 else:
                     try:

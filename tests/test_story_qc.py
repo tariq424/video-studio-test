@@ -40,3 +40,10 @@ def test_repair_marks_timeline(tmp_path):
     bgs = json.loads((pub / "teaser.json").read_text(encoding="utf-8"))["beats"][0]["bgs"]
     assert bgs[0]["tag"] == "GENERATED · CLOUDFLARE" and bgs[0]["qc_repair"]["rung"] == "ai_image"
     assert "qc_repair" not in bgs[1] and "qc_repair" not in bgs[2]
+
+
+def test_long_shots_get_a_second_frame():
+    sh = storyqc.shots(TL)
+    assert all(len(s["ts"]) == 2 and s["a"] < s["ts"][0] < s["ts"][1] < s["b"] for s in sh)
+    short = storyqc.shots({"beats": [{"id": "b0", "start": 0, "dur": 3.0, "bgs": [{"src": "a", "from": 0}]}]})
+    assert short[0]["ts"] == [short[0]["t"]]

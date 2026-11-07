@@ -58,6 +58,7 @@ main>section{min-width:0}
 .edp-log .lg{font-size:12.5px;padding:3px 0;border-bottom:1px solid rgba(0,0,0,.07)}.edp-log .lg:empty{display:none}.lg-ok{color:var(--ok)}.lg-bad{color:var(--bad)}.lg-busy{color:var(--acc)}.lg-meta{font-size:11.5px;color:var(--mut)}
 .ed-last{font-size:12.5px}
 .ed-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}.ed-fit button{padding:5px 10px;font-size:12.5px}.ed-fit button.on{background:var(--acc);color:#111;border-color:var(--acc)}
+.scr-vo{font-size:15px;line-height:1.4;border-left:3px solid var(--acc,#e8960f);background:rgba(232,150,15,.08);padding:6px 10px;margin:0 0 8px;border-radius:4px}
 .src-note{font-size:13.5px;color:var(--mut);border-left:3px solid var(--blue);background:rgba(47,127,224,.07);padding:5px 9px;margin:2px 0 6px;border-radius:4px}
 .edp-card textarea,.edp-card input[type=text]{font-size:16px}
 .sec-edit textarea{font-size:17px;line-height:1.5}.sec-edit input{font-size:16px}
@@ -428,6 +429,7 @@ function scDraw(){const el=$('scrub'),v=$('ov');if(!el||!v)return;const d=ED.las
   <span class="mut" style="font-size:13px">Video:</span>
   <button class="sec ${tgt=='short'?'on':''}" data-testid="scrub-pick-short" aria-pressed="${tgt=='short'}" ${has('short')&&!d.busy?'':'disabled'} onclick="${tgt=='short'?'':"edTarget('short')"}">Short</button>
   <button class="sec ${tgt!='short'?'on':''}" data-testid="scrub-pick-long" aria-pressed="${tgt!='short'}" ${has('long')&&!d.busy?'':'disabled'} onclick="${tgt!='short'?'':"edTarget('long')"}">Explainer</button></div>`;
+ h+=`<div id="scr_vo" data-testid="scrub-vo" class="scr-vo" hidden></div>`;
  h+=`<input type="range" id="scr_r" data-testid="scrub-range" aria-label="Scrub the video" min="0" max="${D.toFixed(2)}" step="0.05" value="${(v.currentTime||0).toFixed(2)}" oninput="scSeek(this.value)" style="width:100%;margin:0">`;
  if(D>0&&ED.beats.length)h+=`<div class="sc-strip">${ED.beats.map(b=>`<div class="sc-seg ${b.editable?'':'off'}" data-beat="${b.id}" title="${esc(b.label)} (${fmtT(b.start)})${(b.rungs||[]).length?' — '+esc(b.rungs.join(', ')):''}" style="left:${(b.start/D*100).toFixed(3)}%;width:${(b.dur/D*100).toFixed(3)}%" onclick="scSeek(${(b.start+Math.min(0.5,b.dur/2)).toFixed(2)})">${ED.kind=='short'?(b.label||'').replace(/^Beat /,''):b.id}</div>`).join('')}</div>`;
  h+=`<div class="row" style="align-items:center;gap:8px;margin-top:6px">
@@ -440,6 +442,7 @@ function scSeek(t){const v=$('ov');if(!v)return;v.currentTime=+t;scTick()}
 function scTick(){const v=$('ov'),r=$('scr_r');if(!v||!r)return;const t=v.currentTime||0;
  if(document.activeElement!==r)r.value=t.toFixed(2);if(isFinite(v.duration)&&+r.max<v.duration)r.max=v.duration.toFixed(2);
  $('scr_t').textContent=fmtTs(t);const b=edAt(t),busy=(ED.last||{}).busy;
+ const vo=$('scr_vo');if(vo){vo.hidden=!b?.vo;if(b?.vo&&vo.dataset.beat!==b.id){vo.dataset.beat=b.id;vo.innerHTML=`<span class="edp-lab">${esc(b.label)} script</span> ${esc(b.vo)}`}}
  const source=$('scr_source');if(source){source.hidden=!b?.source;source.textContent=b?.source?'Picture source: '+b.source:''}
  const rg=$('scr_rung');if(rg){const rs=(b&&b.rungs)||[];rg.hidden=!rs.length;rg.textContent=rs.length?`Made by: ${rs.join(' · ')}`:''}
  $('scr_b').textContent=b?(b.label+(ED.kind!='short'?' · '+b.id:'')+(b.editable?'':' (not editable)')):(ED.beats.length?'between beats':'beats not loaded');

@@ -478,8 +478,11 @@ def _busy(job, bid, msg):
 
 def start(studio, jid, bid, kind, payload=None, ws=None):
     """Run 'expand' (show all options) or 'refine' for one beat in the background. -> error text or ''"""
-    if studio.current: return "Another job is using the GPU right now; try again when it has finished."
-    if not _gpu.acquire(blocking=False): return "Already generating options for a beat; wait for it to finish."
+    # Nov 7: a running job only blocks what needs the GPU by nature (all options / animation). A chat instruction or more stock
+    # goes ahead: stock and the image services first, and WanGP only when nothing else gave a picture AND the GPU is free.
+    if studio.current and kind in ("expand", "animate"): return "Another job is using the GPU right now; try again when it has finished."
+    if not _gpu.acquire(blocking=False): return "Already working on a beat; wait for it to finish."
+    payload = dict(payload or {}, gpu_free=not studio.current)
     job = ws or studio.job(jid).dir
     _busy(job, bid, {"expand": "Generating options...", "animate": "Animating (several minutes)...", "more_stock": "Searching more stock footage..."}.get(kind, "Working on your instruction..."))
     def run():
@@ -620,18 +623,45 @@ def refine(job, bid, cfg, wg, log, payload):
         save(job, rv)
     key = f"{bid}_r{n}"
     log(f"{bid}: refine ({j['intent']}, by {backend}): {note['understood']}")
-    st = _run_slots(job, sec, [key], cfg, wg, log, prompt=sec["still_prompt"], motion=sec["motion"])
+    # Nov 7 order: stock -> image services (Cloudflare etc., no GPU) -> WanGP only when neither gave anything and the GPU is free
     picked, rejected = [], []
     if not sec.get("subject") and qs:
+        _busy(job, bid, "Searching stock footage for your instruction...")
         try: picked, rejected = _extra_stock(job, sec, qs, f"r{n}", cfg, log)
         except Exception as e: log(f"  stock search failed ({str(e)[:100]})")
+    _busy(job, bid, "Asking the image services for a picture...")
+    gen = _refine_image(job, sec, key, cfg, log)
+    st = {}
+    if not picked and not gen:
+        if payload.get("gpu_free", True):
+            _busy(job, bid, "Nothing from stock or the image services: trying WanGP (GPU)...")
+            st = _run_slots(job, sec, [key], cfg, wg, log, prompt=sec["still_prompt"], motion=sec["motion"])
+        else: log(f"  {bid}: WanGP skipped: another job is using the GPU")
     with _lock(job):
         rv = load(job)
         if key in st: _slot_cands(rv, sec, key, st[key], sd, True, log)
         _stock_cands(rv, sec, picked, rejected, _story_subjects(job))
-        rv["beats"][bid]["msg"] = f"New options from your instruction ({j['intent']}). Earlier options are under History."
+        if gen: _add(rv, bid, gen[0], "imagegen", True, f"made from your instruction ({gen[1]})")
+        got = len(picked) + bool(gen) + bool(st.get(key, {}).get("still"))
+        rv["beats"][bid]["msg"] = (f"{got} new option(s) from your instruction ({j['intent']}). Earlier options are under History." if got
+                                   else "Nothing new found for your instruction (stock, image services" + (", WanGP" if st else "") + "); see the log.")
         save(job, rv)
     thumbs(job, cfg, log)
+
+def _refine_image(job, sec, key, cfg, log):
+    """One picture from the free image services (Cloudflare, ChatGPT ... as in QC repair, no Google) for the refined prompt.
+    -> (candidate item, site) or None. Never raises."""
+    if not cfg.get("imagegen_on", True) or not sec.get("still_prompt"): return None
+    try:
+        from . import imagegen, qc_repair
+        sd, _ = _p(job)
+        res = imagegen.generate_many(qc_repair._cfg_no_google(cfg), sd, {"id": sec["id"], "vo": sec["still_prompt"]}, f"{key}_img", log,
+                                     aspect="9:16" if _sp(sd)["orient"] == "portrait" else "16:9")
+        if not res: log(f"  {sec['id']}: no image service produced a picture"); return None
+        site = imagegen.last_site() or "image service"
+        return {"type": "image", "src": _rel(Path(res[0][0]), sd), "fit": "frame", "tag": f"GENERATED · {str(site).upper()}"}, site
+    except Exception as e:
+        log(f"  {sec['id']}: image services failed ({str(e)[:100]})"); return None
 
 # ---------------------------------------------------------------- after the render: keep only what was used
 MEDIA = {".mp4", ".jpg", ".png", ".jpeg", ".webm", ".mov"}
