@@ -96,9 +96,9 @@ def test_short_completeness_over_length():
 
 def test_action_beats_go_to_video_before_stills():
     from studio import config, physics
-    assert config.DEFAULTS["action_video_first"] is True if hasattr(config, "DEFAULTS") else True
+    assert config.DEFAULTS["action_video_first"] is False if hasattr(config, "DEFAULTS") else True
     src = (Path(__file__).resolve().parents[1] / "app" / "studio" / "short.py").read_text(encoding="utf-8")
-    i_act, i_chain, i_img = src.index('cfg.get("action_video_first", True)'), src.index("rung 3a: snapshot"), src.index("rung 3: free image generators")
+    i_act, i_chain, i_img = src.index('cfg.get("action_video_first", False)'), src.index("rung 3a: snapshot"), src.index("rung 3: free image generators")
     assert i_act < i_chain < i_img and "not moving and cfg.get(\"meta_chain_on\"" in src and "not moving and cfg.get(\"imagegen_on\"" in src
     assert physics.event_action("Protesters stormed the gate and set the building on fire.") == "stormed"
     assert physics.event_action("They threatened to storm the gate.") == ""   # hypothetical: not shown as happening
