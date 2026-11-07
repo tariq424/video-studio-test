@@ -566,6 +566,11 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
         locked = illustrate.wangp_lock(s, ents, phases.get(s["id"]))
         opts = illustrate.options(s, ents, phases.get(s["id"]))
         wan_why = locked or ("an illustration fits" if opts and not v2 else "") or (f"action beat ({act}): animation first" if act else "")   # v2: illustrations are rung 9, WanGP draws atmospheric beats
+        # Owner, 2026-11-07: WanGP is the LAST resort (rung 6, after Meta video / Flow), for minimum compute and fast production.
+        # A beat that any earlier rung already gave a picture (stock, source clip, Meta, image services, Blender, Meta video,
+        # Flow) never loads WanGP for its extra slots: they go on to physics / graphics / headline, or the picture holds.
+        if v2 and not wan_why and (items or pick.get(s["id"])):
+            wan_why = "an earlier rung already gave this beat a picture (WanGP is the last resort)"
         for k in range(n - len(items)):
             slots.append({"key": f"{s['id']}_{k}", "beat": s["id"], "vo": s["vo"], "still_prompt": s.get("still_prompt", ""),
                           "motion": s.get("motion", ""), "subject": s.get("subject"), "rotate": rot,

@@ -533,22 +533,36 @@ def expand(job, bid, cfg, wg, log, payload):
     sd, rd = _p(job); sp, sec = _section(job, bid)
     lf = sd / "fallback" / "ladder.json"; lad = json.loads(lf.read_text(encoding="utf-8")) if lf.exists() else {}
     keys = [k for k in lad if k.rsplit("_", 1)[0] == bid] or [f"{bid}_9"]
-    log(f"{bid}: generating all treatments (slots {', '.join(keys)})")
-    st = _run_slots(job, sec, keys[:1] if not any(lad.get(k, {}).get("still") for k in keys) else keys, cfg, wg, log, animate=True)
+    # Owner, 2026-11-07: the ladder order, cheapest first; WanGP only when nothing before it gave a usable picture
+    log(f"{bid}: generating all treatments (stock / photos -> image services -> graphics; WanGP last)")
     with _lock(job): rv = load(job); have = {rv["cands"][c]["rung"] for c in rv["beats"][bid]["cands"]}
     picked, rejected, pics = [], [], []
     if not sec.get("subject") and "stock" not in have:
+        _busy(job, bid, "Searching stock footage...")
         try: picked, rejected = _extra_stock(job, sec, sec.get("queries") or [], "x", cfg, log)
         except Exception as e: log(f"  stock search failed ({str(e)[:100]})")
     if sec.get("subject") and "photo" not in have:
         try: pics = photos.find(cfg, sec["subject"], sd / "photos", log, want=10)
         except Exception as e: log(f"  photo search failed ({str(e)[:100]})")
+    gen = None
+    if "imagegen" not in have:
+        _busy(job, bid, "Asking the image services for a picture...")
+        gen = _refine_image(job, sec, f"{bid}_x{int(time.time()) % 100000}", cfg, log)
     phases = coherence.beat_phases([x for x in sp["sections"] if not x.get("cta")])
+    with _lock(job):
+        rv = load(job)
+        good = any(rv["cands"][c].get("ok") for c in rv["beats"][bid]["cands"]) or bool(picked) or bool(pics) or bool(gen)
+    st = {}
+    if not good:
+        _busy(job, bid, "Nothing usable from stock or the image services: trying WanGP (GPU)...")
+        st = _run_slots(job, sec, keys[:1] if not any(lad.get(k, {}).get("still") for k in keys) else keys, cfg, wg, log)
+    else: log(f"  {bid}: WanGP not needed (earlier rungs gave usable options)")
     with _lock(job):
         rv = load(job)
         for k in keys:
             if k in st: _slot_cands(rv, sec, k, st[k], sd, True, log)
         _stock_cands(rv, sec, picked, rejected, _story_subjects(job))
+        if gen: _add(rv, bid, gen[0], "imagegen", True, f"image service ({gen[1]})")
         for pc in pics:
             dst = sd / "fallback" / f"{pc['id']}.jpg"
             if not dst.exists(): shutil.copy2(pc["path"], dst)
@@ -582,6 +596,23 @@ def add_animation(job, bid, cfg, wg, log, payload):
     lf = sd / "fallback" / "ladder.json"; lad = json.loads(lf.read_text(encoding="utf-8")) if lf.exists() else {}
     keys = [k for k in lad if k.rsplit("_", 1)[0] == bid and lad[k].get("still")] or [f"{bid}_9"]
     keys = [k for k in keys if not lad.get(k, {}).get("clip")] or keys
+    # Owner, 2026-11-07: rung 5 first (Meta video, free -> Flow, capped), WanGP image-to-video only if that gives nothing
+    try:
+        from . import mediaroutes
+        _busy(job, bid, "Asking Meta video / Flow for an animation...")
+        clip, vtag, vrung = mediaroutes.video_rung(cfg, sd, sec, f"{bid}_ed{int(time.time()) % 100000}", log, aspect="9:16" if _sp(sd)["orient"] == "portrait" else "16:9")
+    except Exception as e:
+        if str(e) == "cancelled": raise
+        log(f"  {bid}: Meta video / Flow failed ({str(e)[:100]})"); clip = None
+    if clip:
+        with _lock(job):
+            rv = load(job)
+            _add(rv, bid, {"type": "video", "src": _rel(Path(clip), sd), "secs": round(media.dur(clip), 2), "rate": 1.0, "freeze": True, "tag": vtag},
+                 "flow" if vrung == "flow" else "meta video", True, f"animation from {vrung}")
+            rv["beats"][bid]["msg"] = f"Animation added ({vrung})."
+            save(job, rv)
+        thumbs(job, cfg, log); return
+    _busy(job, bid, "No Meta / Flow clip: animating with WanGP (several minutes)...")
     log(f"{bid}: animating ({', '.join(keys[:1])})")
     st = _run_slots(job, sec, keys[:1], cfg, wg, log, animate=True)
     with _lock(job):

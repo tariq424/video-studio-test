@@ -315,6 +315,10 @@ def _do_motion_inner(job, plan, cfg, wg, log, stop):
                         log(f"  {v['id']}: ladder failed ({type(e).__name__}: {str(e)[:120]}); headline card")
                         v["type"] = "motion"; v["g"] = {"kind": "headline", "kicker": "", "text": " ".join(vs.split()[:12]), "sub": ""}
                     continue
+                # Owner, 2026-11-07: WanGP is the last resort. A motion shot no rung has covered yet goes down the stills ladder
+                # (image services -> Blender -> Meta video -> Flow -> cloud -> WanGP still -> graphics / physics -> headline)
+                # instead of a WanGP video straight after the cloud still
+                v["type"] = "still"; log(f"Motion {v['id']}: down the image ladder (WanGP only as the last resort)"); continue
             elif illustration_still(cfg, job, v, s.get("vo", ""), log): continue   # animated illustration clip (motion/<id>.mp4)
             ok = False
             for t in range(2):
