@@ -647,6 +647,13 @@ class Studio:
                         if fix:
                             from . import qc_repair
                             qc_repair.repair(mp4, cfg, j.dir, log, stop, vert=vert)
+                        if cfg.get("story_qc_on", True):   # owner 2026-11-07: every shot checked against what is being said
+                            from . import storyqc, qc_repair
+                            for rnd in range(2 if fix else 1):   # a second look after repair: the vision model can miss a flag once
+                                bad = storyqc.check(mp4, cfg, j.dir, log, vert=vert, stop=stop)
+                                if not bad: break
+                                if not fix: log(f"  story QC: {len(bad)} off-story shot(s) reported (qc_mode is report; not replaced)"); break
+                                qc_repair.repair(mp4, cfg, j.dir, log, stop, vert=vert, marks=storyqc.marks(bad))
                         qc.qc_final(mp4, cfg, j.dir / "qc", log, every=10.0 if vert else 30.0)
                 else: log("Quality check skipped (the local vision model isn't running)")
             except Exception as e:

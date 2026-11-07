@@ -180,7 +180,7 @@ def _rung_stock(ctx):
         if c.get("script_provider") == "claude" and not c.get("anthropic_api_key"): c["script_provider"] = "deepseek" if c.get("deepseek_api_key") else "local"
         with LLM(c, log, lambda: False) as llm:
             qs = llm.chat_json("You pick stock-footage searches. Reply with JSON only.",
-                               "Narration:\n" + vo[:700] + '\n\nGive 2 short stock-video searches (2-4 words each) for footage that shows what this is about.\n{"queries": ["...", "..."]}',
+                               "Narration:\n" + vo[:700] + '\n\nGive 2 short stock-video searches (2-4 words each) for footage that shows what this is about. Never a person\'s name (stock footage would show a stranger viewers take for them): places, objects, scenes.\n{"queries": ["...", "..."]}',
                                max_tokens=200).get("queries") or []
     except Exception:
         qs = []
@@ -192,6 +192,8 @@ def _rung_stock(ctx):
     tried = 0
     for c in cands:
         if tried >= 3: break
+        why_t = footage.title_contradicts(cfg, c.get("desc", ""), vo, story=vo)
+        if why_t: _log(log, f"    stock {c['id']}: title contradicts the story ({why_t})"); continue
         tried += 1
         out = ctx["work"] / f"stock_{c['id']}.mp4"
         try: footage.fetch(c, str(out), ctx["need"] + 1.0)
@@ -316,13 +318,41 @@ def splice(mp4, reps, W, H, fps, out):
     return Path(out)
 
 
-def repair(mp4, cfg, job_dir, log=print, stop=lambda: False, vert=False, narration_text=None, rungs=None):
-    """Replace every HARD span qc_part marked in <mp4>.qc.json. Never raises (cancel aside); returns the repair report."""
+AI_RUNGS = {"ai_image", "chatgpt_chain", "marble"}
+
+
+def mark_timeline(job_dir, vert, a, b, rung, how):
+    """A repaired span is spliced into the finished video after the render, so the timeline (teaser.json) is told what now
+    plays there: the scrubber's "Made by" and the Publisher's YouTube "Altered content" answer read it (Nov 7: repaired spans
+    showed generated people with no GENERATED tag). -> number of background shots marked."""
+    tl = Path(job_dir) / ("short" if vert else "build") / "public" / "teaser.json"
+    try: data = json.loads(tl.read_text(encoding="utf-8"))
+    except Exception: return 0
+    m = re.search(r"\((\w+)\)", how or "")
+    tag = (f"GENERATED · {(m.group(1) if m else 'AI').upper()}" if rung in AI_RUNGS else
+           "ILLUSTRATIVE" if rung == "stock" else "")
+    n = 0
+    for bt in data.get("beats", []):
+        s0, d, bgs = float(bt.get("start", 0)), float(bt.get("dur", 0)), bt.get("bgs") or []
+        for i, g in enumerate(bgs):
+            ga = s0 + float(g.get("from") or 0)
+            gb = s0 + (float(bgs[i + 1].get("from") or 0) if i + 1 < len(bgs) else d)
+            if min(gb, b) - max(ga, a) <= 0.3: continue
+            g["qc_repair"] = {"rung": rung, "how": how, "span": [round(a, 2), round(b, 2)]}
+            if tag: g["tag"] = tag
+            n += 1
+    if n: tl.write_text(json.dumps(data, indent=1, ensure_ascii=False), encoding="utf-8")
+    return n
+
+
+def repair(mp4, cfg, job_dir, log=print, stop=lambda: False, vert=False, narration_text=None, rungs=None, marks=None):
+    """Replace every HARD span qc_part marked in <mp4>.qc.json (or the given marks, e.g. storyqc's off-story shots).
+    Never raises (cancel aside); returns the repair report."""
     mp4 = Path(mp4); job_dir = Path(job_dir)
     rep = {"video": mp4.name, "started": time.strftime("%Y-%m-%d %H:%M:%S"), "spans": [], "status": "nothing to repair"}
-    rpath = mp4.with_suffix(".repair.json")
+    rpath = mp4.with_suffix(".story_repair.json" if marks is not None else ".repair.json")
     try:
-        sp = spans(mp4)
+        sp = list(marks) if marks is not None else spans(mp4)
         if not sp:
             rpath.write_text(json.dumps(rep, indent=1), encoding="utf-8"); return rep
         W, H, fps = _probe(mp4); total = media.dur(mp4)
@@ -363,6 +393,10 @@ def repair(mp4, cfg, job_dir, log=print, stop=lambda: False, vert=False, narrati
                 raise RuntimeError(f"spliced video is wrong ({media.dur(tmp) if media.ok(tmp) else 0:.1f}s vs {total:.1f}s)")
             shutil.copy2(tmp, mp4)
             rep["original"] = str(keep)
+            for r in rep["spans"]:
+                if r["fixed_by"]:
+                    try: mark_timeline(job_dir, vert, r["span"][0], r["span"][1], r["fixed_by"], r.get("how", ""))
+                    except Exception as e: _log(log, f"  QC repair: timeline not updated ({str(e)[:80]})")
         n = sum(1 for r in rep["spans"] if r["fixed_by"])
         rep["status"] = f"{n} of {len(sp)} span(s) repaired"
         _log(log, f"  QC repair: {rep['status']}")

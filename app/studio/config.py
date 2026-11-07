@@ -93,6 +93,8 @@ DEFAULTS = {
     "narration_gap_secs": 0.9,        # explainer: silence between narration chunks (~every 85 words; was 0.25 s)
     "music_in_smoke": False,          # smoke-test Shorts get music (and breathers) too
     "music_generate": True, "music_generate_per_day": 0,   # a new Gemini track when no library track fits the mood (0 = no daily cap)
+    "story_qc_on": True,              # QC: every background shot of the finished video checked against the narration (another country, flag, unrelated)
+    "story_qc_max_shots": 40,
     "short_fit_3min": False,          # True = drop beats / speed up so a Short stays under 3:00; False = a long Short just runs long
     "story_subject_guard": True,
     "hold_previous_max_secs": 3.5,    # fallback: a beat this short that only got a text card holds the previous beat's picture (0 = off)
