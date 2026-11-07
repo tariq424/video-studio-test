@@ -508,7 +508,7 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
             for it in _safe(log, f"{s['id']} storyboard", lambda: storyboard.beat(cfg, sd, s, story, log, aspect="9:16", max_shots=n), []) or []:
                 items.append({k: v for k, v in it.items() if k not in ("text", "motion", "piece")})
         moving = False
-        if v2 and cfg.get("action_video_first", True) and not items and not pick.get(s["id"]) \
+        if v2 and cfg.get("action_video_first", False) and not items and not pick.get(s["id"]) \
                 and (cfg.get("meta_video_on", True) or cfg.get("flow_on", True)):
             # owner, 2026-11-07: pick by narration fit, then by cost. An action the narration describes (no stock or source shows it,
             # no physics module animates it from real data) can't be shown by a still: go straight to video - Meta (free), then
