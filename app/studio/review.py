@@ -478,11 +478,10 @@ def _busy(job, bid, msg):
 
 def start(studio, jid, bid, kind, payload=None, ws=None):
     """Run 'expand' (show all options) or 'refine' for one beat in the background. -> error text or ''"""
-    # Nov 7: a running job only blocks what needs the GPU by nature (all options / animation). A chat instruction or more stock
-    # goes ahead: stock and the image services first, and WanGP only when nothing else gave a picture AND the GPU is free.
-    if studio.current and kind in ("expand", "animate"): return "Another job is using the GPU right now; try again when it has finished."
+    # Nov 7 (GPU interlock, 691935f): the editor has priority. A running job never refuses a beat action any more: jobs pause
+    # with "Waiting: editor in use", and the WanGP step takes the machine-wide GPU lock (gpu_lock), waiting for a job to
+    # finish its current GPU stage if it holds it. Stock and the image services need no lock.
     if not _gpu.acquire(blocking=False): return "Already working on a beat; wait for it to finish."
-    payload = dict(payload or {}, gpu_free=not studio.current)
     job = ws or studio.job(jid).dir
     _busy(job, bid, {"expand": "Generating options...", "animate": "Animating (several minutes)...", "more_stock": "Searching more stock footage..."}.get(kind, "Working on your instruction..."))
     def run():
@@ -505,9 +504,15 @@ def _run_slots(job, sec, keys, cfg, wg, log, prompt=None, motion=None, animate=F
     sd, _ = _p(job)
     slots = [{"key": k, "beat": sec["id"], "vo": sec["vo"], "still_prompt": prompt or sec.get("still_prompt", ""),
               "motion": motion if motion is not None else sec.get("motion", ""), "subject": sec.get("subject")} for k in keys]
-    gpu = wg.alive()
-    if not gpu: log("  WanGP isn't reachable: no AI stills or animations")
-    return ladder.run(cfg, wg, sd, sd / "fallback", slots, log, lambda: False, gpu, seed=7000 + int(time.time()) % 1000, full=True, animate=animate)
+    from . import gpu_lock
+    def waiting(m):
+        who = (m or {}).get("desc") or "another job"
+        log(f"  {sec['id']}: waiting for the GPU (held by {who}); the job yields at the end of its current stage")
+        _busy(job, sec["id"], f"Waiting for the GPU ({who} is finishing a stage)...")
+    with gpu_lock.holder(desc=f"editor-beat:{Path(job).name}:{sec['id']}", on_wait=waiting):
+        gpu = wg.alive()
+        if not gpu: log("  WanGP isn't reachable: no AI stills or animations")
+        return ladder.run(cfg, wg, sd, sd / "fallback", slots, log, lambda: False, gpu, seed=7000 + int(time.time()) % 1000, full=True, animate=animate)
 
 def _extra_stock(job, sec, queries, tag, cfg, log, n=2):
     from . import footage
@@ -633,10 +638,8 @@ def refine(job, bid, cfg, wg, log, payload):
     gen = _refine_image(job, sec, key, cfg, log)
     st = {}
     if not picked and not gen:
-        if payload.get("gpu_free", True):
-            _busy(job, bid, "Nothing from stock or the image services: trying WanGP (GPU)...")
-            st = _run_slots(job, sec, [key], cfg, wg, log, prompt=sec["still_prompt"], motion=sec["motion"])
-        else: log(f"  {bid}: WanGP skipped: another job is using the GPU")
+        _busy(job, bid, "Nothing from stock or the image services: trying WanGP (GPU)...")
+        st = _run_slots(job, sec, [key], cfg, wg, log, prompt=sec["still_prompt"], motion=sec["motion"])
     with _lock(job):
         rv = load(job)
         if key in st: _slot_cands(rv, sec, key, st[key], sd, True, log)
