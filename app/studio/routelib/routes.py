@@ -1306,7 +1306,10 @@ def r13_meta_chain(desc, aspect, image_path, ctx):
         imgs0 = _img_srcs(page)
         box = _pick(page, ["textarea[placeholder*='Ask Meta']", "div[contenteditable='true']"])
         try:
-            _type_like_human(page, box, "Imagine: " + _prompt(desc, "photorealistic, no text"))
+            from .. import people   # a person in the snapshot is a real person: a sketch, never a photo-real look-alike (owner, 2026-11-07)
+            real_person = people.shows_person(desc) and "sketch" not in desc.lower()
+            _type_like_human(page, box, "Imagine: " + (_prompt(desc + " " + people.SNAP_RULE, "no text") if real_person
+                                                       else _prompt(desc, "photorealistic, no text")))
         except Exception:
             _gen_fail(ctx, "meta", evidence, "prompt box not usable")
         img_data, t0 = None, time.time()
