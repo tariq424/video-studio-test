@@ -135,3 +135,13 @@ def test_first_name_alone_counts_when_unique():
     assert people.names("the nia of it", ents) == []          # lower-case word, not the name
     assert people.names("Clinton waved.", ents) == []         # two Clintons: ambiguous
     assert people.names("Smith waved.", ents) == ["Clinton Smith"]
+
+
+def test_look_drops_absent_features(tmp_path, monkeypatch):
+    (tmp_path / "entities.json").write_text(json.dumps([{"name": "Nia Dixon", "kind": "person"}]), encoding="utf-8")
+    snap = tmp_path / "s.png"; snap.write_bytes(b"x")
+    people._LOOKS.clear(); people._LOOKS_JOB[0] = None
+    monkeypatch.setattr(people, "_vision_json", lambda *a: {"person": "yes",
+                        "look": "an older woman with short gray hair, wearing a black fleece jacket and no glasses or beard"})
+    assert people.learn_look({}, tmp_path, {"vo": "Nia Dixon spoke."}, snap, None, lambda *_: None) == \
+        "an older woman with short gray hair, wearing a black fleece jacket"

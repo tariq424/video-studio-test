@@ -95,7 +95,9 @@ def learn_look(cfg, sd, sec, image, ents=None, log=print):
         log(f"  {nm}: look not taken ({str(e)[:80]})"); return ""
     look = re.sub(r"\s+", " ", str(j.get("look") or "")).strip(" .")
     look = re.sub(r"(?i)^(the )?(main )?(person|subject|they|she|he)( in (the|this) (picture|image))? (appears to be|is|seems to be) ", "", look)
-    look = re.split(r"(?i),? and (is|are) (indoors|outdoors|standing|sitting|in )", look)[0].strip(" .,")[:160]
+    look = re.split(r"(?i),? and (is|are) (indoors|outdoors|standing|sitting|in )", look)[0]
+    look = re.sub(r"(?i),?\s*(and )?(with )?(no|without) (glasses|beard|eyeglasses)( or (glasses|beard|eyeglasses))?", "", look)  # filler
+    look = look.strip(" .,")[:160]
     if not str(j.get("person", "")).lower().startswith("y") or len(look.split()) < 3: return ""
     _LOOKS[nm] = look
     for e in ents or []:
