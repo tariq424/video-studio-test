@@ -187,14 +187,14 @@ let lastKey='';
 const STAGE_NAME={transcript:'transcript',script:'script',short_script:'script',review:'script review',short_stock:'stock footage',short_voice:'narration',
  short_fallback:'visuals',short_review:'visual review',short_render:'rendering',charts:'charts',voice:'narration',captions:'captions',broll:'stock footage',
  presenter:'presenter',motion:'motion clips',stills:'stills',assemble:'rendering'};
-function outputsHtml(s){const p=s.prog||{},m=s.mode||'long',rows=[],busy=['running','queued','paused','awaiting_visuals','awaiting_review'].includes(s.status);
+function outputsHtml(s){const iv=s.kind=='interview',p=iv?Object.assign({},s.prog||{},{out:'both'}):(s.prog||{}),m=s.mode||'long',rows=[],busy=['running','queued','paused','awaiting_visuals','awaiting_review'].includes(s.status);
  const one=(name,key,file)=>{let t;
   if(file)t=`✓ Finished <code style="font-size:12px">${esc(file.replace(/\\/g,'/').split('/').slice(-1)[0])}</code>`;
   else if(busy&&(p.out===key||p.out==='both'))t=`<b>${s.status=='running'?'Working':esc(statusText(s))}</b> — ${esc(STAGE_NAME[p.stage||s.stage]||p.stage||s.stage||'')}${p.of?` · ${key=='short'?'Beat':'Section'} ${p.n} of ${p.of}`:''}`;
   else if(s.status=='finished')t='—';else t=busy?'Waiting':esc(s.status||'');
   rows.push(`<div data-testid="output-${key}" style="font-size:13.5px">${name}: ${t}</div>`)};
  if(m=='short'||m=='both')one('Short','short',s.short_output);
- if(m=='long'||m=='both')one('Explainer','explainer',s.output);
+ if(m=='long'||m=='both')one(iv?'Longer cut':'Explainer','explainer',s.output);
  return rows.length?`<div style="margin:6px 0">${rows.join('')}</div>`:''}
 function hk(x){let h=0;x=String(x||'');for(let i=0;i<x.length;i++)h=(h*31+x.charCodeAt(i))|0;return (h>>>0).toString(36)}   // thumbnail cache key
 function tq(c){return '?v='+hk((c.key||'')+'|'+(c.thumb||''))}
@@ -205,9 +205,9 @@ async function loadDetail(){if(editing)return;const s=await j('/api/jobs/'+sel);
  const fin=(s.output||s.short_output)&&!['running','queued','paused','awaiting_visuals','awaiting_review'].includes(s.status);
  if(POPUP){if(fin){$('popTitle').textContent=s.title||s.url;const useShort=s.short_output&&!(s.output&&s.edit_target=='long');const relSrc=useShort?s.short_output:s.output;if(relSrc){const rel=relSrc.replace(/\\/g,'/').split('/').slice(-2).join('/');$('detail').innerHTML=`<video id="ov" controls src="/files/${sel}/${rel}?t=${Date.now()}" ontimeupdate="edTick()" onloadedmetadata="scDraw()" onplay="scTick()" onpause="scTick()"></video><div id="scrub"></div><div id="edbar"></div><div id="edp"></div>`;edInit();return}}else{$('detail').innerHTML='<p class="mut">This job is not finished yet.</p>';return}}
  if(!POPUP&&fin){const mode=s.mode||'long';const cardMt={both:`long ${s.minutes} min + Short ${fmt(Math.round(s.short_secs||165))}`,short:`${s.smoke?'Smoke test · ':''}Short ${fmt(Math.round(s.short_secs||165))}`,long:`long ${s.minutes} min`}[mode];const kindTxt={both:'Long + Short',short:'Short',long:'Explainer'}[mode];const cardInfo=s.minutes?cardMt:(s.kind==='interview'?'Interview edit':kindTxt);$('detail').innerHTML=`<div class="job" style="display:flex;gap:16px;align-items:center"><div style="flex:1;min-width:0"><b>${esc(s.title||s.url)}</b><div class="mut" style="font-size:12px">${s.minutes?kindTxt+' · ':''}${cardInfo}</div><button style="margin-top:10px" onclick="openEditPopup('${sel}')">Edit in popup ↗</button></div><div id="thumbp" style="width:180px;flex:0 0 auto"></div></div>`;if(s.thumbnail)showThumb(s);return}
- const mtxt={both:`long ${s.minutes} min + Short ${fmt(Math.round(s.short_secs||165))}`,short:`${s.smoke?'Smoke test · ':''}Short ${fmt(Math.round(s.short_secs||165))}`,long:`long ${s.minutes} min`}[s.mode||'long'];
- let h=`<h2>${esc(s.title||s.url)}</h2><div class="mut">${mtxt} · <b data-testid="job-status" data-status="${esc(s.status)}" data-stage="${esc(s.stage)}">${statusText(s)}</b>${s.error?` · <span style="color:var(--bad)">${esc(s.error)}</span>`:''}</div>${outputsHtml(s)}${(s.length_warnings||[]).map(w=>`<div data-testid="length-warning" style="color:var(--bad);font-size:13px">Length miss: ${esc(w)}</div>`).join('')}`;
- h+=`<div class="stages">${(s.stages||stages).map(t=>`<span class="st ${done.includes(t)?'done':(s.stage==t?'cur':'')}">${t}</span>`).join('')}</div>`;
+ const mtxt={both:`long ${s.minutes} min + Short ${fmt(Math.round(s.short_secs||165))}`,short:`${s.smoke?'Smoke test · ':''}Short ${fmt(Math.round(s.short_secs||165))}`,long:`long ${s.minutes} min`}[s.mode||'long'];const mtxt2=s.kind=='interview'?'Interview edit · Short + longer cut':mtxt;
+ let h=`<h2>${esc(s.title||s.url)}</h2><div class="mut">${mtxt2} · <b data-testid="job-status" data-status="${esc(s.status)}" data-stage="${esc(s.stage)}">${statusText(s)}</b>${s.error?` · <span style="color:var(--bad)">${esc(s.error)}</span>`:''}</div>${outputsHtml(s)}${(s.length_warnings||[]).map(w=>`<div data-testid="length-warning" style="color:var(--bad);font-size:13px">Length miss: ${esc(w)}</div>`).join('')}`;
+ h+=`<div class="stages">${(s.kind=='interview'?['interview']:(s.stages||stages)).map(t=>`<span class="st ${done.includes(t)?'done':(s.stage==t?'cur':'')}">${t}</span>`).join('')}</div>`;
  h+=`<div class="row">`;
  if(s.status=='awaiting_review'){h+=`<button onclick="act('approve')">Approve & render</button>`;if(s.plan_summary)h+=`<button class="sec" onclick="editPlan()">Edit long script</button>`;if(s.short_summary)h+=`<button class="sec" onclick="editShort()">Edit Short script</button>`}
  if(['running','queued'].includes(s.status)){h+=`<button class="sec" onclick="act('stop')">Stop</button>`;h+=s.pause_req?`<span class="mut" data-testid="job-pausing">Pausing at the next safe point…</span>`:`<button class="sec" data-testid="job-pause" onclick="act('pause')">Pause now</button>`}
