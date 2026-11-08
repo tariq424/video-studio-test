@@ -240,6 +240,50 @@ class Studio:
         what = url or (f"file {up}" if up else "pasted text")
         j.log(f"Job created for {what} (output: {'SMOKE TEST, ' if smoke else ''}{mode}; long {minutes} min, short {short_secs:.0f}s)"); self._enqueue(jid); return jid
 
+    def create_interview(self, src, context="", extras=None, thanks=""):
+        """Your own interview footage (owner, 2026-11-08): the real conversation leads - a preview of later moments, background
+        lines, then your questions and the guest's answers in order, with commentary where the guest gets specific. Makes a
+        Short and a longer cut (studio/interview.py), opened as an interview job you can edit (studio/interview_edit.py)."""
+        src = Path(str(src).strip().strip('"'))
+        if not src.is_file(): raise ValueError(f"File not found on this PC: {src}")
+        if src.suffix.lower() not in (".mov", ".mp4", ".m4v", ".mkv"): raise ValueError("An interview needs a video file (.mov .mp4 .m4v .mkv)")
+        ex = []
+        for x in extras or []:
+            p = Path(str(x).strip().strip('"'))
+            if not str(x).strip(): continue
+            if not p.is_file(): raise ValueError(f"Clip not found on this PC: {p}")
+            ex.append(str(p))
+        jid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        j = self.job(jid); j.dir.mkdir(parents=True)
+        j.save(kind="interview", url="", mode="both", minutes=0, captions=True, auto_approve=True, visual_review="never", status="queued",
+               stage="interview", done=[], title="", created=time.time(), priority="normal", src_title=src.name,
+               interview={"src": str(src), "context": str(context or "").strip(), "extras": ex, "thanks": str(thanks or "").strip()})
+        j.log(f"Interview job created for {src}" + (f" (+{len(ex)} more clip(s))" if ex else "")); self._enqueue(jid); return jid
+
+    def _interview(self, j, s, cfg, log):
+        """Run the interview edit for an interview job, then open its outputs in the editor."""
+        from . import interview, interview_edit
+        iv = s.get("interview") or {}
+        src = Path(iv.get("src") or "")
+        if not src.is_file(): raise RuntimeError(f"the interview footage is gone: {src}")
+        if iv.get("thanks"): cfg["interview_thanks"] = iv["thanks"]
+        work = j.dir / "iwork"
+        name = re.sub(r"[^A-Za-z0-9]+", "_", src.stem).strip("_").lower()[:40] or "interview"
+        j.save(stage="interview", prog={"out": "short", "stage": "interview", "n": 0, "of": 0})
+        log("== interview ==")
+        gpu_lock.acquire(desc=f"job:{j.dir.name}:interview")
+        try: interview.build(cfg, src, work, iv.get("context", ""), log, name=name, extras=iv.get("extras") or None)
+        finally: gpu_lock.release()
+        outs = interview_edit.adopt(j.dir, {"short": work / f"{name}_short_parts.json", "long": work / f"{name}_documentary_parts.json"}, log)
+        if not outs: raise RuntimeError("the interview edit made no video")
+        try: title = json.loads((work / "result.json").read_text(encoding="utf-8")).get("title", "")
+        except (OSError, ValueError): title = ""
+        try: title = json.loads((j.dir / "iedit" / "long.json").read_text(encoding="utf-8")).get("title") or title
+        except (OSError, ValueError): pass
+        j.save(status="finished", stage="done", done=["interview"], title=title or src.stem, output=outs.get("long"), short_output=outs.get("short"),
+               edit_target="short" if outs.get("short") else "long", prog={"out": "short", "stage": "done", "n": 0, "of": 0})
+        log("Finished.")
+
     def approve(self, jid):
         j = self.job(jid); s = j.state
         if s.get("status") == "awaiting_review":
@@ -427,7 +471,9 @@ class Studio:
         wg = WanGP(cfg); log = j.log
         j.save(status="running", error="")
         dbg = debug.Debugger(j, log)
-        try: self._stages(j, s, cfg, wg, log, stop, dbg, jid)
+        try:
+            if s.get("kind") == "interview": self._interview(j, s, cfg, log)
+            else: self._stages(j, s, cfg, wg, log, stop, dbg, jid)
         except debug.Paused as p:
             info = p.info
             if j.state.get("cancel_req"):   # Stop video reached its safe point

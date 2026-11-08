@@ -71,6 +71,12 @@ def create():
         b.setdefault("auto_approve", "true")   # script review is skipped unless the user ticks it off
         for k in ("presenter", "auto_approve", "captions"): b[k] = b.get(k) in ("true", "1", "on", True)
     else: b = request.get_json(silent=True) or {}; f = None
+    if b.get("mode") == "interview":   # your own interview footage: the real conversation leads (studio/interview.py)
+        ex = b.get("interview_extras") or []
+        if isinstance(ex, str): ex = [x for x in ex.splitlines() if x.strip()]
+        if not str(b.get("src_path") or "").strip(): return jsonify(error="Give the path of the interview video on this PC."), 400
+        try: return jsonify(id=studio.create_interview(b.get("src_path", ""), b.get("interview_context", ""), ex, b.get("interview_thanks", "")))
+        except ValueError as e: return jsonify(error=str(e)[:300]), 400
     sp = (b.get("src_path") or "").strip().strip('"')
     if sp and not (f and f.filename):   # a file on this PC by path (the /make page can't put a file into an upload field)
         if not Path(sp).is_file(): return jsonify(error=f"File not found on this PC: {sp}"), 400

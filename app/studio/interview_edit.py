@@ -28,6 +28,43 @@ VIDEO = {".mov", ".mp4", ".m4v"}
 PHOTO = {".jpg", ".jpeg", ".png"}
 
 
+def _guess(m, p):
+    """A piece whose picture was a guess (mostly blurred / turned on its side) is marked "check" (owner: stop if not sure)."""
+    from . import shots
+    mm = p.get("m") or {}
+    if mm.get("type") not in ("bite", "narr") or mm.get("si") is None: return False
+    try:
+        an_dir = m["sources"][int(mm["si"])][2]
+        an = json.loads((Path(an_dir) / "faces.json").read_text(encoding="utf-8"))
+    except Exception: return False
+    by = {x["t"]: shots.kind_keep(x) for x in an.get("secs") or []}
+    t0 = float(mm.get("t0") or 0); t1 = float(mm.get("t1") or t0 + float(p.get("dur") or 0))
+    secs = list(range(int(t0), max(int(t0) + 1, int(t1))))
+    bad = sum(1 for t in secs if by.get(t, "none") in ("blur",) or str(by.get(t, "")).startswith("turn"))
+    return bad / max(1, len(secs)) >= 0.3
+
+
+def adopt(job, manifests, log=print):
+    """A finished interview build -> this job's outputs and editor manifests. manifests: {"short": parts.json, "long": parts.json}
+    (either may be missing). Videos are hard-linked (copied across drives). -> {"short": path, "long": path}"""
+    import os
+    job = Path(job); outs = {}
+    for k, mp in manifests.items():
+        if not mp or not Path(mp).exists(): continue
+        m = json.loads(Path(mp).read_text(encoding="utf-8"))
+        if not Path(m["out"]).exists(): continue
+        dst = job / "output" / Path(m["out"]).name; dst.parent.mkdir(parents=True, exist_ok=True)
+        if not dst.exists():
+            try: os.link(m["out"], dst)
+            except OSError: shutil.copy2(m["out"], dst)
+        for p in m["parts"]:
+            p["dur"] = media.dur(p["file"]); p["check"] = _guess(m, p)
+        (job / "iedit").mkdir(parents=True, exist_ok=True)
+        _save_man(job, k, m); outs[k] = str(dst)
+        log(f"  {k}: {len(m['parts'])} pieces, {sum(1 for p in m['parts'] if p['check'])} marked check")
+    return outs
+
+
 def is_interview(job):
     from .pipeline import Job
     return Job(job).state.get("kind") == "interview"

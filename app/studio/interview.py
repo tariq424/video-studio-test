@@ -168,13 +168,14 @@ About the footage: {context}
 The documentary's soundbites (segment numbers with their words) and context notes:
 {material}
 Rules: tell ONE story with a beginning, middle and end that a tourist would want to watch. It MUST touch each of these topics,
-using his own words about them where he talks about them: {topics}. Open with the most gripping soundbite (under 20 seconds);
+using the guest's own words about them where they come up: {topics}. Open with the most gripping soundbite (under 20 seconds);
 then 6-10 more soundbites (each 5-20 seconds; a sub-range of a soundbite's segments is fine), joined by up to five one-sentence
-narration lines that carry the story forward; up to THREE context inserts from the notes (only what the note says);
+narration lines that carry the story forward (right after the opener, one of them says who the guest is and where);
+keep the creator's question in front of an answer that doesn't make sense without it; up to THREE context inserts from the notes (only what the note says);
 END ON A SOUNDBITE that lands the story. No small talk, no logistics, nothing off-thread.
 Narration only connects: it never states anything that is not in the transcript or the notes, never links two facts that the
-sources don't link (e.g. do not claim the mosque stands on land that was taken), and attributes the speaker's claims to him
-("Mr. Clinton says ...", "as he tells it ...") instead of stating them as fact.
+sources don't link (e.g. do not claim the mosque stands on land that was taken), and attributes the speaker's claims to them
+("she says ...", "as he tells it ...") instead of stating them as fact.
 Also write "hook": an on-screen line for the opening soundbite, under 45 characters, true to the story.
 Reply with JSON only: {{"hook": "...", "items": [{{"bite": [first, last]}} | {{"narr": "...", "broll": ""}} | {{"insert": "...", "note": n, "visual": "...", "card": "..."}}]}}"""
 
@@ -222,9 +223,10 @@ def short_plan(cfg, segs, pl, context, notes, work, log=print, short_secs=90, tr
     return j
 
 
-TRIAGE = """You edit a documentary from the creator's OWN footage of a conversation. The guest's own telling is the backbone:
-keep his narrative, in its original order, and AUGMENT it. The creator (the man holding the camera, asking questions) is a
-visitor and not the subject.
+TRIAGE = """You edit a documentary from the creator's OWN footage of a conversation: the creator asks the questions, the guest
+answers. The real conversation is the backbone: keep it in its original order with the creator's questions in front of the
+answers they lead to (the viewer hears the question, then the answer), and AUGMENT it: a preview first, then background, then
+the conversation with commentary where the guest gets specific.
 
 About the footage (from the creator): {context}
 
@@ -237,31 +239,40 @@ Research notes (checked facts with sources; the ONLY facts you may add):
 Mark up the WHOLE conversation. Reply with JSON only:
 {{
  "title": "a YouTube title, under 70 characters, honest, no clickbait",
+ "guest": "the guest's name as said in the conversation or the creator's note, else empty",
+ "preview": [[first_seg, last_seg], ...],
+ "background": ["one or two sentences", ...],
  "drop": [[first_seg, last_seg, "why"], ...],
  "facts": [{{"after": seg, "note": n, "text": "1-2 sentences, only what note n says", "visual": "what a photo for it should show, 3-8 words", "card": "on-screen fact under 40 characters"}}],
  "jokes": [{{"after": seg, "text": "one light, warm line"}}],
  "chapters": [{{"at": seg, "title": "2-5 words"}}],
- "pictures": [{{"from": seg, "to": seg, "visual": "the photographable thing he is talking about, 3-8 words, e.g. 'Tucker's Town Bermuda', 'St. George's Bermuda harbour', or empty"}}]
+ "pictures": [{{"from": seg, "to": seg, "visual": "the photographable thing being talked about, 3-8 words, e.g. 'Tucker's Town Bermuda', 'St. George's Bermuda harbour', or empty"}}]
 }}
 Rules:
+- preview: 2-4 of the most intriguing moments from LATER in the conversation (each 3-10 seconds, a complete phrase, the guest
+  speaking), played first as a "coming up" teaser, before anything else.
+- background: 2-4 short narration lines that come after the preview and before the conversation: who the guest is, where and
+  when the conversation happened, and why it is worth hearing. Only what the creator's note, the notes or the transcript say.
 - drop ONLY what is boring or repetitive: small talk, directions and logistics, dead air, the same point said again, chatter about
-  the drive, anything private (addresses, phone numbers, money of private people). Everything else stays, however long the video gets.
-- facts: where he mentions something a viewer would want explained (a place, a law, a date, a group, a number), or in place of a
-  dropped stretch. "after" = the segment after which his talk pauses for the fact (it must end a sentence); he picks up again at
-  the next segment. Use most notes once; never two facts in a row; at most one fact per ~90 seconds of his talk.
-  A fact must be about what he is talking about in the 3 segments before "after" - the same place, person or event he names
-  there. Never put a fact about one place where he talks about another (e.g. Horseshoe Bay is not Tucker's Town); if no note
-  fits what he is saying at a pause, put no fact there.
+  the drive, anything private (addresses, phone numbers, money of private people). Everything else stays, however long the video
+  gets. Never drop a question whose answer stays: a question goes only when it is repeated or its answer is dropped.
+- facts: commentary where the guest gets specific: a place, a law, a date, a group, a number a viewer would want explained, or
+  in place of a dropped stretch. "after" = the segment after which the talk pauses for the fact (it must end a sentence); the
+  conversation picks up again at the next segment. Use most notes once; never two facts in a row; at most one fact per ~90
+  seconds of talk. A fact must be about what is being talked about in the 3 segments before "after" - the same place, person
+  or event named there. Never put a fact about one place where the talk is about another (e.g. Horseshoe Bay is not Tucker's
+  Town); if no note fits what is said at a pause, put no fact there.
 - jokes: at most 3, only in relaxed moments (the drive, food, sports, the weather), gentle and at our own expense; NEVER near
   slavery, race, land losses, poverty or religion.
 - chapters: 4-8, at the segment where a new topic starts; the first at segment 0.
-- pictures: cover every kept stretch with what he is talking about (one entry per topic stretch); empty when it's personal talk.
+- pictures: cover every kept stretch with what is being talked about (one entry per topic stretch); empty when it's personal talk.
 - Never put words in anyone's mouth; never invent facts."""
 
 
 def triage(cfg, segs, context, notes, work, log=print):
-    """The augment plan for the documentary (owner, 2026-10-24): keep the guest's narrative in order, drop only boring or repeated
-    stretches, pause him for facts at natural breaks, a few light jokes in relaxed moments. Cached in triage.json."""
+    """The augment plan for the documentary (owner, 2026-10-24): keep the conversation in order (questions in front of their
+    answers), drop only boring or repeated stretches, pause for facts where the guest gets specific, a few light jokes in relaxed
+    moments; open with a preview of later moments and a few background lines (owner, 2026-11-08). Cached in triage.json."""
     out = Path(work) / "triage.json"
     if cfg.get("interview_triage_file") and Path(cfg["interview_triage_file"]).exists():   # an edit plan written by hand
         return json.loads(Path(cfg["interview_triage_file"]).read_text(encoding="utf-8"))
@@ -281,6 +292,12 @@ def triage(cfg, segs, context, notes, work, log=print):
         for f in j.get("facts") or []:
             if notes and not (str(f.get("note", "")).isdigit() and int(f["note"]) < len(notes)): raise ValueError(f"fact note {f.get('note')} isn't a note number")
         if not j.get("chapters"): raise ValueError("chapters are needed")
+        if len(j.get("preview") or []) > 4: raise ValueError("at most 4 preview moments")
+        for p in j.get("preview") or []:
+            if not (isinstance(p, list) and len(p) >= 2 and 0 <= int(p[0]) <= int(p[1]) < n): raise ValueError(f"preview {p} is outside 0-{n - 1}")
+            if span(int(p[0]), int(p[1])) > 15: raise ValueError(f"preview {p[:2]} is {span(int(p[0]), int(p[1])):.0f} s; a teaser is 3-10 s")
+        bg = j.get("background") or []
+        if not isinstance(bg, list) or len(bg) > 4 or not all(isinstance(x, str) for x in bg): raise ValueError("background is a list of up to 4 sentences")
         dropped = sum(span(int(d[0]), int(d[1])) for d in j.get("drop") or [])
         if dropped > 0.6 * total: raise ValueError(f"{dropped / 60:.0f} min dropped; drop only boring or repeated stretches")
     _log(log, f"Interview: marking up all {n} segments (keep / drop / facts / jokes; script AI)")
@@ -292,7 +309,8 @@ def triage(cfg, segs, context, notes, work, log=print):
                           max_tokens=6000, check=check)
     out.write_text(json.dumps(j, indent=1, ensure_ascii=False), encoding="utf-8")
     dropped = sum(span(int(d[0]), int(d[1])) for d in j.get("drop") or [])
-    _log(log, f"  triage: {len(j.get('drop') or [])} stretch(es) dropped ({dropped / 60:.1f} min), {len(j.get('facts') or [])} fact(s), "
+    _log(log, f"  triage: {len(j.get('preview') or [])} preview moment(s), {len(j.get('background') or [])} background line(s), "
+              f"{len(j.get('drop') or [])} stretch(es) dropped ({dropped / 60:.1f} min), {len(j.get('facts') or [])} fact(s), "
               f"{len(j.get('jokes') or [])} joke(s), {len(j.get('chapters') or [])} chapter(s)")
     return j
 
@@ -306,8 +324,9 @@ def _cut_points(segs, a, b):
 
 
 def augment_items(tri, segs, max_bite=45.0):
-    """Triage -> items in the guest's order: his talk (bites, split at facts / jokes / chapters and every ~max_bite s so each
-    gets its own picture), the facts and jokes at their pauses, dropped stretches gone."""
+    """Triage -> items: the preview (teaser bites from later on, then the title card), the background lines, then the
+    conversation in its order (bites, split at facts / jokes / chapters and every ~max_bite s so each gets its own picture),
+    the facts and jokes at their pauses, dropped stretches gone."""
     n = len(segs)
     ends = lambda i: 0 <= i < n and segs[i]["text"].rstrip()[-1:] in ".?!"
     drop = set()
@@ -352,7 +371,14 @@ def augment_items(tri, segs, max_bite=45.0):
                 if not tri.get("exact") and items and ("insert" in x or "narr" in x) and ("insert" in items[-1] or "narr" in items[-1]): continue   # never two in a row
                 items.append(x)
     flush()
-    return items
+    head = []
+    for p in tri.get("preview") or []:   # "coming up": the most intriguing moments from later on, first
+        a, b = int(p[0]), int(p[1])
+        if 0 <= a <= b < n: head.append({"bite": [a, b], "visual": visual(a, b), "preview": True})
+    if head: head[-1]["title_after"] = True   # the title card comes after the teasers
+    for line in tri.get("background") or []:   # who, where, why: before the conversation starts
+        if str(line).strip(): head.append({"narr": str(line).strip(), "broll": "", "background": True})
+    return head + items
 
 
 def total_secs(items, segs):
@@ -1244,6 +1270,8 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
         if tri: items = augment_items(tri, segs)
         else: items = (_items(sp) if sp else _items(pl.get("short") or {})) if kind == "short" else [x for c in pl["documentary"]["chapters"] for x in c.get("items", [])]
         vtitle = (tri or {}).get("title") or pl.get("title", name)
+        guest = str((tri_all or {}).get("guest") or "").strip()[:40]
+        sub = str(cfg.get("interview_subtitle") or ("A conversation with " + guest if guest else "A conversation"))
         import hashlib   # cuts are cached per plan: a changed plan never reuses another plan's numbered parts
         kd = work / f"{kind}_{hashlib.md5((CUT_VERSION + json.dumps(items, sort_keys=True)).encode()).hexdigest()[:6]}"; kd.mkdir(exist_ok=True)
         parts, rnd = [], random.Random(7)
@@ -1259,17 +1287,18 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
             trip = TripFootage(Path(src).parent / "labeled" / "catalog", [src] + [p_ for p_, _, _ in sources[1:]] + [f for f, _, _ in oc], root, log, near=gps_of(src),
                                radius_km=float(cfg.get("interview_trip_radius_km", 2.0))) if cfg.get("interview_trip_footage", True) else False
         ladder = Ladder(cfg, src, flip, kd, kind, log, own=oc, scenic=card_bg, trip=trip or None)
-        hk = hook(cfg, main_segs, context, kind, work, log) if cfg.get("interview_hook", True) and not (kind == "short" and sp) else None
+        has_preview = bool(items and items[0].get("preview"))
+        hk = hook(cfg, main_segs, context, kind, work, log) if cfg.get("interview_hook", True) and not (kind == "short" and sp) and not has_preview else None
         if kind == "short" and sp and items and "bite" in items[0]:   # the Short's own opener is its cold open: hook text from its thread
             items[0] = dict(items[0], hook_text=str(sp.get("hook") or "")[:48])
         if hk:   # cold open: the most striking line, with the hook text on screen, before the story starts
             f = cut_bite_framed(src, hk["t0"], hk["t1"], kd / "hook.mp4", kind, flip, an, cuts, log, ladder=ladder, keep=keep)
             parts.append({"file": f, "words": [(w, s - hk["t0"], e - hk["t0"]) for w, s, e in hk["words"]], "style": "Cap", "hook": hk["text"],
                           "m": {"type": "bite", "src": str(src), "flip": flip, "si": 0, "t0": hk["t0"], "t1": hk["t1"], "text": hk.get("quote", "")}})
-        if hk or not (kind == "short" and sp):   # title card: what this is, before the story (the Short's comes after its opener)
+        if (hk or not (kind == "short" and sp)) and not has_preview:   # title card: what this is, before the story (the Short's comes after its opener)
             tt = kd / "title.mp4"
             if not media.ok(tt, 0.5): card_part(card_bg, 3.2, tt, kind)
-            parts.append({"file": tt, "words": [], "titles": [(vtitle, "Title", -50), ("A conversation in Bermuda", "Sub", 90)], "m": {"type": "card"}})
+            parts.append({"file": tt, "words": [], "titles": [(vtitle, "Title", -50), (sub, "Sub", 90)], "m": {"type": "card"}})
         for k, it in enumerate(items):
             if "bite" in it:
                 a, b = int(it["bite"][0]), int(it["bite"][1])
@@ -1292,10 +1321,10 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                 parts.append({"file": f, "words": words, "style": "Cap", "hook": it.get("hook_text", ""), "chapter": it.get("chapter", ""),
                               "credits": [(x[0], x[1], x[3]) for x in credits if x[3]],
                               "m": {"type": "bite", "src": str(bsrc), "flip": bflip, "si": segs[a].get("src", 0), "t0": t0, "t1": t1, "text": said}})
-                if it.get("hook_text"):   # the title card goes right after the opener
+                if it.get("hook_text") or it.get("title_after"):   # the title card goes right after the opener / the preview
                     tt = kd / "title.mp4"
                     if not media.ok(tt, 0.5): card_part(card_bg, 3.2, tt, kind)
-                    parts.append({"file": tt, "words": [], "titles": [(vtitle, "Title", -50), ("A conversation in Bermuda", "Sub", 90)], "m": {"type": "card"}})
+                    parts.append({"file": tt, "words": [], "titles": [(vtitle, "Title", -50), (sub, "Sub", 90)], "m": {"type": "card"}})
                 _log(log, f"  {kind} {k:02}: soundbite {t0:.0f}-{t1:.0f}s \"{segs[a]['text'][:60]}\"")
             elif it.get("narr") and keep:   # a joke / bridge line over the real scene nearby, muted
                 from . import captions
@@ -1393,8 +1422,9 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                 _log(log, f"  {kind} {k:02}: context \"{it['insert'][:60]}\"" + (f" [{credit}]" if credit else " (over blurred footage)"))
         ec = kd / "end.mp4"   # end card: thanks + subscribe, music carries it out
         if not media.ok(ec, 0.5): card_part(card_bg, 6.0 if kind == "documentary" else 4.0, ec, kind)
-        parts.append({"file": ec, "words": [], "titles": [(str(cfg.get("interview_thanks") or "Thank you, Mr. Clinton"), "Title", -90), (str(cfg.get("interview_thanks_sub") or "and the Islamic Center of Bermuda"), "Sub", 20),
-                                                          ("Subscribe for more journeys", "Sub", 120)], "m": {"type": "card"}})
+        thanks = str(cfg.get("interview_thanks") or (f"Thank you, {guest}" if guest else "Thanks for watching"))   # the guest's name, never one old video's
+        parts.append({"file": ec, "words": [], "titles": [t for t in [(thanks, "Title", -90), (str(cfg.get("interview_thanks_sub") or ""), "Sub", 20),
+                                                                       ("Subscribe for more journeys", "Sub", 120)] if t[0]], "m": {"type": "card"}})
         man = {"kind": kind, "out": str(work / f"{name}_{kind}.mp4"), "title": vtitle, "gps": gps_of(src), "parts": parts,
                "sources": [[str(p_), fl_, str(root if i_ == 0 else root / "extra" / Path(p_).stem.rstrip("."))] for i_, (p_, fl_, _a) in enumerate(sources)],
                "cfg": {k_: cfg[k_] for k_ in ("interview_music_db", "interview_duck_threshold", "interview_duck_ratio") if k_ in cfg}}
