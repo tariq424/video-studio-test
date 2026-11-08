@@ -920,6 +920,155 @@ def r8_flow_video(desc, aspect, image_path, ctx):
         pw.stop()
 
 
+# ------------------------------------------------------------------ Flow still (owner, 2026-11-07)
+# Flow's agent makes STILLS without spending credits (owner's finding). Same project / in-frame composer / send steps as r8, but
+# it asks for one image and NEVER approves a quote above 0 credits: a still that would cost credits is rejected and the route
+# fails, so the ladder moves on. The picture can then go straight to Meta's free image-to-video (r7) or be described elsewhere.
+FLOW_IMAGE_ASK = ("Generate ONE single still image (not a video, not a grid, not panels or a storyboard sheet). {shape} "
+                  "No text, letters, logos, mastheads or brand names anywhere in the picture. The image: {desc}")
+
+
+def _flow_frames_imgs(page, min_side=120):
+    """{src: natural area} for every <img> of at least min_side in every frame (Flow's editor may live in an iframe; a new still
+    first shows as a small grid thumbnail, Nov 7)."""
+    out = {}
+    for fr in page.frames:
+        try:
+            for src, a in fr.evaluate("(m) => [...document.images].filter(i => Math.min(i.naturalWidth, i.naturalHeight) >= m)"
+                                      ".map(i => [i.currentSrc || i.src, i.naturalWidth * i.naturalHeight]).filter(x => x[0])", min_side):
+                out[src] = max(a, out.get(src, 0))
+        except Exception:
+            pass
+    return out
+
+
+def _flow_send(page, ctx, evidence, text):
+    """New project -> the composer inside its frame -> type -> send. -> the composer's frame. Raises Blocker."""
+    _flow_close_news(page, ctx)
+    newproj = _pick(page, ["button:has-text('New project')", ":text('New project')", "button:has-text('add')"])
+    try:
+        newproj.first.click(timeout=10000)
+    except Exception:
+        _gen_fail(ctx, "flow", evidence, "'New project' button not found/clickable")
+    page.wait_for_timeout(8000)
+    _flow_close_news(page, ctx)
+    box = box_frame = None
+    for fr in page.frames:
+        for loc in (fr.locator("textarea"), fr.locator("[contenteditable='true']"), fr.locator("[role='textbox']")):
+            for i in range(min(loc.count(), 5)):
+                try:
+                    cand = loc.nth(i); cand.click(timeout=3000); cand.fill(text); box, box_frame = cand, fr; break
+                except Exception:
+                    continue
+            if box: break
+        if box: break
+    if box is None:
+        _gen_fail(ctx, "flow", evidence, "composer not drivable after New project")
+    try: box.press("Enter")
+    except Exception: pass
+    page.wait_for_timeout(1500)
+    def left():
+        try: return (box.input_value() if box.evaluate("e => 'value' in e") else box.inner_text()).strip()
+        except Exception: return ""
+    for _try in range(8):
+        if not left(): break
+        for sel in ("button[aria-label='Start generation']", "button[aria-label*='Send' i]", "button[aria-label*='Submit' i]",
+                    "button:has-text('arrow_forward')", "button:has(i:text('arrow_forward'))", "button[type='submit']"):
+            try:
+                b = box_frame.locator(sel).last
+                if b.is_visible(timeout=600) and b.is_enabled(): b.click(timeout=4000); break
+            except Exception:
+                continue
+        page.wait_for_timeout(2000)
+    if left():
+        _gen_fail(ctx, "flow", evidence, "prompt typed but not sent")
+    _note(ctx, "prompt sent")
+    return box_frame
+
+
+def _flow_quote(page):
+    """Flow's agent approval card: -> (frame, cost) with cost an int, None when no number is shown, or (None, None) when no card."""
+    for fr in page.frames:
+        try:
+            b = fr.get_by_text("Approve", exact=True)
+            if b.count() and b.last.is_visible(timeout=500):
+                m = re.search(r"costing\s+(\d+)\s+credits?", fr.locator("body").inner_text(), re.I)
+                return fr, (int(m.group(1)) if m else None)
+        except Exception:
+            continue
+    return None, None
+
+
+def r14_flow_image(desc, aspect, image_path, ctx):
+    pw, cctx, page, prefs = _browser("flow")
+    ctx["_page"] = page
+    try:
+        _goto(page, HOME_URLS["flow"])
+        page.wait_for_timeout(6000)
+        state, evidence = _signin_state(page, "flow")
+        _note(ctx, f"signin={state}; evidence: {evidence}")
+        if state == "login_wall":
+            _not_signed_in("flow")
+        if state == "unknown":
+            _blocker_unknown("flow", page, ctx, "r14", state, evidence)
+        shape = "Tall vertical 9:16 portrait image." if aspect == "9:16" else "Wide horizontal 16:9 landscape image."
+        before = set(_flow_frames_imgs(page))
+        _flow_send(page, ctx, evidence, FLOW_IMAGE_ASK.format(shape=shape, desc=str(desc)[:1200]))
+        t0, src, handled = time.time(), "", False
+        while time.time() - t0 < 300 and not src:
+            page.wait_for_timeout(5000)
+            if not handled:
+                fr, cost = _flow_quote(page)
+                if fr is not None:
+                    handled = True
+                    if cost == 0:
+                        fr.get_by_text("Approve", exact=True).last.click(timeout=4000); _note(ctx, "approved Flow's still (0 credits)")
+                    else:   # never spend credits on a still: reject, and the ladder moves on
+                        try: fr.get_by_text("Reject", exact=True).last.click(timeout=4000)
+                        except Exception: pass
+                        _gen_fail(ctx, "flow", evidence, f"Flow quoted {cost if cost is not None else 'an unknown number of'} "
+                                                         "credits for the still; rejected (stills must be free)")
+            new = [s for s in _flow_frames_imgs(page) if s not in before]
+            src = new[0] if new else ""
+        if not src:
+            _gen_fail(ctx, "flow", evidence, "no still within 300s")
+        page.wait_for_timeout(4000)
+        try:   # the grid shows a thumbnail: open it, so the full-size image loads, and take the largest new image
+            for fr in page.frames:
+                t = fr.locator(f"img[src='{src}']")
+                if t.count():
+                    t.first.click(timeout=4000); page.wait_for_timeout(5000); break
+        except Exception:
+            pass
+        new = {k: a for k, a in _flow_frames_imgs(page).items() if k not in before}
+        if new: src = max(new, key=new.get)
+        _note(ctx, f"still found ({new.get(src, 0) // 1000} k pixels)")
+        data = None
+        if src.startswith("http"):
+            try: data = cctx.request.get(src, timeout=120000).body()   # signed-in cookies
+            except Exception: data = None
+        if not _is_image(data):
+            try:
+                for fr in page.frames:
+                    try:
+                        b64 = fr.evaluate("""async (u) => { const r = await fetch(u); const b = new Uint8Array(await r.arrayBuffer());
+                            let s = ''; for (let i = 0; i < b.length; i += 32768) s += String.fromCharCode.apply(null, b.subarray(i, i + 32768));
+                            return btoa(s); }""", src)
+                        data = base64.b64decode(b64)
+                        if _is_image(data): break
+                    except Exception:
+                        continue
+            except Exception:
+                data = None
+        if not _is_image(data):
+            _gen_fail(ctx, "flow", evidence, f"still download ({src[:80]})")
+        _note(ctx, f"still {len(data) // 1024} KB")
+        return _save(data, "r14_flow_image.jpg")
+    finally:
+        cctx.close()
+        pw.stop()
+
+
 # ------------------------------------------------------------------ local/GPU
 WANGP_DIR = Path(os.environ.get("WANGP_DIR") or "C:/pinokio/api/wan.git") / "app"   # where wgp.py lives; the Pinokio app is not used
 
@@ -1367,6 +1516,7 @@ ROUTES = [
     {"id": "r11", "name": "blender-video", "proves": "Blender over MCP (safe mode): text -> plan -> Poly Haven scene -> Cycles GPU -> mp4; Blender closed after", "fn": r11_blender_video},
     {"id": "r12", "name": "copilot-describe", "proves": "Copilot (Bing chat) describes an image -> recreate prompt, people kept anonymous", "fn": r12_copilot_describe, "needs_image": True},
     {"id": "r13", "name": "meta-chain", "proves": "meta.ai one chat: image from the description, then animate that image -> video", "fn": r13_meta_chain},
+    {"id": "r14", "name": "flow-image", "proves": "Google Flow agent -> one still, approved only at 0 credits", "fn": r14_flow_image},
 ]
 
-assert len(ROUTES) == 13
+assert len(ROUTES) == 14

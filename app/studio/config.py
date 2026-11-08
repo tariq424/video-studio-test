@@ -34,7 +34,7 @@ DEFAULTS = {
     # fixed priority, every beat (2026-10-22): Hugging Face (free) -> ChatGPT -> Bing -> Gemini only when all three fail,
     # to keep automation away from Tariq's main Google account. imagegen_rotate: true brings back the per-video rotation.
     # 2026-11-06: Cloudflare Workers AI (FLUX.1-schnell, cheapest, ~5 s) first; Meta (meta.ai, via the media routes) before Gemini.
-    "imagegen_providers": ["cloudflare", "hf", "chatgpt", "bing", "meta", "gemini"],
+    "imagegen_providers": ["cloudflare", "hf", "flow", "chatgpt", "bing", "meta", "gemini"],   # flow: 0-credit stills (route r14)
     "cloudflare_account_id": "",
     "cloudflare_api_token": "",       # a permanent Cloudflare API token (Account > Workers AI); kept in the Windows vault
     # media routes (2026-11-06): studio/routelib (moved in from the media-poc setup page) runs on this app's Python; signed-in browser

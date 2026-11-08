@@ -59,7 +59,7 @@ CAPTCHA = re.compile(r"(captcha|unusual traffic|verify (that )?you('| a)re (a )?
 REFUSED = re.compile(r"(can.t (create|generate|make) (images|that|this)|couldn.t (create|generate)|i can.t help with (that|this)|"
                      r"against (my|our) (policies|guidelines)|unable to (create|generate))", re.I)
 
-PROVIDERS = ("gemini", "chatgpt", "bing", "hf", "cloudflare", "meta")
+PROVIDERS = ("gemini", "chatgpt", "bing", "hf", "cloudflare", "meta", "flow")
 CF_MODEL = "@cf/black-forest-labs/flux-1-schnell"   # Cloudflare Workers AI (REST; account id + API token in settings / vault)
 GOOGLE_IMAGE_PROVIDERS = ("gemini",)
 FIT_AUDIT = "fit_audit.json"
@@ -712,6 +712,41 @@ def _session_meta(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
     return prompt
 
 
+LOGO_CHECK = ('Does this image show any readable text, letters, a logo, a newspaper masthead, a brand name or a sign with words? '
+              'Reply with JSON only: {"text": "yes" or "no", "what": "<the words or logo, a few words>"}')
+
+
+def _session_flow(cfg, sec, aspect, out, timeout, log, evidence, extras=()):
+    """Google Flow still (route r14, the signed-in Flow profile): Flow's agent makes stills at 0 credits (owner, 2026-11-07); the
+    route rejects any quote above 0. Flow draws text well, so a still with words, a logo or a masthead is refused here."""
+    from . import mediaroutes
+    if not cfg.get("flow_on", True): raise Skip("Flow is off (setting flow_on)")
+    if not mediaroutes.available(cfg, "r14"): raise Skip("no signed-in Flow profile (media_routes data folder)")
+    prompt = _text_prompt(cfg, sec, log)
+    _pause(cfg, log, "this beat's image", "flow")
+    log(f"  flow: prompt ({len(prompt.split())} words): \"{prompt[:140]}...\"")
+    tmp = Path(out).with_suffix(".flow_raw")
+    r = mediaroutes.run(cfg, "r14", prompt, aspect, tmp, log, timeout=max(timeout, 420))
+    if not r: raise RuntimeError("Flow made no still (see the line above)")
+    from PIL import Image
+    with Image.open(r["output"]) as im: im.convert("RGB").save(out, "JPEG", quality=93)
+    tmp.unlink(missing_ok=True)
+    _answered("flow")
+    try:
+        from . import footage
+        from .llm import parse_json
+        j = parse_json(footage._vision(dict(cfg, vet_provider=cfg.get("vet_provider") if cfg.get("vet_provider") not in (None, "", "off") else "local"),
+                                       out, LOGO_CHECK)) or {}
+        if str(j.get("text", "")).lower().startswith("y"):
+            Path(out).unlink(missing_ok=True)
+            raise RuntimeError(f"Flow's still shows text or a logo ({str(j.get('what') or '')[:60]}); refused")
+    except RuntimeError:
+        raise
+    except Exception as e:
+        log(f"  flow: text/logo check unavailable ({str(e)[:80]}); still kept")
+    return prompt
+
+
 TEXT_CHECK = ('Check this AI-generated image for obvious physical mistakes only: an object with the wrong number of parts (a plane '
               'with extra wings or engines, a car with extra wheels, a bike with three pedals), malformed hands or limbs, or impossible, '
               'melted or fused structures. Ignore any text, lettering, signs or license plates. Reply with JSON only: '
@@ -982,13 +1017,14 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
                 prompt = _session(cfg, image, aspect, vo, out, timeout, log, evidence, extras)
             elif site == "chatgpt":
                 prompt = _session_chatgpt(cfg, image, aspect, vo, out, timeout, log, evidence, extras)
-            elif site in ("hf", "bing", "cloudflare", "meta"):
+            elif site in ("hf", "bing", "cloudflare", "meta", "flow"):
                 if image and described is None:
                     described = describe_local(cfg, image, vo, log)
                     if described and people.rebuilds_layout(described):   # a split screen / video call of strangers: not a scene
                         log("  the screenshot description rebuilds the show's screen layout; the prompt comes from the narration"); described = ""
                 s2 = dict(sec, described_prompt=described, person_in_frame=people.shows_person(described)) if described else sec
-                fn = {"hf": _session_hf, "bing": _session_bing, "cloudflare": _session_cloudflare, "meta": _session_meta}[site]
+                fn = {"hf": _session_hf, "bing": _session_bing, "cloudflare": _session_cloudflare, "meta": _session_meta,
+                      "flow": _session_flow}[site]
                 prompt = fn(cfg, s2, aspect, out, timeout, log, evidence, extras)
         except Skip as s_:
             cool = int(float(cfg.get("imagegen_cooldown_hours", 6)) * 3600) if s_.cool == -1 else s_.cool
