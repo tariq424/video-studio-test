@@ -710,7 +710,8 @@ def r7_meta_video(desc, aspect, image_path, ctx):
         if state == "unknown":
             _blocker_unknown("meta", page, ctx, "r7", state, evidence)
         box = _pick(page, ["textarea[placeholder*='Ask Meta']", "div[contenteditable='true']"])
-        prompt = ("Animate this image with a slow cinematic camera push-in. People stay still with their mouths closed: no talking, no lip movement. " + desc) if src else \
+        prompt = ("Animate this image with a slow cinematic camera push-in. People stay still with their mouths closed: no talking, no lip movement. "
+                  "Keep the image's art style exactly: a drawing or sketch stays a drawing in every frame. " + desc) if src else \
                  ("Create a short video: " + _prompt(desc, "photorealistic, slow cinematic camera move, no text"))
         try:
             box.first.click()
@@ -1457,6 +1458,7 @@ def r13_meta_chain(desc, aspect, image_path, ctx):
         try:
             from .. import people   # a person in the snapshot is a real person: a sketch, never a photo-real look-alike (owner, 2026-11-07)
             real_person = people.shows_person(desc) and "sketch" not in desc.lower()
+            drawn = real_person or "sketch" in desc.lower()   # the still will be a drawing: the animation must keep it one
             _type_like_human(page, box, "Imagine: " + (_prompt(desc + " " + people.SNAP_RULE, "no text") if real_person
                                                        else _prompt(desc, "photorealistic, no text")))
         except Exception:
@@ -1478,7 +1480,8 @@ def r13_meta_chain(desc, aspect, image_path, ctx):
         vids0 = set(page.evaluate("() => [...document.querySelectorAll('video')].map(v => v.currentSrc || v.src).filter(Boolean)"))
         try:                                         # step 2: animate THAT image, same conversation
             box = _pick(page, ["textarea[placeholder*='Ask Meta']", "div[contenteditable='true']"])
-            _type_like_human(page, box, "Animate this image with a slow cinematic camera move. People stay still with their mouths closed: no talking, no lip movement. Keep everything else exactly the same.")
+            _type_like_human(page, box, "Animate this image with a slow cinematic camera move. People stay still with their mouths closed: no talking, no lip movement. Keep everything else exactly the same."
+                             + (" " + people.KEEP_DRAWN if drawn else ""))
         except Exception:
             _gen_fail(ctx, "meta", evidence, "follow-up box not usable")
         data, t0 = None, time.time()

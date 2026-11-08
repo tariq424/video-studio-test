@@ -99,6 +99,10 @@ def chain_rung(cfg, sd, sec, key, log, snapshot, aspect="16:9", ents=()):
     cap = int(cfg.get("meta_chain_max_per_video", 3))   # ~6 min each: a story with little public footage must not add an hour
     if len([x for x in d.glob("*.mp4") if media.ok(x)]) >= cap:
         log(f"  chain: {cap} snapshot clip(s) already made for this video; next rung"); return None
+    from . import people
+    people.learn_look(cfg, sd, sec, snapshot, list(ents or []), log)   # before any prompt: the person's look from this real frame
+    if (d / f"{key}.drawn_lost").is_file() and img.is_file():   # its animation turned the sketch into a photo: the still only
+        return {"video": None, "image": img, "prompt": txt.read_text(encoding="utf-8") if txt.is_file() else ""}
     if not txt.is_file():
         r = run(cfg, "r12", "describe", aspect, txt, log, image=snapshot, timeout=300)
         if not r:   # Copilot blocked (its human check) or failed: Meta describes the snapshot itself, in the chain's own chat
@@ -114,7 +118,8 @@ def chain_rung(cfg, sd, sec, key, log, snapshot, aspect="16:9", ents=()):
             if src_img.is_file():
                 import shutil
                 shutil.copyfile(src_img, img)
-            return {"video": vid, "image": img if img.is_file() else None, "prompt": prompt, "describer": "meta"}
+            return _keep_drawn(cfg, d, key, vid, img, log, {"video": vid, "image": img if img.is_file() else None, "prompt": prompt,
+                                                             "describer": "meta"})
     prompt = txt.read_text(encoding="utf-8").strip()
     try:
         if not named_ok and known_person({"vo": prompt}, ents):   # setting off: the describer named someone, not this method
@@ -132,7 +137,27 @@ def chain_rung(cfg, sd, sec, key, log, snapshot, aspect="16:9", ents=()):
     if src_img.is_file():
         import shutil
         shutil.copyfile(src_img, img)
-    return {"video": vid, "image": img if img.is_file() else None, "prompt": prompt}
+    return _keep_drawn(cfg, d, key, vid, img, log, {"video": vid, "image": img if img.is_file() else None, "prompt": prompt})
+
+
+def _keep_drawn(cfg, d, key, vid, img, log, res):
+    """A sketch must stay a sketch: when Meta drew a still and its animation came back photo-real (it re-renders faces), the
+    clip is dropped and the drawn still is used instead (it still gets the gentle camera move). -> res"""
+    from . import media, people
+    if not cfg.get("keep_drawn_check", True) or not img or not Path(img).is_file() or not media.ok(vid): return res
+    if people.is_drawing(cfg, img) is not True: return res
+    frame = d / f"{key}_mid.jpg"
+    try:
+        media.ff("-ss", f"{max(0.5, (media.dur(vid) or 4.0) * 0.6):.2f}", "-i", vid, "-frames:v", 1, frame, check=False, timeout=120)
+    except Exception:
+        return res
+    drawn = people.is_drawing(cfg, frame) if frame.is_file() else None
+    frame.unlink(missing_ok=True)
+    if drawn is False:
+        log(f"  {key}: Meta's animation turned the sketch into a photo-real picture; the drawn still is used instead")
+        (d / f"{key}.drawn_lost").write_text("animation came back photo-real", encoding="utf-8")
+        return dict(res, video=None)
+    return res
 
 
 def blender_rung(cfg, sd, sec, key, log, aspect="16:9"):

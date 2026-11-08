@@ -945,6 +945,7 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
     from . import people
     sec = people.with_people(sec, sd); _PPL["now"] = list(sec.get("people") or [])
     _PPL["snap"] = bool(image and Path(str(image)).is_file())   # described from a real frame: any person in it is real (sketch)
+    if _PPL["snap"] and _PPL["now"]: people.learn_look(cfg, sd, sec, image, None, log)   # one look per person, from a real frame
     order = [x for x in (cfg.get("imagegen_providers") or PROVIDERS) if x in PROVIDERS] or ["gemini"]
     order = _stable_non_google_first(order)
     fit_on = narration_fit_on()

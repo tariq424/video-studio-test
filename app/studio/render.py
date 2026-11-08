@@ -368,6 +368,9 @@ def do_stills(job, plan, cfg, wg, log, stop):
                 except Exception as e:
                     if str(e) == "cancelled": raise
                     log(f"  {v['id']}: describe -> Meta chain failed ({str(e)[:100]}); next rung"); ch = None
+                if ch and not ch.get("video") and ch.get("image"):   # the animation lost the sketch style: the drawn still
+                    shutil.copy(ch["image"], out); v["tag"] = "GENERATED · META"
+                    log(f"  {v['id']}: snapshot described, Meta sketch used as a still"); n += 1; continue
                 if ch:
                     md = job / "motion"; md.mkdir(exist_ok=True)
                     shutil.copy(ch["video"], md / f"{v['id']}.mp4"); v["type"] = "motion"; v["tag"] = "GENERATED · META"; v.pop("g", None)

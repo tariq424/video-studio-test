@@ -141,6 +141,21 @@ TRANSCRIPT PASSAGES:
 
 Reply with ONLY JSON: {{"vo":"corrected narration","charts":[...same chart objects, corrected...],"changes":["short note per change"],"questions":["..."]}}"""
 
+# Facts we checked ourselves (place colour: the GPS of your footage -> OpenStreetMap -> Wikipedia). The fact-check used to
+# "correct" them away because the transcript doesn't say them (Nov 8: the Royal Naval Dockyard became a museum).
+VERIFIED = """
+VERIFIED PLACE NOTES (from the GPS of the footage, OpenStreetMap and Wikipedia; as reliable as the transcript). Narration that uses
+these facts is supported: keep these place names and facts exactly, never replace them with something from the transcript:
+{notes}
+"""
+
+
+def verified_notes(srcdir):
+    """Facts we verified ourselves for this source (the place colour), or ''."""
+    p = Path(srcdir) / "place_colour.md" if srcdir else None
+    return p.read_text(encoding="utf-8") if p and p.is_file() else ""
+
+
 _STOP = set("the a an and or but of to in on for with at by from is are was were be been it this that these those as not no so if then than too very just about into over under more most less least can could would should will may might do does did have has had you your we our they their he his she her i me my them what which who whom how why when where there here all any some such only own same other".split())
 
 AUDIENCE = {   # one line per level, added to the narration prompts (explainer sections and Shorts); job form "Audience"
@@ -231,6 +246,8 @@ def fact_check(llm, plan, meta, transcript, log, stop=None, cfg=None):
         prompt = FACTCHECK.format(audience=aline, title=title, channel=channel, desc=desc, stitle=s["title"],
                     words=len(s["vo"].split()), vo=s["vo"], charts=json.dumps([c["chart"] for c in charts], ensure_ascii=False),
                     passages=_passages(words, s["vo"] + " " + s["title"]))
+        if meta.get("verified_notes"):
+            prompt += VERIFIED.format(notes=str(meta["verified_notes"])[:3000])
         if prot:
             prompt += ("\nPROTECTED WORDS (our labelled opinion and joke): keep each one word for word in your corrected vo, unless "
                        "it states a fact that is wrong; then change only that fact:\n" + "\n".join("- " + p for p in prot))
@@ -304,6 +321,7 @@ def write_plan(cfg, meta, transcript, minutes, log, stop=None, workdir=None):
     title, channel = meta.get("title") or "the episode", meta.get("channel") or meta.get("uploader") or "the host"
     with LLM(cfg, log, stop) as llm:
         if workdir: llm.trace_dir = Path(workdir).parent / "prompts"
+        meta = dict(meta, verified_notes=verified_notes(workdir))
         log(f"Writing script with {llm.name} (target {words} words)...")
         log_audience(cfg, log)
         # 1. notes

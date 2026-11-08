@@ -17,7 +17,8 @@ Story text:
 {text}
 
 List the identifiable real things this story is about that viewers would expect to SEE: a particular airline's aircraft, a specific
-car make/model, a named ship, train, product or building, and the named people involved. At most 6. For each:
+car make/model, a named ship, train, product or building (at most 6 things), AND every named person in the story (at most 4),
+always including anyone who speaks, is interviewed or introduces themselves in the footage. People never count toward the 6. For each:
 - "name": as specific as the story allows ("flydubai Boeing 737-800", "Mitsubishi Outlander Sport", "Captain (name withheld)")
 - "brand": the brand/operator/maker if any ("flydubai", "Mitsubishi"), else ""
 - "kind": "aircraft" | "vehicle" | "ship" | "train" | "product" | "building" | "person" | "other"
@@ -71,7 +72,8 @@ def entities(cfg, job, title, text, log, stop, llm=None):
     j = run(llm) if llm else None
     if j is None:
         with LLM(cfg, log, stop) as l: j = run(l)
-    out = [x for x in (_clean(e) for e in (j.get("entities") or [])) if x][:6]
+    allx = [x for x in (_clean(e) for e in (j.get("entities") or [])) if x]
+    out = [x for x in allx if x["kind"] != "person"][:6] + [x for x in allx if x["kind"] == "person"][:4]
     f.write_text(json.dumps(out, indent=1), encoding="utf-8")
     things = [e["name"] for e in out if e["kind"] != "person"]
     if things: log(f"  story subjects: {', '.join(things)}; every shot of that kind must show exactly that")

@@ -12,7 +12,7 @@ if (Test-Path -LiteralPath $SettingsPath) {
 }
 $Settings.jobs_dir = "$TestData\jobs"
 $Settings.ffmpeg_dir = ''
-$Settings.short_concurrency = '2'
+$Settings.short_concurrency = 'auto'
 $Settings.long_renderer = 'remotion'
 $Settings.qa_provider = 'off'
 $Settings.cloud_on = $false

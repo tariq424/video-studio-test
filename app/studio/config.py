@@ -81,7 +81,8 @@ DEFAULTS = {
     "jobs_dir": r"F:\videos\video_studio\jobs",   # outputs stay on F:\videos
     "vet_provider": "local",          # stock-clip vetting: local (Ollama vision) | zai | claude | off
     "vet_model": "qwen2.5vl:7b",
-    "short_concurrency": "75%",       # 100% measured no faster (Oct 2026)
+    "short_concurrency": "auto",      # Remotion workers: auto = by free RAM (2/4/6); a number overrides (studio/short.py)
+    "remotion_headless_shell": True,  # render in Remotion's headless Chrome (2x faster, Nov 8); the installed Chrome is the fallback
     "visual_review_default": "never",  # jobs that don't say: never pause for unsure beats, decide on my own (auto | every | never)
     "pause_on_questions": False,     # skip review by default; True = pause only when the fact-check raised questions
     "long_broll": True,               # long videos: use real stock footage first, AI stills/motion only where nothing fits

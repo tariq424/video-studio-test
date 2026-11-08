@@ -35,20 +35,89 @@ _OLD = re.compile(r"(?i)\s*No real or recogni[sz]able people\.?|\s*no real or re
 PERSON = re.compile(r"(?i)\b(wom[ae]n|m[ae]n|person|people|lady|ladies|gentleman|girl|boy|guest|host|interviewer|speaker|figure|face|"
                     r"portrait|elderly|grey-haired|gray-haired|she|he|her|his|they)\b")
 SNAP_RULE = (f"If the image shows a person, they are a real person: draw them as {SKETCH}; never a photo-real look-alike.")
+# Meta's animate step re-rendered a charcoal sketch as a photo-real face (Nov 8 smoke test): say it, and check it (mediaroutes)
+KEEP_DRAWN = ("This is a hand-drawn sketch: every frame must stay a hand-drawn charcoal and pastel drawing in exactly this style, "
+              "never a photograph or a realistic video.")
+DRAWN_ASK = ('Is this picture a hand-drawn drawing, sketch or illustration, or is it a photograph (or photo-realistic)? '
+             'Reply with JSON only: {"kind": "drawing" or "photo"}')
+LOOK_ASK = ('Look at the main person in this picture. Reply with JSON only: {"person": "yes" or "no", "look": "<under 20 words: '
+            'apparent age, gender, hair, clothing, glasses or beard>"}')
 
 
 def shows_person(text):
     return bool(PERSON.search(str(text or "")))
 
 
-def ents_for(sd):
-    """The story's entity list for a job dir or its short/ workspace. -> [] when there is none."""
+_LOOKS, _LOOKS_JOB = {}, [None]   # {name: look} for the job whose entities.json was read last
+
+
+def _ents_file(sd):
     sd = Path(sd)
     for f in (sd / "entities.json", sd.parent / "entities.json"):
-        if f.is_file():
-            try: return json.loads(f.read_text(encoding="utf-8")) or []
-            except ValueError: return []
-    return []
+        if f.is_file(): return f
+    return None
+
+
+def ents_for(sd):
+    """The story's entity list for a job dir or its short/ workspace. -> [] when there is none. Also loads that job's people's
+    looks for rule()."""
+    f = _ents_file(sd)
+    if not f: return []
+    try: ents = json.loads(f.read_text(encoding="utf-8")) or []
+    except ValueError: return []
+    if str(f) != _LOOKS_JOB[0]: _LOOKS.clear(); _LOOKS_JOB[0] = str(f)
+    for e in ents:
+        if e.get("kind") == "person" and e.get("look"): _LOOKS[e["name"]] = e["look"]
+    return ents
+
+
+def _vision_json(cfg, image, ask):
+    from . import footage
+    from .llm import parse_json
+    vp = (cfg or {}).get("vet_provider")
+    c = dict(cfg or {}, vet_provider=vp if vp not in (None, "", "off") else "local")
+    return parse_json(footage._vision(c, str(image), ask)) or {}
+
+
+def learn_look(cfg, sd, sec, image, ents=None, log=print):
+    """The beat names exactly one person and we have a REAL frame for it (snapshot of the source / your footage): describe how
+    that person looks, once per job, and keep it in entities.json. Every sketch of them then carries the same look, so one
+    person doesn't become a different woman from beat to beat (Nov 8 smoke test). -> the look or ''."""
+    if cfg is not None and not cfg.get("people_look_on", True): return ""
+    ents = ents if ents else ents_for(sd)
+    if sd: ents_for(sd)   # this job's looks
+    ppl = names(sec.get("vo", ""), ents)
+    if len(ppl) != 1 or not image or not Path(str(image)).is_file(): return ""
+    nm = ppl[0]
+    if _LOOKS.get(nm): return _LOOKS[nm]
+    try: j = _vision_json(cfg, image, LOOK_ASK)
+    except Exception as e:
+        log(f"  {nm}: look not taken ({str(e)[:80]})"); return ""
+    look = re.sub(r"\s+", " ", str(j.get("look") or "")).strip(" .")
+    look = re.sub(r"(?i)^(the )?(main )?(person|subject|they|she|he)( in (the|this) (picture|image))? (appears to be|is|seems to be) ", "", look)
+    look = re.split(r"(?i),? and (is|are) (indoors|outdoors|standing|sitting|in )", look)[0].strip(" .,")[:160]
+    if not str(j.get("person", "")).lower().startswith("y") or len(look.split()) < 3: return ""
+    _LOOKS[nm] = look
+    for e in ents or []:
+        if e.get("name") == nm: e["look"] = look
+    f = _ents_file(sd) if sd else None
+    if f:
+        try:
+            data = json.loads(f.read_text(encoding="utf-8")) or []
+            for e in data:
+                if e.get("name") == nm: e["look"] = look
+            f.write_text(json.dumps(data, indent=1), encoding="utf-8")
+        except (OSError, ValueError):
+            pass
+    log(f"  {nm}: look taken from the real frame ({look}); every sketch of them uses it")
+    return look
+
+
+def is_drawing(cfg, image):
+    """True / False from the vision model; None when it can't tell."""
+    try: k = str(_vision_json(cfg, image, DRAWN_ASK).get("kind", "")).lower()
+    except Exception: return None
+    return True if k.startswith("draw") else False if k.startswith("photo") else None
 
 
 def names(text, ents):
@@ -71,8 +140,10 @@ def with_people(sec, sd=None, ents=None):
 
 
 def rule(ppl):
-    """The people line for a generator prompt."""
-    return f"Show {', '.join(ppl)} as {SKETCH}." if ppl else ""
+    """The people line for a generator prompt (with each person's look from a real frame, when we have it)."""
+    if not ppl: return ""
+    who = [f"{p} ({_LOOKS[p]})" if _LOOKS.get(p) else p for p in ppl]
+    return f"Show {', '.join(who)} as {SKETCH}."
 
 
 def tail(sec_or_people, photo=True):

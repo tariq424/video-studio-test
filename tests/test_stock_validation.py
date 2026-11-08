@@ -39,7 +39,7 @@ class StockValidationTests(unittest.TestCase):
    with self.assertRaisesRegex(RuntimeError,'not found'):
     short.render_browser_args({'remotion_browser_executable':str(browser)+'missing'})
  def test_concurrency(self):
-  for value in ['75%','100%','25%']:
-   self.assertEqual(short.render_concurrency({'short_concurrency':value}),2)
+  for value in ['75%','100%','25%','auto']:   # never a percentage fan-out: bounded by free RAM (Nov 8)
+   self.assertIn(short.render_concurrency({'short_concurrency':value}),(2,4,6))
   self.assertEqual(short.render_concurrency({'short_concurrency':1}),1)
 if __name__=='__main__':unittest.main()

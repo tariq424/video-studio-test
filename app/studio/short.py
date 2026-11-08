@@ -237,6 +237,8 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
     title, channel = meta.get("title") or "the source", meta.get("channel") or meta.get("uploader") or "the creator"
     with LLM(cfg, log, stop) as llm:
         llm.trace_dir = Path(srcdir).parent / "prompts"
+        from .writer import verified_notes
+        meta = dict(meta, verified_notes=verified_notes(srcdir))
         log(f"Writing the Short with {llm.name} (~{secs:.0f}s, {words} words, {nb} beats)...")
         log_audience(cfg, log)
         notes = make_notes(llm, meta, transcript, max(words, 1500), log, stop, srcdir)
@@ -567,9 +569,11 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
             if snap and snap.get("path"):
                 ch = _safe(log, "describe -> Meta chain", lambda: mediaroutes.chain_rung(cfg, sd, s, f"{s['id']}_chain", log, snap["path"],
                                                                                      aspect="9:16", ents=ents))
-                if ch:
+                if ch and ch.get("video"):
                     items.append({"type": "video", "src": _rel_sd(ch["video"], sd), "secs": round(media.dur(ch["video"]), 2), "rate": 1.0,
                                   "freeze": True, "tag": "GENERATED · META", "rung": "meta chain"})
+                elif ch and ch.get("image"):   # the animation lost the sketch style: the drawn still
+                    items.append({"type": "image", "src": _rel_sd(ch["image"], sd), "tag": "GENERATED · META", "rung": "meta chain"})
         if v2 and len(items) < n and not moving and cfg.get("imagegen_on", True):   # rung 3: free image generators (describe the source screenshot -> new image)
             from . import imagegen
             snap = snap or _safe(log, f"{s['id']} source screenshot", lambda: source_visuals.snapshot(cfg, job, sd, s, log, source_item=raw_source))
@@ -1193,9 +1197,50 @@ def render_recon(g, out, secs, size, cfg, log, stop):
     tmp.rename(out); log(f"  reconstruction {out.stem}: {g.get('scene')} ({g.get('name') or ''})")
     return out
 
-def render_browser_args(cfg):
-    """Match the installed Chrome used by local smoke tests; allow an explicit override."""
+_HS_TRIED = [False]
+_ENSURE_JS = ("require('@remotion/renderer').ensureBrowser({browserExecutable: null, chromeMode: 'headless-shell', logLevel: 'error'})"
+              ".then(s => console.log(JSON.stringify(s))).catch(e => { console.error(e.message); process.exit(1); })")
+
+
+def headless_shell(log=print):
+    """Remotion's own Chrome Headless Shell (downloaded once into remotion/node_modules/.remotion). Measured Nov 8: 11.7 fps at 6
+    workers vs 5.9 fps with the installed Chrome, which doesn't render frames in parallel. -> path or None."""
+    base = config.ROOT / "remotion" / "node_modules" / ".remotion" / "chrome-headless-shell"
+    def find():
+        for f in sorted(base.glob("**/chrome-headless-shell*")) if base.is_dir() else []:
+            if f.is_file() and f.suffix.lower() in ("", ".exe"): return f
+        return None
+    f = find()
+    if f or _HS_TRIED[0]: return f
+    _HS_TRIED[0] = True
+    try:
+        log("  getting Remotion's headless Chrome (one time, ~110 MB; renders about twice as fast)...")
+        js = config.ROOT / "remotion" / "_ensure_browser.cjs"
+        js.write_text(_ENSURE_JS, encoding="utf-8")
+        try: subprocess.run(["node", js.name], cwd=js.parent, capture_output=True, text=True, timeout=900)
+        finally: js.unlink(missing_ok=True)
+    except Exception as e:
+        log(f"  headless Chrome not available ({str(e)[:100]}); the installed Chrome renders")
+    return find()
+
+
+def chrome_browser_args(cfg):
+    """The installed Chrome (the fallback, and what renders when the headless shell is off or missing)."""
+    candidates = [
+        Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Google/Chrome/Application/chrome.exe",
+        Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Google/Chrome/Application/chrome.exe",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/Application/chrome.exe"] if os.name == "nt" else []
+    for path in candidates:
+        if path.is_file(): return [f"--browser-executable={path}"]
+    return []
+
+
+def render_browser_args(cfg, log=print):
+    """An explicit override, else Remotion's headless shell (fast), else the installed Chrome."""
     explicit = cfg.get("remotion_browser_executable")
+    if not explicit and cfg.get("remotion_headless_shell", True):
+        hs = headless_shell(log)
+        if hs: return [f"--browser-executable={hs}"]
     candidates = [Path(explicit)] if explicit else [
         Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Google/Chrome/Application/chrome.exe",
         Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Google/Chrome/Application/chrome.exe",
@@ -1207,10 +1252,17 @@ def render_browser_args(cfg):
 
 
 def render_concurrency(cfg):
-    # Percentage-based fan-out exhausts RAM with concurrent 1080x1920 decoders.
-    # Bound automatic settings; explicit numeric settings remain an override.
-    value = cfg.get("short_concurrency", "75%")
-    return 2 if str(value).endswith("%") else value
+    """Remotion workers. A number is an override. Otherwise ("auto", or an old "75%") it follows free memory: percentage fan-out
+    once exhausted RAM with many 1080x1920 decoders; 6 workers measured +4.5 GB (Nov 8), so 6 with >= 8 GB free, 4 with >= 5 GB,
+    else 2."""
+    value = str(cfg.get("short_concurrency", "auto")).strip()
+    if value.isdigit(): return int(value)
+    try:
+        import psutil
+        free = psutil.virtual_memory().available / 2**30
+    except Exception:
+        return 2
+    return 6 if free >= 8 else 4 if free >= 5 else 2
 
 
 def do_render(job, plan, cfg, meta, log, stop):
@@ -1219,12 +1271,14 @@ def do_render(job, plan, cfg, meta, log, stop):
     out_dir = job / "output"; out_dir.mkdir(exist_ok=True)
     safe = re.sub(r"[^A-Za-z0-9]+", "_", plan["title"]).strip("_")[:60] or "short"
     out = out_dir / f"{safe}_short.mp4"; tmp = out_dir / "_short_rendering.mp4"
+    conc = render_concurrency(cfg)
     cmd = [_npx(), "remotion", "render", "src/Root.tsx", "Teaser", str(tmp), f"--public-dir={job / 'short' / 'public'}",
-           f"--concurrency={cfg.get('short_concurrency', '75%')}", "--jpeg-quality=95", "--crf=16", "--log=info", f"--gl={_gl(cfg)}"]
-    browser_args = render_browser_args(cfg)
+           f"--concurrency={conc}", "--jpeg-quality=95", "--crf=16", "--log=info", f"--gl={_gl(cfg)}"]
+    browser_args = render_browser_args(cfg, log)
     cmd.extend(browser_args)
+    on_shell = any("chrome-headless-shell" in a for a in browser_args)
     log(f"  Render browser: {browser_args[0].split('=', 1)[1] if browser_args else 'Remotion default'}")
-    log(f"Rendering the Short with Remotion ({total:.0f}s of video; concurrency {render_concurrency(cfg)})...")
+    log(f"Rendering the Short with Remotion ({total:.0f}s of video; concurrency {conc})...")
     # If the native compositor rejects a valid video, try browser decoding first.
     # Card recovery is per asset and retries are bounded, including browser startup.
     from .render_media import fallback_failed_video
@@ -1244,6 +1298,12 @@ def do_render(job, plan, cfg, meta, log, stop):
             if time.time() - t0 > 30 and last: log("  " + last[:160]); t0 = time.time()
             if stop(): p.kill(); raise RuntimeError("cancelled")
         if p.wait() == 0: break
+        if on_shell:   # the headless shell failed: the installed Chrome (it decoded px7989667 when Remotion's default didn't) first,
+            on_shell = False   # before any clip is swapped for a card
+            ch = chrome_browser_args(cfg)
+            if ch:
+                cmd = [a for a in cmd if not a.startswith("--browser-executable=")] + ch
+                log("  the render failed in Remotion's headless Chrome; trying again with the installed Chrome"); continue
         if browser_retries < 2 and any(BROWSER_FLAKE in l for l in tail):
             # headless Chrome sometimes starts slowly (busy GPU/disk); Remotion gives it 25 s - just start again
             browser_retries += 1

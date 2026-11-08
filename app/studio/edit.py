@@ -713,7 +713,7 @@ def _render(job, comp, props, out, cfg, log, frames=None, scale=1.0, audio=True)
     rdir, bundle = review._bundle(log); out = Path(out); out.parent.mkdir(parents=True, exist_ok=True)
     pf = out.with_name(out.stem + "_props.json"); pf.write_text(json.dumps(props), encoding="utf-8")
     cmd = [short._npx(), "remotion", "render", str(bundle), comp, str(out), f"--props={pf}", f"--gl={short._gl(cfg)}", f"--scale={scale}",
-           "--log=error", f"--concurrency={cfg.get('short_concurrency', '75%')}", "--crf=12" if scale >= 1 else "--crf=24"]
+           "--log=error", f"--concurrency={__import__('studio.short', fromlist=['x']).render_concurrency(cfg)}", "--crf=12" if scale >= 1 else "--crf=24"]
     if frames: cmd.append(f"--frames={frames[0]}-{frames[1]}")
     if not audio: cmd.append("--muted")
     p = None
