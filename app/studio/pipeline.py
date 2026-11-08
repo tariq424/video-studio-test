@@ -135,9 +135,10 @@ class Studio:
     def job(self, jid): return Job(self.jobs_dir() / jid)
     def list(self):
         out = []
-        for d in sorted(self.jobs_dir().iterdir(), reverse=True):
+        for d in self.jobs_dir().iterdir():
             if d.is_dir() and (d / "state.json").exists(): s = Job(d).state; s["id"] = d.name; out.append(s)
-        return out
+        # newest first by when the job was made (a hand-named folder like 20261027_nea_dixon sorts wrong by name)
+        return sorted(out, key=lambda s: (float(s.get("created") or 0), s["id"]), reverse=True)
 
     def _prio(self, jid):
         try:

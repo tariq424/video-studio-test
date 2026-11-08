@@ -16,7 +16,7 @@ textarea{min-height:90px;resize:vertical}
 button{background:var(--acc);color:#111;border:0;border-radius:8px;padding:9px 14px;font-weight:600;cursor:pointer}
 button.sec{background:transparent;color:var(--fg);border:1px solid var(--line)}button:disabled{opacity:.5;cursor:default}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.job{padding:10px;border:1px solid var(--line);border-radius:8px;margin-bottom:8px;cursor:pointer}.job.sel{border-color:var(--acc)}
+.job{padding:10px;border:1px solid var(--line);border-radius:8px;margin-bottom:8px;cursor:pointer}#jobs{max-height:70vh;overflow-y:auto}.job.sel{border-color:var(--acc)}
 .stages{display:flex;gap:4px;flex-wrap:wrap;margin:10px 0}.st{font-size:12px;padding:3px 8px;border-radius:6px;background:var(--inset);border:1px solid var(--line);color:var(--mut)}
 .st.done{color:#fff;background:#1a9e6b;border-color:#1a9e6b}.st.cur{color:#111;background:var(--acc);border-color:var(--acc);font-weight:700}
 pre{background:var(--inset);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:320px;overflow:auto;font-size:12.5px;white-space:pre-wrap}
@@ -169,7 +169,9 @@ async function createJob(){if(RUNJOB||STARTING)return;STARTING=true;$('makebtn')
  if(k=='file'){if($('upf').files.length)fd.append('file',$('upf').files[0]);else if($('upp').value.trim())fd.append('src_path',$('upp').value.trim());else{$('cmsg').textContent='Choose a file (or type its path) first.';STARTING=false;$('makebtn').disabled=false;return}}
  try{const r=await fetch('/api/jobs',{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'failed');sel=d.id;if(EMBED)parent.postMessage({vsJob:d.id},'*');$('url').value='';$('upp').value='';$('ptx').value='';$('upf').value='';if($('clipf')){$('clipf').value='';$('clipp').value='';$('cliph').value=''}$('cmsg').textContent='';STARTING=false;loadJobs()}catch(e){$('cmsg').textContent=e.message;STARTING=false;$('makebtn').disabled=false}}
 async function openJob(){const id=($('openid').value||'').trim();if(!id)return;try{await j(`/api/jobs/${id}`)}catch(e){alert('No job '+id);return}sel=id;editing=false;planCache=null;lastKey='';loadJobs()}
-async function loadJobs(){const js=await j('/api/jobs');runUI(js);$('jobs').innerHTML=js.length?js.map(x=>`<div class="job ${x.id==sel?'sel':''}" onclick="sel='${x.id}';editing=false;planCache=null;loadJobs()"><b>${esc(x.title||x.url||x.id)}</b><div class="mut" style="font-size:12px">${x.id} · ${x.cancelled&&x.status=='stopped'?'cancelled':x.status} · ${x.stage}</div></div>`).join(''):'No jobs yet.';if(sel)loadDetail()}
+// a click on a job far down the list opened it off-screen at the top of the page ("clicking has no effect"): bring it into view
+function selectJob(id){sel=id;editing=false;planCache=null;lastKey='';loadJobs().then(()=>{const d=$('detail');if(!d)return;const b=d.getBoundingClientRect();if(b.top<0||b.top>innerHeight*0.6)d.scrollIntoView({behavior:'smooth',block:'start'})})}
+async function loadJobs(){const js=await j('/api/jobs');runUI(js);$('jobs').innerHTML=js.length?js.map(x=>`<div class="job ${x.id==sel?'sel':''}" onclick="selectJob('${x.id}')"><b>${esc(x.title||x.url||x.id)}</b><div class="mut" style="font-size:12px">${x.id} · ${x.cancelled&&x.status=='stopped'?'cancelled':x.status} · ${x.stage}</div></div>`).join(''):'No jobs yet.';if(sel)loadDetail()}
 function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 let lastKey='';
 // one status line per output (Short / Explainer): finished (with file), working (stage, beat n of N), or waiting
