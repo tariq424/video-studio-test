@@ -127,3 +127,11 @@ def test_headless_shell_first_installed_chrome_fallback(monkeypatch, tmp_path):
     assert "chrome-headless-shell" not in "".join(short.render_browser_args({"remotion_headless_shell": False}, lambda *_: None))
     src = (Path(__file__).parents[1] / "app" / "studio" / "short.py").read_text(encoding="utf-8")
     assert "trying again with the installed Chrome" in src   # a failed shell render retries in Chrome before any clip becomes a card
+
+
+def test_first_name_alone_counts_when_unique():
+    ents = [{"name": "Nia Dixon", "kind": "person"}, {"name": "Clinton Smith", "kind": "person"}, {"name": "Clinton Jones", "kind": "person"}]
+    assert people.names("Nia figured the tour was off.", ents) == ["Nia Dixon"]
+    assert people.names("the nia of it", ents) == []          # lower-case word, not the name
+    assert people.names("Clinton waved.", ents) == []         # two Clintons: ambiguous
+    assert people.names("Smith waved.", ents) == ["Clinton Smith"]

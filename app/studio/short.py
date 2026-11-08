@@ -1285,7 +1285,7 @@ def do_render(job, plan, cfg, meta, log, stop):
     timeline = job / "short" / "public" / "teaser.json"
     data = json.loads(timeline.read_text(encoding="utf-8"))
     videos = {b.get("src") for beat in data["beats"] for b in beat.get("bgs", []) if b.get("type") == "video"}
-    browser_retries = 0
+    browser_retries, shell_retried = 0, False
     for attempt in range(2 * len(videos) + 3):
         p = subprocess.Popen(cmd, cwd=rdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
         last, t0, tail, errline = "", time.time(), [], ""
@@ -1299,11 +1299,18 @@ def do_render(job, plan, cfg, meta, log, stop):
             if stop(): p.kill(); raise RuntimeError("cancelled")
         if p.wait() == 0: break
         if on_shell:   # the headless shell failed: the installed Chrome (it decoded px7989667 when Remotion's default didn't) first,
-            on_shell = False   # before any clip is swapped for a card
+            # before any clip is swapped for a card. A failure that isn't about video (Nov 8: bundling died at 6% while RAM was
+            # short) gets one more try in the fast headless shell first; switching browsers can't fix it and halves the speed.
+            why = re.sub(r"\x1b\[[0-9;]*m", "", errline or (tail[-1] if tail else "no output"))[:200]
+            media_err = any(re.search(r"VS-MEDIA-ERROR|extract|decod|compositor|OffthreadVideo|frame", l, re.I) for l in tail)
+            if not media_err and not shell_retried:
+                shell_retried = True
+                log(f"  the render failed in Remotion's headless Chrome ({why}); trying it once more"); time.sleep(10); continue
+            on_shell = False
             ch = chrome_browser_args(cfg)
             if ch:
                 cmd = [a for a in cmd if not a.startswith("--browser-executable=")] + ch
-                log("  the render failed in Remotion's headless Chrome; trying again with the installed Chrome"); continue
+                log(f"  the render failed in Remotion's headless Chrome ({why}); trying again with the installed Chrome"); continue
         if browser_retries < 2 and any(BROWSER_FLAKE in l for l in tail):
             # headless Chrome sometimes starts slowly (busy GPU/disk); Remotion gives it 25 s - just start again
             browser_retries += 1

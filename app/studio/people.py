@@ -123,12 +123,17 @@ def is_drawing(cfg, image):
 def names(text, ents):
     """Real people from the entity list that the text names (full name or surname). -> [name, ...] in entity order."""
     low = " " + re.sub(r"[^a-z0-9 ]+", " ", str(text or "").lower()) + " "
+    people = [e for e in ents or [] if e.get("kind") == "person"]
+    firsts = [(str(e.get("name") or "").split() or [""])[0].lower() for e in people]
     out = []
-    for e in ents or []:
-        if e.get("kind") != "person": continue
+    for e in people:
         nm = str(e.get("name") or "").strip()
         parts = [w for w in re.sub(r"[^a-z0-9 ]+", " ", nm.lower()).split() if len(w) > 2]
-        if parts and (f" {' '.join(parts)} " in low or f" {parts[-1]} " in low) and nm not in out: out.append(nm)
+        # a script names someone in full once, then by first name ("Nia figured..."): a capitalised first name counts when no
+        # other person in the story shares it (Nov 8 smoke test)
+        first = nm.split()[0] if len(nm.split()) > 1 and len(nm.split()[0]) > 2 else ""
+        by_first = bool(first) and firsts.count(first.lower()) == 1 and bool(re.search(rf"\b{re.escape(first)}\b", str(text or "")))
+        if parts and (f" {' '.join(parts)} " in low or f" {parts[-1]} " in low or by_first) and nm not in out: out.append(nm)
     return out
 
 

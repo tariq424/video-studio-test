@@ -1459,8 +1459,9 @@ def r13_meta_chain(desc, aspect, image_path, ctx):
             from .. import people   # a person in the snapshot is a real person: a sketch, never a photo-real look-alike (owner, 2026-11-07)
             real_person = people.shows_person(desc) and "sketch" not in desc.lower()
             drawn = real_person or "sketch" in desc.lower()   # the still will be a drawing: the animation must keep it one
-            _type_like_human(page, box, "Imagine: " + (_prompt(desc + " " + people.SNAP_RULE, "no text") if real_person
-                                                       else _prompt(desc, "photorealistic, no text")))
+            sent = "Imagine: " + (_prompt(desc + " " + people.SNAP_RULE, "no text") if real_person else _prompt(desc, "photorealistic, no text"))
+            OUT.mkdir(parents=True, exist_ok=True); (OUT / "r13_meta_chain.sent.txt").write_text(sent, encoding="utf-8")   # what Meta got
+            _type_like_human(page, box, sent)
         except Exception:
             _gen_fail(ctx, "meta", evidence, "prompt box not usable")
         img_data, t0 = None, time.time()

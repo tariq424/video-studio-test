@@ -49,7 +49,8 @@ def score(jd):
     stand_in, layouts, sketches = [], [], 0
     by_beat = {b["id"]: " ".join(str(w[0]) for w in b.get("words", [])) for b in tz["beats"]}
     for pf in list((sd / "imagegen").glob("*.prompt.txt")) + list((sd / "chain").glob("*.prompt.txt")):
-        p = pf.read_text(encoding="utf-8", errors="replace"); bid = pf.name.split("_")[0]
+        sent = pf.with_name(pf.name.replace(".prompt.txt", ".sent.txt"))   # the exact prompt Meta got (description + people rule)
+        p = (sent if sent.is_file() else pf).read_text(encoding="utf-8", errors="replace"); bid = pf.name.split("_")[0]
         if people.rebuilds_layout(p): layouts.append(pf.name)
         if people.names(by_beat.get(bid, ""), ents) or (pf.parent.name in ("imagegen", "chain") and people.shows_person(p) and "sketch" not in p.lower()
                                                         and ((sd / "source_excerpts" / f"{bid}_snap.png").exists() or pf.parent.name == "chain")):

@@ -140,10 +140,19 @@ def chain_rung(cfg, sd, sec, key, log, snapshot, aspect="16:9", ents=()):
     return _keep_drawn(cfg, d, key, vid, img, log, {"video": vid, "image": img if img.is_file() else None, "prompt": prompt})
 
 
+def _sent(cfg, d, key):
+    """Keep the exact prompt Meta was sent (description + people rule) next to the clip, for the scorecard and the editor."""
+    f = routes_dir(cfg) / "output" / "r13_meta_chain.sent.txt"
+    if f.is_file():
+        try: (d / f"{key}.sent.txt").write_text(f.read_text(encoding="utf-8"), encoding="utf-8")
+        except OSError: pass
+
+
 def _keep_drawn(cfg, d, key, vid, img, log, res):
     """A sketch must stay a sketch: when Meta drew a still and its animation came back photo-real (it re-renders faces), the
     clip is dropped and the drawn still is used instead (it still gets the gentle camera move). -> res"""
     from . import media, people
+    _sent(cfg, d, key)
     if not cfg.get("keep_drawn_check", True) or not img or not Path(img).is_file() or not media.ok(vid): return res
     if people.is_drawing(cfg, img) is not True: return res
     frame = d / f"{key}_mid.jpg"
