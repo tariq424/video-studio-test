@@ -189,9 +189,9 @@ def _rung_stock(ctx):
     cands = []
     for q in qs:
         cands += footage.pexels(q, orient, log, want) + footage.pixabay(q, orient, log, want)
-    tried = 0
+    tried, goods, have = 0, [], 0.0   # owner, 2026-11-07: several clips cover a long span (one clip froze for 26 s on a hook)
     for c in cands:
-        if tried >= 3: break
+        if tried >= 6 or have >= ctx["need"] - 0.3: break
         why_t = footage.title_contradicts(cfg, c.get("desc", ""), vo, story=vo)
         if why_t: _log(log, f"    stock {c['id']}: title contradicts the story ({why_t})"); continue
         tried += 1
@@ -210,9 +210,30 @@ def _rung_stock(ctx):
         except Exception as e:
             _log(log, f"    stock {c['id']}: subject check failed ({str(e)[:60]})"); continue
         good, why = clip_ok(cfg, out, ctx["work"], f"stock_{c['id']}")
-        if good: return out, None, f"Pexels/Pixabay '{c.get('query')}' ({c['id']})"
+        if good:
+            goods.append((out, c)); have += media.dur(out) or 0.0
+            continue
         _log(log, f"    stock {c['id']}: frame check failed ({why})")
+    if goods:
+        how = f"Pexels/Pixabay {', '.join(repr(c.get('query')) + ' (' + c['id'] + ')' for _, c in goods)}"
+        if len(goods) == 1: return goods[0][0], None, how
+        joined = join_clips([g for g, _ in goods], ctx["need"], ctx["W"], ctx["H"], ctx["work"] / f"stock_join_{ctx['key']}.mp4")
+        return joined, None, how + f" ({len(goods)} clips joined)"
     return None, None, f"no usable stock ({len(cands)} found, {tried} checked)"
+
+
+def join_clips(clips, need, W, H, out, fps=30):
+    """Clips end to end, each cut to its share of the span (in proportion to its length), at the video's size. -> out"""
+    durs = [max(0.5, media.dur(c) or 0.5) for c in clips]
+    tot = sum(durs); shares = [need * d / tot if tot > need else d for d in durs]
+    args, parts = [], []
+    for k, (c, sh) in enumerate(zip(clips, shares)):
+        args += ["-i", c]
+        parts.append(f"[{k}:v]trim=duration={sh:.3f},setpts=PTS-STARTPTS,scale={W}:{H}:force_original_aspect_ratio=increase,"
+                     f"crop={W}:{H},setsar=1,fps={fps}[v{k}]")
+    flt = ";".join(parts) + ";" + "".join(f"[v{k}]" for k in range(len(clips))) + f"concat=n={len(clips)}:v=1:a=0[out]"
+    media.ff(*args, "-filter_complex", flt, "-map", "[out]", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", out, timeout=600)
+    return Path(out)
 
 
 def _gen_image(ctx, text, key, cfg):

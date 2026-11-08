@@ -11,7 +11,7 @@ def prof(vo):
 
 class SyntheticProfiles(unittest.TestCase):
     def test_no_sine_path_left(self):
-        for vo in ["A train travels from A to B.", "The convoy drove toward the border.", "Ships moving on a route"]:
+        for vo in ["A train travels 300 km from A to B.", "The convoy drove 40 miles toward the border.", "Ships moving on a route at 30 km/h"]:
             r = physics.synthetic_motion({"vo": vo})
             self.assertIsNotNone(r, vo)
             self.assertNotEqual(r.get("module"), "physical_flow")
@@ -45,7 +45,8 @@ class SyntheticProfiles(unittest.TestCase):
         self.assertEqual(max(v for _, v in r["series"]), 140)
 
     def test_assumptions_are_shown(self):
-        r = prof("The rocket lifted off from Cape Canaveral.")
+        self.assertIsNone(prof("The rocket lifted off from Cape Canaveral."))   # no stated number: no chart
+        r = prof("The rocket lifted off from Cape Canaveral and burned for 150 seconds.")   # one stated number: the rest assumed, shown
         self.assertEqual(r["module"], "synthetic_launch")
         self.assertTrue(r["synthetic"])
         self.assertIn("assumed", r["notes"])

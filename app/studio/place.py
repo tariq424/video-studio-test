@@ -14,9 +14,25 @@ from pathlib import Path
 
 UA = {"User-Agent": "VideoStudio/1.0 (local video tool; place research for the creator's own footage)"}
 COLOUR = ("PLACE COLOUR (from the footage's GPS: {where}{when}). Colour the video with the place, using ONLY the location notes "
-          "below: open with one line on where we are before the first soundbite / beat; during the video, at most one or two short "
-          "bridges about the surroundings at natural pauses (never about the guest's own life, never inside a soundbite); close with "
-          "one line on what else to see nearby. Keep it brief: the guest's own story stays the backbone.")
+          "below. ALL THREE are required: (1) open with one line on where we are before the first soundbite / beat; (2) during the "
+          "video, one or two short bridges about the surroundings at natural pauses, each naming a nearby place from the notes (never "
+          "about the guest's own life, never inside a soundbite); (3) close with one line on what else to see nearby, naming it. Keep "
+          "each brief: the guest's own story stays the backbone.")
+
+
+def terms(pc):
+    """Place names a script must use to show it took the place colour: the area / street and the nearby sights. -> [str]"""
+    import re as _re
+    w = (pc or {}).get("where") or {}
+    out = [w.get("area"), w.get("name")] + [s.get("name") for s in (pc or {}).get("sights") or []]
+    out = [_re.sub(r",.*$|\s+Parish$|^Places of interest in\s+", "", str(x or "")).strip() for x in out]
+    return [x for x in dict.fromkeys(out) if len(x) > 3 and x.lower() not in {"bermuda", (w.get("country") or "").lower()}]
+
+
+def colour_used(pc, beats):
+    """How many beats of a script name a place from the place colour (opener + bridge + close needs 2+). -> int"""
+    ts = [t.lower() for t in terms(pc)]
+    return sum(1 for b in beats if any(t in str(b.get("vo") or "").lower() for t in ts)) if ts else 99
 
 
 def _get(url, params=None, timeout=20):

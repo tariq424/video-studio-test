@@ -241,6 +241,10 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
         log_audience(cfg, log)
         notes = make_notes(llm, meta, transcript, max(words, 1500), log, stop, srcdir)
         tries = []   # every parsed attempt, so a near miss can be kept instead of an unchecked re-ask
+        from . import place
+        try: pc_ = json.loads((Path(srcdir) / "place.json").read_text(encoding="utf-8")) if (Path(srcdir) / "place.json").is_file() else None
+        except ValueError: pc_ = None
+        if pc_ and not pc_.get("notes"): pc_ = None
         def chk(j):
             b = j.get("beats")
             if not isinstance(b, list) or len(b) < minb: raise ValueError(f"need at least {minb} beats")
@@ -248,6 +252,9 @@ def write_short(cfg, meta, transcript, secs, mode, long_title, log, stop, srcdir
                 if not isinstance(x.get("vo"), str) or not x.get("queries"): raise ValueError("beat missing vo or queries")
             n = sum(len(x["vo"].split()) for x in b)
             tries.append((abs(n - words), j))
+            if pc_ and not smoke and place.colour_used(pc_, b) < 2:   # owner, 2026-11-07: the place colour must really be used
+                raise ValueError("use the PLACE COLOUR notes: name where we are in the first beat, add one short bridge about a nearby "
+                                 "place in a middle beat, and close by naming what else is nearby (" + ", ".join(place.terms(pc_)[:5]) + ")")
             if smoke:   # the 30-second test is trimmed in code afterwards (trim_smoke); only a runaway length is re-asked
                 if n > words * 3: raise ValueError(f"narration is {n} words in total; keep it near {words}")
             elif n > words * 3: raise ValueError(f"narration is {n} words in total, about three times the {words}-word guide: "

@@ -509,6 +509,7 @@ def _profile(model, p, kind="object", icon="dot"):
         return float(p[name])
     if model == "travel":   # accelerate to cruise, hold, slow to a stop; drawn as DISTANCE covered (a flat speed line says nothing)
         v = a("speed_kmh", dict((k, c) for _, k, c, _ in MOVERS).get(kind, 60), f"typical {kind} speed")
+        if p.get("distance_km") and not p.get("secs"): p["secs"] = float(p["distance_km"]) / max(v, 1) * 3600 * 1.1   # stated distance
         T = a("secs", 60 * {"car": 30, "truck": 120, "train": 60, "ship": 720, "aircraft": 120, "helicopter": 60, "drone": 20,
                             "bike": 60, "troops": 240}.get(kind, 30), f"typical {kind} trip length")
         acc = {"car": 3.0, "truck": 1.2, "train": 0.5, "ship": 0.05, "aircraft": 2.0}.get(kind, 1.5)   # m/s^2
@@ -576,7 +577,7 @@ def _profile(model, p, kind="object", icon="dot"):
 SYNTH_PICK = """A news video needs an animated physics graph for this beat. Narration: "{vo}"
 Pick ONE model and fill its parameters ONLY with numbers the narration states (leave any other parameter out: typical values are
 added and shown as assumed). Models:
-- travel: something moving along (vehicle, train, ship, aircraft, troops). params: kind (car/truck/train/ship/aircraft/drone/bike/troops), speed_kmh, secs (trip time)
+- travel: something moving along (vehicle, train, ship, aircraft, troops). params: kind (car/truck/train/ship/aircraft/drone/bike/troops), speed_kmh, secs (trip time), distance_km
 - brake: something stopping hard or crashing. params: kind, speed_kmh, impact (true for a crash/collision), decel_mps2
 - free_fall: something falling. params: height_m, terminal_mps
 - launch: rocket / missile going up. params: accel_mps2, burn_secs
@@ -630,6 +631,7 @@ def synthetic_profile(sec, cfg=None, log=None):
         if not sp and m and sec_ and model == "travel" and m >= 1000:   # "400 km in 5 hours" -> 80 km/h
             sp = m / 1000 / (sec_ / 3600)
         if sp and model != "storm_build": params["speed_kmh"] = sp
+        if m and model == "travel" and not sp: params["distance_km"] = m / 1000   # "travels 300 km": the stated distance
         if sec_: params["secs"] = sec_
         if model == "storm_build":   # winds in mph (or km/h, knots): the highest is the peak, a lower one the start
             ws = [float(x.replace(",", "")) * f for x, u in re.findall(r"([\d][\d,]*)\s*(mph|km/h|kph|knots?|kn)\b", text, re.I)
@@ -643,6 +645,11 @@ def synthetic_profile(sec, cfg=None, log=None):
         params = {k: (float(v) if k not in ("impact", "title") and not isinstance(v, bool) else v) for k, v in params.items()}
     except (TypeError, ValueError):
         params = {}
+    # owner, 2026-11-07: never invent numbers. A chart whose every number is a "typical" fill-in ("sailing journey 297 km",
+    # "from snow to sand 1,353 km at 850 km/h" on a personal story with no distance in it) is fiction dressed as data: no chart.
+    if not any(isinstance(v, (int, float)) and not isinstance(v, bool) and v for k, v in params.items() if k not in ("title", "impact")):
+        (log or (lambda _: None))("  physics: the narration states no number for this motion; no modelled chart (it would be invented)")
+        return None
     if title: params["title"] = title
     r = _profile(model, params, kind, icon)
     if not r or len(r["series"]) < 2: return None

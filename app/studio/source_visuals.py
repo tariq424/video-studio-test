@@ -152,13 +152,15 @@ def auto_request(job, sec, min_overlap=3, secs=2.5):
     beat = _words(sec.get("vo", ""))
     if not beat or not isinstance(cues, list):
         return None
+    try: own = json.loads((Path(job) / "src" / "meta.json").read_text(encoding="utf-8")).get("own_footage")
+    except (OSError, ValueError): own = False
     best, score = None, 0
     for i, c in enumerate(cues):
         try:
             start = float(c["start"])
         except (KeyError, TypeError, ValueError):
             continue
-        if start < 15:   # skip the intro / channel bumper
+        if start < 15 and not own:   # skip the intro / channel bumper (your own footage has none)
             continue
         window = " ".join(str(x.get("text") or "") for x in cues[i:i + 3])   # a cue plus the next two (~6-9 s of speech)
         sc = len(beat & _words(window))
