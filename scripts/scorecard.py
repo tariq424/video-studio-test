@@ -51,7 +51,8 @@ def score(jd):
     for pf in list((sd / "imagegen").glob("*.prompt.txt")) + list((sd / "chain").glob("*.prompt.txt")):
         p = pf.read_text(encoding="utf-8", errors="replace"); bid = pf.name.split("_")[0]
         if people.rebuilds_layout(p): layouts.append(pf.name)
-        if people.names(by_beat.get(bid, ""), ents):
+        if people.names(by_beat.get(bid, ""), ents) or (pf.parent.name in ("imagegen", "chain") and people.shows_person(p) and "sketch" not in p.lower()
+                                                        and ((sd / "source_excerpts" / f"{bid}_snap.png").exists() or pf.parent.name == "chain")):
             if "sketch" in p.lower(): sketches += 1
             else: stand_in.append(pf.name)
     r["photo_standins"] = len(stand_in); r["sketches"] = sketches; r["rebuilt_layouts"] = len(layouts)

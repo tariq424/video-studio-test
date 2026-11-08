@@ -44,10 +44,10 @@ FORMAT = "Put the final prompt on its own line, starting with PROMPT:"
 _PPL = {"now": []}
 def _people_line():
     from . import people
-    return people.DESCRIBE_RULE + (" " + people.rule(_PPL["now"]) if _PPL["now"] else "")
+    return people.DESCRIBE_RULE + (" " + people.rule(_PPL["now"]) if _PPL["now"] else (" " + people.SNAP_RULE if _PPL.get("snap") else ""))
 def _rule_now():
     from . import people
-    return people.rule(_PPL["now"])
+    return people.rule(_PPL["now"]) or (people.SNAP_RULE if _PPL.get("snap") else "")
 NARRATION = "Write a prompt for a photorealistic image that illustrates this narration, without brands or text: "
 GENERATE = "Generate an image: "
 VARIANTS = ["Generate a second image of the same scene from a different camera angle, same style and lighting.",
@@ -451,7 +451,7 @@ def _session_chatgpt(cfg, image, aspect, vo, out, timeout, log, evidence, extras
     from .flow import _first
     shape = "Tall vertical 9:16 portrait image." if aspect == "9:16" else "Wide horizontal 16:9 landscape image."
     from . import people
-    rules = ("No text, letters, logos or brand names. " + people.rule(_PPL["now"])) if _PPL["now"] else "Photorealistic. No text, letters, logos or brand names."
+    rules = ("No text, letters, logos or brand names. " + _rule_now()) if (_PPL["now"] or _PPL.get("snap")) else "Photorealistic. No text, letters, logos or brand names."
     with sync_playwright() as pw:
         context, page = _launch(pw, cfg, "chatgpt")
         step = "open"
@@ -909,6 +909,7 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
         return []
     from . import people
     sec = people.with_people(sec, sd); _PPL["now"] = list(sec.get("people") or [])
+    _PPL["snap"] = bool(image and Path(str(image)).is_file())   # described from a real frame: any person in it is real (sketch)
     order = [x for x in (cfg.get("imagegen_providers") or PROVIDERS) if x in PROVIDERS] or ["gemini"]
     order = _stable_non_google_first(order)
     fit_on = narration_fit_on()
@@ -986,7 +987,7 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
                     described = describe_local(cfg, image, vo, log)
                     if described and people.rebuilds_layout(described):   # a split screen / video call of strangers: not a scene
                         log("  the screenshot description rebuilds the show's screen layout; the prompt comes from the narration"); described = ""
-                s2 = dict(sec, described_prompt=described) if described else sec
+                s2 = dict(sec, described_prompt=described, person_in_frame=people.shows_person(described)) if described else sec
                 fn = {"hf": _session_hf, "bing": _session_bing, "cloudflare": _session_cloudflare, "meta": _session_meta}[site]
                 prompt = fn(cfg, s2, aspect, out, timeout, log, evidence, extras)
         except Skip as s_:

@@ -393,6 +393,36 @@ def do_stock(job, plan, cfg, log, stop):
 
 # ---------------------------------------------------------------- fallback visuals (no matching footage)
 FB_SECS = 7.0   # screen time one fallback visual covers
+STILL_EXTRA = 4.0   # a still (push-in) may run this much longer than its slot
+
+
+def map_useful(g, min_deg=0.5):
+    """A route/place map shows something only when its places are spread out: points closer than ~50 km pile onto one dot over
+    blank sea at the map's zoom (owner, 2026-11-07: Dockyard and Horseshoe Bay, Bermuda). -> bool"""
+    pts = [p for p in (g or {}).get("points") or [] if isinstance(p.get("lat"), (int, float)) and isinstance(p.get("lon"), (int, float))]
+    if len(pts) < 2: return bool(pts)
+    lat = [p["lat"] for p in pts]; lon = [p["lon"] for p in pts]
+    return max(max(lat) - min(lat), max(lon) - min(lon)) >= min_deg
+
+
+def _fill_beat(items, d):
+    """[(kind, item, secs)] whose shots are shorter than the beat (d s) -> a list that covers it without freezing one shot.
+    Stills (images, parallax layers) take up to STILL_EXTRA s more each (their slow push-in carries it); then the beat's shots
+    play again in turn, never the same one twice in a row (a clip held on its last frame for 13 s, a map held for 23 s)."""
+    items = [(k, c, cp + (STILL_EXTRA if k == "fb" and c.get("type") in ("image", "layers") else 0.0)) for k, c, cp in items]
+    total = sum(cp for _, _, cp in items)
+    if total > d:   # the stills' extra overshot: give back the difference evenly, never below their own length
+        over, st = total - d, [i for i, (k, c, _) in enumerate(items) if k == "fb" and c.get("type") in ("image", "layers")]
+        for i in st:
+            k, c, cp = items[i]; items[i] = (k, c, max(cp - STILL_EXTRA, cp - over / len(st)))
+        return items
+    base, i = list(items), 0
+    if len(base) == 1: return items   # one shot only: replaying it restarts it, no better than holding it
+    while sum(cp for _, _, cp in items) < d - 0.3 and len(items) < 16:
+        nxt = base[i % len(base)]; i += 1
+        if len(base) > 1 and nxt[1] is items[-1][1]: continue
+        items.append(nxt)
+    return items
 
 def _needs(plan, tm, pick, sd, cfg):
     """Beats whose footage doesn't cover them and that may not borrow other beats' clips: subject-locked beats, or any beat
@@ -566,7 +596,9 @@ def do_fallback(job, plan, cfg, wg, log, stop, full=False, dbg=None):
                 items.append({"type": "video", "src": _rel_sd(clip, sd), "secs": round(media.dur(clip), 2), "rate": 1.0, "freeze": True,
                               "tag": vtag, "rung": "flow" if vrung == "flow" else "meta video"})
         bd = s.get("backdrop") or {"kind": "headline", "kicker": "", "text": s["vo"][:60], "sub": ""}
-        if bd.get("kind") == "map" and len(items) < n: items.append({"type": "graphic", "g": bd, "rung": "map"})
+        if bd.get("kind") == "map" and len(items) < n:
+            if map_useful(bd): items.append({"type": "graphic", "g": bd, "rung": "map"})
+            else: log(f"  {s['id']}: map skipped: its places are too close together to show on a map (they would sit on one dot)")
         have = len(pick.get(s["id"], []))
         why1 = f"only {have} coherent stock clip(s)" if have else "no coherent stock"
         if s["id"] not in base_needs: why1 = ""   # stock covers this beat; the other treatments are made for the review menu
@@ -1049,6 +1081,8 @@ def build(job, plan, cfg, log):
             if items and sum(it[2] for it in items) < d - 0.3 and any(it[0] == "clip" or it[1]["type"] == "video" for it in items):
                 base = list(items)   # chosen footage shorter than the beat: play the choice again rather than run out
                 while sum(it[2] for it in items) < d - 0.3 and len(items) < 12: items += base
+        if items and sum(it[2] for it in items) < d - 0.3:
+            items = _fill_beat(items, d)   # owner, 2026-11-07: never one shot frozen for the slack (13 s graphics freeze, 23 s map)
         eb = rv["beats"].get(s["id"], {}).get("edit") if rv else None   # replaced in the post-render editor: same visual, same fit
         if eb and all(c in rv["cands"] for c in eb["cands"]):
             from . import edit

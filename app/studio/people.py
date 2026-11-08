@@ -31,6 +31,16 @@ LAYOUT = re.compile(r"(?i)split[- ]?screen|video[- ]call|zoom call|\bpanels?\b|t
 _OLD = re.compile(r"(?i)\s*No real or recogni[sz]able people\.?|\s*no real or recogni[sz]able people")
 
 
+# a person in a description of a REAL frame (snapshot of the source / your footage): named or not, they are a real person
+PERSON = re.compile(r"(?i)\b(wom[ae]n|m[ae]n|person|people|lady|ladies|gentleman|girl|boy|guest|host|interviewer|speaker|figure|face|"
+                    r"portrait|elderly|grey-haired|gray-haired|she|he|her|his|they)\b")
+SNAP_RULE = (f"If the image shows a person, they are a real person: draw them as {SKETCH}; never a photo-real look-alike.")
+
+
+def shows_person(text):
+    return bool(PERSON.search(str(text or "")))
+
+
 def ents_for(sd):
     """The story's entity list for a job dir or its short/ workspace. -> [] when there is none."""
     sd = Path(sd)
@@ -66,9 +76,12 @@ def rule(ppl):
 
 
 def tail(sec_or_people, photo=True):
-    """What every text-to-image prompt ends with: the sketch rule for named people, else photorealistic; never text/logos."""
+    """What every text-to-image prompt ends with: the sketch rule for named people (or a real person seen in the source frame the
+    prompt was described from), else photorealistic; never text/logos."""
     ppl = sec_or_people.get("people") if isinstance(sec_or_people, dict) else list(sec_or_people or [])
     if ppl: return " " + rule(ppl) + " No text, no logos."
+    if isinstance(sec_or_people, dict) and sec_or_people.get("person_in_frame"):
+        return f" Any person in it is drawn as {SKETCH}. No text, no logos."
     return (" Photorealistic." if photo else "") + " No text, no logos."
 
 

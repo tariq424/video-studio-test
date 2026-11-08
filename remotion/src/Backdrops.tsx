@@ -55,17 +55,27 @@ export const MapBackdrop: React.FC<{ g: Extract<Backdrop, { kind: "map" }>; dur:
   const k = Math.min(all.length - 1, Math.max(0, Math.floor(draw * (all.length - 1))));
   const head = all[k] || P(origin), prev = all[Math.max(0, k - 1)] || head;
   const ang = (Math.atan2(head[1] - prev[1], head[0] - prev[0]) * 180) / Math.PI;
+  // label placement (owner, 2026-11-07: "Royal Naval Dockyard" and "Horseshoe Bay" printed on top of each other): each name goes
+  // above its dot unless it would overlap a name already placed; then below the dot, then further out; kept inside the frame
+  const placed: { x: number; y: number; w: number }[] = [];
+  const spots = pts.map((p) => {
+    const [px, py] = P(p); const w = Math.max(60, p.name.length * 23);
+    const x = Math.min(width - 20 - w / 2, Math.max(20 + w / 2, px));
+    const tries = [py - 30, py + 62, py - 78, py + 110, py - 126, py + 158];
+    const y = tries.find((ty) => !placed.some((q) => Math.abs(q.x - x) < (q.w + w) / 2 + 8 && Math.abs(q.y - ty) < 46)) ?? tries[0];
+    placed.push({ x, y, w }); return { x, y };
+  });
   const label = (p: MapPoint, i: number) => {
-    const [x, y] = P(p);
+    const [x, y] = P(p); const spot = spots[i] || { x, y: y - 30 };
     const show = interpolate(t, [0.3 + i * 0.25, 0.7 + i * 0.25], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
     const col = p.role === "actual" ? C.gold : p.role === "planned" ? "rgba(255,255,255,0.75)" : C.text;
     return (
       <g key={p.name + i} opacity={show}>
         <circle cx={x} cy={y} r={p.role === "actual" ? 16 : 12} fill={col} stroke="#0b0f17" strokeWidth={4} />
         {p.role === "actual" ? <circle cx={x} cy={y} r={16 + 18 * ((t * 1.2) % 1)} fill="none" stroke={C.gold} strokeWidth={3} opacity={1 - ((t * 1.2) % 1)} /> : null}
-        <text x={x} y={y - 30} textAnchor="middle" fontFamily={HEAD} fontWeight={900} fontSize={40} fill={col}
+        <text x={spot.x} y={spot.y} textAnchor="middle" fontFamily={HEAD} fontWeight={900} fontSize={40} fill={col}
           stroke="#0b0f17" strokeWidth={10} paintOrder="stroke">{p.name}</text>
-        {p.role === "planned" && actual ? <text x={x} y={y - 78} textAnchor="middle" fontFamily={BODY} fontWeight={800} fontSize={26}
+        {p.role === "planned" && actual ? <text x={spot.x} y={spot.y - 48} textAnchor="middle" fontFamily={BODY} fontWeight={800} fontSize={26}
           fill="rgba(255,255,255,0.7)" stroke="#0b0f17" strokeWidth={8} paintOrder="stroke">PLANNED</text> : null}
       </g>
     );

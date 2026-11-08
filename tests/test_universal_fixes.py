@@ -45,3 +45,27 @@ def test_repair_joins_several_clips(tmp_path):
         clips.append(c)
     out = qc_repair.join_clips(clips, 6.0, 360, 640, tmp_path / "j.mp4")
     assert abs(media.dur(out) - 6.0) < 0.3
+
+
+def test_person_in_a_real_frame_is_sketched():
+    from studio import people, imagegen
+    assert people.shows_person("An older woman with short grey hair in a gift shop") and not people.shows_person("A white boat at a dock")
+    p = imagegen._text_prompt({}, {"vo": "x", "people": [], "person_in_frame": True, "described_prompt": "An older woman in a shop."}, print)
+    assert "courtroom sketch" in p and "Photorealistic" not in p
+    p = imagegen._text_prompt({}, {"vo": "x", "people": [], "described_prompt": "A white boat at a dock."}, print)
+    assert "Photorealistic" in p
+
+
+def test_fill_beat_never_freezes_one_shot():
+    from studio.short import _fill_beat
+    src, lay, gfx = {"type": "video"}, {"type": "layers"}, {"type": "video"}
+    r = _fill_beat([("fb", src, 8.0), ("fb", lay, 7.0), ("fb", gfx, 7.9)], 36.4)
+    assert sum(cp for *_, cp in r) >= 36.1 and all(a[1] is not b[1] for a, b in zip(r, r[1:]))
+    assert max(cp for *_, cp in r) <= 11.0
+
+
+def test_map_needs_spread_out_places():
+    from studio.short import map_useful
+    near = {"points": [{"lat": 32.327, "lon": -64.834}, {"lat": 32.255, "lon": -64.818}]}
+    far = {"points": [{"lat": 25.2, "lon": 55.3}, {"lat": 21.5, "lon": 39.2}]}
+    assert not map_useful(near) and map_useful(far)
