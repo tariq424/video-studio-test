@@ -88,3 +88,36 @@ def test_adopt_links_outputs_and_writes_manifests(tmp_path):
     assert list(outs) == ["short"] and Path(outs["short"]).read_bytes() == b"v"
     m = json.loads((tmp_path / "job" / "iedit" / "short.json").read_text(encoding="utf-8"))
     assert m["parts"][0]["dur"] == 3.0 and m["parts"][0]["check"] is False
+
+
+def test_topic_notes_research_what_the_guest_mentions(tmp_path, monkeypatch):
+    import studio.llm
+    from studio import websearch
+
+    class L(_LLM):
+        def chat_json(self, system, user, max_tokens=0, check=None):
+            if "SPECIFIC things" in user:
+                j = {"topics": [{"seg": 3, "topic": "three passports", "query": "Bermudian status citizenship"},
+                                {"seg": 7, "topic": "sailing", "query": "Caribbean sailing"}]}
+                if check: check(j)
+                return j
+            assert "Bermudian status:" in user
+            return {"facts": ["Bermudian status is a legal status that gives the right to live and work in Bermuda.", ""]}
+    monkeypatch.setattr(studio.llm, "LLM", L)
+    monkeypatch.setattr(websearch, "_wikipedia", lambda cfg, q: [f"Bermudian status: about {q}"] if "Bermudian" in q else [])
+    monkeypatch.setattr(websearch, "search", lambda cfg, q, log=None: ([], ""))
+    res = interview.topic_notes({}, _segs(10), "ctx", tmp_path, log=lambda m: None)
+    assert res == [{"fact": "Bermudian status is a legal status that gives the right to live and work in Bermuda.",
+                    "source": "https://en.wikipedia.org/wiki/Bermudian_status", "topic": "three passports", "seg": 3, "kind": "topic"}]
+    assert "(about what is said at segment 3: three passports)" in interview.note_lines(res + [{"fact": "Dockyard.", "kind": "place"}])
+    assert "[1] (place) Dockyard." in interview.note_lines(res + [{"fact": "Dockyard.", "kind": "place"}])
+
+
+def test_a_fact_on_what_was_said_goes_where_it_was_said(tmp_path, monkeypatch):
+    import studio.llm
+    monkeypatch.setattr(studio.llm, "LLM", _LLM)
+    _LLM.plan = {"chapters": [{"at": 0, "title": "A"}], "facts": [{"after": 1, "note": 0, "text": "Status."}, {"after": 8, "note": 1, "text": "Dockyard."}]}
+    notes = [{"fact": "Status.", "seg": 6, "kind": "topic", "topic": "passports"}, {"fact": "Dockyard.", "kind": "place"}]
+    j = interview.triage({}, _segs(10), "ctx", notes, tmp_path)
+    assert [f["after"] for f in j["facts"]] == [7, 8]   # moved to the answer about it; the place note stays where it was put
+    assert "Spell people's and places' names the way the creator's note" in _LLM.prompt

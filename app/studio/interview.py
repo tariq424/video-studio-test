@@ -71,6 +71,80 @@ def _log(log, m):
     (log or print)(m)
 
 
+def note_lines(notes):
+    """Research notes for a prompt: [n] the fact, tagged with what kind it is (a fact on something the guest said, with the
+    segment where it comes up, or a note on the place)."""
+    out = []
+    for i, n in enumerate(notes or []):
+        tag = f"(about what is said at segment {n['seg']}: {n.get('topic', '')}) " if n.get("seg") is not None else \
+              "(place) " if n.get("kind") == "place" else ""
+        out.append(f"[{i}] {tag}{n['fact']}")
+    return "\n".join(out) or "(none)"
+
+
+TOPICS = """Here is a conversation the creator filmed. List the SPECIFIC things the guest mentions that a viewer would want
+explained or put in context: a place, a law or status (e.g. dual citizenship), an institution, a group, an activity, an event,
+a date, a number. Not the guest's private life (family, health, money), not small talk.
+About the footage: {context}
+Transcript:
+{segments}
+Reply with JSON only: {{"topics": [{{"seg": <segment number where it comes up>, "topic": "2-6 words", "query": "an encyclopedia
+search for it, 2-6 words, with the place if it helps (e.g. 'Bermudian status citizenship')"}}]}} - at most {n}, most interesting first."""
+
+FACTS_FROM = """For each topic below, write ONE or TWO plain sentences that a documentary narrator could say to explain it, using
+ONLY the search snippets given for that topic. If the snippets don't clearly cover the topic, write an empty string - never
+guess, never use outside knowledge.
+{items}
+Reply with JSON only: {{"facts": ["sentence(s) for topic 1 or empty", "... topic 2", ...]}}"""
+
+
+def topic_notes(cfg, segs, context, work, log=print, n=6):
+    """Commentary where the guest gets specific (owner, 2026-11-08: "when she talks about specifics, that is where our
+    commentary comes in"): the AI lists what the guest mentions, each is looked up (Wikipedia first, then the other search
+    routes; a blocked route just moves on), and the AI turns only the snippets into a fact. -> [{"fact", "source", "topic",
+    "seg"}], cached in topic_notes.json; [] on any failure (the video is made without them)."""
+    out = Path(work) / "topic_notes.json"
+    if out.exists(): return json.loads(out.read_text(encoding="utf-8"))
+    if not cfg.get("interview_topic_notes", True): return []
+    from .llm import LLM
+    from . import websearch
+    nseg = len(segs)
+    lines = "\n".join(f"[{s['i']}] {s['text']}" for s in segs)
+    def check(j):
+        for t in j.get("topics") or []:
+            if not 0 <= int(t.get("seg", -1)) < nseg: raise ValueError(f"segment {t.get('seg')} is outside 0-{nseg - 1}")
+            if not str(t.get("query") or "").strip(): raise ValueError("every topic needs a query")
+    try:
+        with LLM(dict(cfg), log, lambda: False) as llm:
+            topics = (llm.chat_json("You are a documentary researcher. Reply with JSON only.",
+                                    TOPICS.format(context=context, segments=lines[:60000], n=n), max_tokens=1500, check=check).get("topics") or [])[:n]
+            found = []
+            for t in topics:
+                snips, route = [], ""
+                try: snips, route = websearch._wikipedia(cfg, t["query"]), "wikipedia"
+                except Exception: pass
+                if not snips: snips, route = websearch.search(cfg, t["query"], log)
+                if snips: found.append((t, snips[:3], route))
+            _log(log, f"Interview: {len(topics)} thing(s) the guest mentions, {len(found)} found in research")
+            if not found:
+                out.write_text("[]", encoding="utf-8"); return []
+            items = "\n\n".join(f"Topic {k + 1}: {t['topic']}\nSnippets:\n" + "\n".join(f"- {s[:600]}" for s in sn) for k, (t, sn, _r) in enumerate(found))
+            facts = llm.chat_json("You are a careful fact writer. Reply with JSON only.", FACTS_FROM.format(items=items), max_tokens=2000).get("facts") or []
+    except Exception as e:
+        if str(e) == "cancelled": raise
+        _log(log, f"  topic research skipped ({str(e)[:120]}); the video uses the place notes only"); return []
+    res = []
+    for (t, sn, route), f in zip(found, facts):
+        f = re.sub(r"\s+", " ", str(f or "")).strip()
+        if len(f.split()) < 6: continue
+        title = sn[0].split(":", 1)[0].strip() if route == "wikipedia" else ""
+        src = f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}" if title else f"{route} search: {t['query']}"
+        res.append({"fact": f, "source": src, "topic": str(t["topic"])[:60], "seg": int(t["seg"]), "kind": "topic"})
+        _log(log, f"  segment {t['seg']} ({t['topic']}): {f[:90]}")
+    out.write_text(json.dumps(res, indent=1, ensure_ascii=False), encoding="utf-8")
+    return res
+
+
 # ------------------------------------------------------------------ 1-2 transcript
 _GPU_BAD = False
 def cfg_gpu_ok():
@@ -150,12 +224,12 @@ def plan(cfg, segs, context, broll, work, log=print, short_secs=90, doc_min=8, d
     with LLM(dict(cfg), log, lambda: False) as llm:
         try: j = llm.chat_json("You are an award-winning documentary editor. Reply with JSON only.",
                           PLAN.format(context=context, segments=lines[:60000], broll=json.dumps(broll), short_secs=short_secs,
-                                      notes="\n".join(f"[{i}] {n['fact']}" for i, n in enumerate(notes or [])) or "(none)",
+                                      notes=note_lines(notes),
                                       doc_min=doc_min, doc_max=doc_max), max_tokens=6000, check=check)
         except RuntimeError:   # lengths still off after 3 tries: take a valid plan and trim it to size
             j = llm.chat_json("You are an award-winning documentary editor. Reply with JSON only.",
                               PLAN.format(context=context, segments=lines[:60000], broll=json.dumps(broll), short_secs=short_secs,
-                                          notes="\n".join(f"[{i}] {n['fact']}" for i, n in enumerate(notes or [])) or "(none)",
+                                          notes=note_lines(notes),
                                           doc_min=doc_min, doc_max=doc_max), max_tokens=6000, check=lambda x: check(x, False))
     j = fit(j, segs, short_secs)
     out.write_text(json.dumps(j, indent=1, ensure_ascii=False), encoding="utf-8")
@@ -195,7 +269,7 @@ def short_plan(cfg, segs, pl, context, notes, work, log=print, short_secs=90, tr
     else:
         bites = sorted({tuple(it["bite"]) for c in pl["documentary"]["chapters"] for it in c.get("items", []) if "bite" in it})
     mat = "\n".join(f"[{a}-{b}] " + " ".join(segs[i]["text"] for i in range(a, b + 1))[:600] for a, b in bites)
-    mat += "\n\nNotes:\n" + ("\n".join(f"[{i}] {n['fact']}" for i, n in enumerate(notes or [])) or "(none)")
+    mat += "\n\nNotes:\n" + note_lines(notes)
     n = len(segs)
     def check(j, strict=True):
         its = j.get("items") or []
@@ -256,8 +330,9 @@ Rules:
 - drop ONLY what is boring or repetitive: small talk, directions and logistics, dead air, the same point said again, chatter about
   the drive, anything private (addresses, phone numbers, money of private people). Everything else stays, however long the video
   gets. Never drop a question whose answer stays: a question goes only when it is repeated or its answer is dropped.
-- facts: commentary where the guest gets specific: a place, a law, a date, a group, a number a viewer would want explained, or
-  in place of a dropped stretch. "after" = the segment after which the talk pauses for the fact (it must end a sentence); the
+- facts: commentary where the guest gets specific. A note marked "(about what is said at segment N)" goes right after
+  segment N, at the end of that answer (use every one of those). A "(place)" note goes in the background lines or at a change of
+  topic (a new chapter), never in the middle of a personal answer. "after" = the segment after which the talk pauses for the fact (it must end a sentence); the
   conversation picks up again at the next segment. Use most notes once; never two facts in a row; at most one fact per ~90
   seconds of talk. A fact must be about what is being talked about in the 3 segments before "after" - the same place, person
   or event named there. Never put a fact about one place where the talk is about another (e.g. Horseshoe Bay is not Tucker's
@@ -266,6 +341,7 @@ Rules:
   slavery, race, land losses, poverty or religion.
 - chapters: 4-8, at the segment where a new topic starts; the first at segment 0.
 - pictures: cover every kept stretch with what is being talked about (one entry per topic stretch); empty when it's personal talk.
+- Spell people's and places' names the way the creator's note spells them (the transcript may mishear a name).
 - Never put words in anyone's mouth; never invent facts."""
 
 
@@ -305,8 +381,11 @@ def triage(cfg, segs, context, notes, work, log=print):
     with LLM(dict(cfg), log, lambda: False) as llm:
         j = llm.chat_json("You are an award-winning documentary editor. Reply with JSON only.",
                           TRIAGE.format(context=context, segments=lines[:140000],
-                                        notes="\n".join(f"[{i}] {x['fact']}" for i, x in enumerate(notes or [])) or "(none)"),
+                                        notes=note_lines(notes)),
                           max_tokens=6000, check=check)
+    for f in j.get("facts") or []:   # a fact on what the guest said: right where it is said (Nov 8: facts landed after unrelated answers)
+        nt = (notes or [])[int(f["note"])] if str(f.get("note", "")).isdigit() and int(f["note"]) < len(notes or []) else {}
+        if nt.get("seg") is not None and abs(int(f["after"]) - int(nt["seg"])) > 3: f["after"] = min(n - 1, int(nt["seg"]) + 1)
     out.write_text(json.dumps(j, indent=1, ensure_ascii=False), encoding="utf-8")
     dropped = sum(span(int(d[0]), int(d[1])) for d in j.get("drop") or [])
     _log(log, f"  triage: {len(j.get('preview') or [])} preview moment(s), {len(j.get('background') or [])} background line(s), "
@@ -1212,8 +1291,10 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
     from . import place   # place colour from the footage's GPS (owner, 2026-11-06): checked facts + where to use them
     pc = place.colour(cfg, src, root, log)
     if pc:
-        notes = list(notes or []) + [n for n in pc["notes"] if n not in (notes or [])]
+        notes = list(notes or []) + [dict(n, kind="place") for n in pc["notes"] if n not in (notes or [])]
         context = (str(context or "") + "\n" + pc["context"]).strip()
+    tn = topic_notes(cfg, segs, context, root, log)   # facts on what the guest mentions, tied to where it comes up
+    if tn: notes = list(notes or []) + [n for n in tn if n not in (notes or [])]
     bf = root / "broll.json"   # probing every clip in the folder is slow on a busy PC: once per folder
     broll = json.loads(bf.read_text(encoding="utf-8")) if bf.exists() else broll_list(src)
     bf.write_text(json.dumps(broll, indent=1), encoding="utf-8")
