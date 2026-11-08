@@ -121,3 +121,18 @@ def test_a_fact_on_what_was_said_goes_where_it_was_said(tmp_path, monkeypatch):
     j = interview.triage({}, _segs(10), "ctx", notes, tmp_path)
     assert [f["after"] for f in j["facts"]] == [7, 8]   # moved to the answer about it; the place note stays where it was put
     assert "Spell people's and places' names the way the creator's note" in _LLM.prompt
+
+
+def test_topic_note_source_is_the_snippet_the_fact_came_from(tmp_path, monkeypatch):
+    import studio.llm
+    from studio import websearch
+
+    class L(_LLM):
+        def chat_json(self, system, user, max_tokens=0, check=None):
+            if "SPECIFIC things" in user: return {"topics": [{"seg": 2, "topic": "citizenship", "query": "British citizenship Bermuda"}]}
+            return {"facts": ["A British Overseas Territories citizen holds a category of British nationality."]}
+    monkeypatch.setattr(studio.llm, "LLM", L)
+    monkeypatch.setattr(websearch, "_wikipedia", lambda cfg, q: ["Bermuda: an island territory in the Atlantic.",
+                                                                 "British Overseas Territories citizen: a category of British nationality."])
+    res = interview.topic_notes({}, _segs(5), "ctx", tmp_path, log=lambda m: None)
+    assert res[0]["source"] == "https://en.wikipedia.org/wiki/British_Overseas_Territories_citizen"

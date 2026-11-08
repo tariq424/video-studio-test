@@ -137,7 +137,9 @@ def topic_notes(cfg, segs, context, work, log=print, n=6):
     for (t, sn, route), f in zip(found, facts):
         f = re.sub(r"\s+", " ", str(f or "")).strip()
         if len(f.split()) < 6: continue
-        title = sn[0].split(":", 1)[0].strip() if route == "wikipedia" else ""
+        fw = set(re.findall(r"[a-z]{4,}", f.lower()))   # the source is the snippet the fact came from, not just the first one
+        best = max(sn, key=lambda x: len(fw & set(re.findall(r"[a-z]{4,}", x.lower()))))
+        title = best.split(":", 1)[0].strip() if route == "wikipedia" else ""
         src = f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}" if title else f"{route} search: {t['query']}"
         res.append({"fact": f, "source": src, "topic": str(t["topic"])[:60], "seg": int(t["seg"]), "kind": "topic"})
         _log(log, f"  segment {t['seg']} ({t['topic']}): {f[:90]}")
