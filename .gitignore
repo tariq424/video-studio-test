@@ -35,3 +35,6 @@ models/
 app/studio/routelib/output/
 app/studio/routelib/profiles/
 app/studio/routelib/secrets/
+
+# local Python virtual environment (rebuilt by install)
+.venv/
