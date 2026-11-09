@@ -26,7 +26,7 @@ DEFAULTS = {
     "gemini_profile": "",
     "gemini_url": "https://gemini.google.com/app",
     "imagegen_timeout": 240,
-    "imagegen_max_per_video": 8,      # beats per output that get Gemini images
+    "imagegen_max_per_video": 0,      # 0 = no cap (owner, 2026-11-08: as many AI pictures as needed; a failure moves to the next rung)
     "imagegen_per_beat": 1,           # 1 AI image per beat (2026-10-21: protect the accounts); parallax/zoom add the variety
     "imagegen_cooldown_hours": 6,     # after a usage-limit message
     "imagegen_headless": True,        # no visible Chrome window for Gemini (2026-10-21)

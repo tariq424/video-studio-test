@@ -28,7 +28,7 @@ from pathlib import Path
 from . import media
 
 VIDEO_EXT = (".mov", ".mp4", ".m4v", ".mkv")
-CUT_VERSION = "18"   # bump when the way parts are cut changes, so cached parts are made again
+CUT_VERSION = "19"   # bump when the way parts are cut changes, so cached parts are made again
 PLAN = """You edit a documentary from the creator's OWN interview footage. The interview audio is the star: viewers should mostly
 hear the people on camera. Your narration only bridges: a hook, where we are, a line between topics, a closing line.
 
@@ -84,7 +84,10 @@ def note_lines(notes):
 
 TOPICS = """Here is a conversation the creator filmed. List the SPECIFIC things the guest mentions that a viewer would want
 explained or put in context: a place, a law or status (e.g. dual citizenship), an institution, a group, an activity, an event,
-a date, a number. Not the guest's private life (family, health, money), not small talk.
+a date, a number. Not the guest's private life (family, health, money), not small talk. Things at or near where the
+conversation was filmed (its places, attractions, history) first. The query names the thing she means, never a brand or a
+namesake she didn't name (sailing in the Caribbean -> 'sailing Caribbean islands', not a cruise line; skiing in Vermont ->
+'skiing in Vermont', not one resort she never named).
 About the footage: {context}
 Transcript:
 {segments}
@@ -96,6 +99,166 @@ ONLY the search snippets given for that topic. If the snippets don't clearly cov
 guess, never use outside knowledge.
 {items}
 Reply with JSON only: {{"facts": ["sentence(s) for topic 1 or empty", "... topic 2", ...]}}"""
+
+
+DIVES = """A documentary is built around the creator's conversation with a guest. Right after the guest mentions each topic
+below, the film pauses for a short researched segment that tells the viewer more about it - concrete, colourful, visual, the
+kind of detail a good travel documentary narrator gives. Write each segment ONLY from the reference text given for that topic:
+never outside knowledge, never guesses, never the guest's private life. About {words} words per segment (fewer if the text is
+thin). Leave a topic OUT when its reference is about a different place or thing than the one the guest means (another
+island's law, a namesake, a person or event she never spoke of) or is only loosely related - check it against her words. Split each segment into lines of one or two sentences, and give each line
+what to show under it (a photographable thing, 3-8 words, with the place, e.g. 'glass bottom boat Bermuda reef') and a short
+on-screen card when a number, date or name stands out.
+About the footage: {context}
+
+{items}
+
+For every topic say whether the reference fits what she means ("fits": false for a namesake, a brand, another place, or
+anything she didn't actually talk about - write no lines then), and "thin": true only when the reference truly has too little
+for about {words} words.
+Reply with JSON only: {{"dives": [{{"topic": <topic number>, "fits": true, "thin": false, "title": "chapter title, 2-5 words", "lines": [{{"text": "...", "visual": "...", "card": "under 40 characters, or empty"}}]}}]}}"""
+
+
+def wiki_article(q, chars=3500, topic=""):
+    """(title, url, text) of the Wikipedia article that best matches q: the article's opening sections as plain text, or None.
+    The title must share a word with the topic / query, and the page for a Bermuda query must mention Bermuda (Nov 8: the
+    Cayman Islands' "Belonger status" and a Bahamas island came back for Bermuda topics)."""
+    import requests
+    h = {"User-Agent": "VideoStudio/1.0 (personal documentary research tool)"}
+    for wait in (0, 4, 10, 20):   # Wikipedia answers 429 when asked too fast (Nov 8: half the topics lost): wait and ask again
+        if wait: time.sleep(wait)
+        r = requests.get("https://en.wikipedia.org/w/api.php", params={"action": "query", "list": "search", "srsearch": q, "srlimit": 5, "format": "json"},
+                         headers=h, timeout=20)
+        if r.status_code != 429: break
+    titles = [x["title"] for x in r.json().get("query", {}).get("search", [])] if r.status_code == 200 else []
+    stem = lambda w: w[:5]
+    qw = {stem(w) for w in re.findall(r"[a-z]{4,}", (q + " " + topic).lower())} - {"bermu"}
+    score = lambda t: len(qw & {stem(w) for w in re.findall(r"[a-z]{4,}", t.lower())})
+    for best in sorted([t for t in titles if score(t)], key=lambda t: (-score(t), titles.index(t)))[:3]:
+        r = requests.get("https://en.wikipedia.org/w/api.php", params={"action": "query", "prop": "extracts", "explaintext": 1, "exchars": chars,
+                         "titles": best, "format": "json", "redirects": 1}, headers=h, timeout=20)
+        pg = next(iter((r.json().get("query", {}).get("pages", {}) or {}).values()), {})
+        text = re.sub(r"\n?=+ *(See also|References|External links|Further reading|Notes)[\s\S]*$", "", str(pg.get("extract") or ""))
+        text = re.sub(r"\s+", " ", re.sub(r"=+ *([^=]+?) *=+", r"\1:", text)).strip()
+        if len(text.split()) < 40: continue
+        if "bermud" in q.lower() and "bermud" not in text.lower(): continue   # a Bermuda topic: never another island's page
+        t = pg.get("title") or best
+        return t, "https://en.wikipedia.org/wiki/" + t.replace(" ", "_"), text
+    return None
+
+
+def spell_as_noted(text, note):
+    """A name the transcript misheard, spelled the way the creator's note spells it (Nov 8: the Short's title said "Nia
+    Dixon"; the note says Nea): a capitalised word one letter away from a capitalised word of the note, same first letter."""
+    names = {w for w in re.findall(r"\b[A-Z][a-z]{2,}", str(note or ""))}
+    text = str(text or "")
+    def fix(m):
+        w = m.group(0)
+        if w in names: return w
+        nxt = re.match(r"\s+([A-Z][a-z]+)", text[m.end():])
+        # an everyday word ("New Hampshire") is never "fixed" unless the note's next name follows it ("Nia Dixon")
+        if w.lower() in COMMON_WORDS and not (nxt and nxt.group(1) in names): return w
+        for n in names:
+            if len(n) == len(w) and n[0] == w[0] and sum(x != y for x, y in zip(n, w)) == 1: return n
+        return w
+    return re.sub(r"\b[A-Z][a-z]{2,}", fix, text)
+
+
+COMMON_WORDS = set("""new now not nor net nap and are but can did for get got had has her him his how its let may man men one our out own
+put say see she the too two use was way who why yes yet you all any big boy day end far few god hot job law lot low mom old per
+red run sat set sir six sun ten top try war win won also back bank bars bath bays been best boat body book born both busy call
+came care case city come cost dark days deal dear does done door down each east easy else even ever face fact fair fall farm
+fast feel feet fine fire five food four free from full gave girl give goes gold gone good hand hard have head hear heat help
+here high hill home hope hour huge idea into just keep kept kind king knew know land last late left less life like line live
+long look lord lost lots love made main make many mark mind miss more most move much must name near need next nice nine none
+note once only open over park part pass past pick plan play pool port quite real rest ride road rock room rose said sale same
+save says seen sell send ship shop show side sign some song soon sort star stay step stop such sure take talk tell than that
+them then they this time told took town tree trip true turn type unit upon very view wait walk wall want warm wash week well
+went were west what when wide wife wild will wind wise wish with word work yard year your""".split())
+
+
+NAME_GENERIC = set("royal naval national museum island islands mountain mountains resort beach park house church street town city county "
+              "state river lake north south east west great saint new old fort harbour harbor bermuda".split())
+
+
+def named(title, heard):
+    """Is the article's own name something said in the conversation or the creator's note? (Nov 8: she said she skied in
+    Vermont and the research came back with Stowe and Bretton Woods, places she never named.) The main name - before a comma or
+    bracket - needs one distinctive word that was heard."""
+    main = re.split(r"[,(]", title)[0].lower()
+    words = [w for w in re.findall(r"[a-z]{4,}", main) if w not in NAME_GENERIC]
+    said = {w[:5] for w in re.findall(r"[a-z]{4,}", heard.lower())}
+    return not words or any(w[:5] in said for w in words)
+
+
+def deep_dives(cfg, segs, context, work, need_secs, log=print, n=12):
+    """Researched segments where the guest mentions something (owner, 2026-11-08: "a 4-minute interview is too short to
+    interest a viewer... the biggest improvement needed is colour, context media"): each thing she mentions is looked up
+    (Wikipedia's article, else the search routes), and the AI writes a short segment from that text only, split into lines
+    with a picture for each. Sized to fill need_secs. -> [{"seg", "title", "lines": [{"text", "visual", "card"}], "source",
+    "topic"}], cached in deep_dives.json; [] on any failure (the film is made without them)."""
+    out = Path(work) / "deep_dives.json"
+    if out.exists(): return json.loads(out.read_text(encoding="utf-8"))
+    if need_secs < 45: return []
+    from .llm import LLM
+    from . import websearch
+    nseg = len(segs)
+    lines = "\n".join(f"[{s['i']}] {s['text']}" for s in segs)
+    def check(j):
+        for t in j.get("topics") or []:
+            if not 0 <= int(t.get("seg", -1)) < nseg: raise ValueError(f"segment {t.get('seg')} is outside 0-{nseg - 1}")
+            if not str(t.get("query") or "").strip(): raise ValueError("every topic needs a query")
+    try:
+        with LLM(dict(cfg), log, lambda: False) as llm:
+            topics = (llm.chat_json("You are a documentary researcher. Reply with JSON only.",
+                                    TOPICS.format(context=context, segments=lines[:60000], n=n), max_tokens=1500, check=check).get("topics") or [])[:n]
+            found, seen = [], set()
+            heard = " ".join(s["text"] for s in segs) + " " + str(context or "")
+            for t in topics:
+                art = None
+                try: art = wiki_article(t["query"], topic=str(t.get("topic") or ""))
+                except Exception: pass
+                if art and art[1].startswith("https://en.wikipedia.org/") and not named(art[0], heard):
+                    _log(log, f"  segment {t['seg']} ({t['topic']}): \"{art[0]}\" is never named in the conversation - left out"); continue
+                if not art:
+                    try:
+                        sn, route = websearch.search(cfg, t["query"], log)
+                        if sn: art = (t["topic"], f"{route} search: {t['query']}", " ".join(sn[:4]))
+                    except Exception: pass
+                if art and art[1] not in seen: seen.add(art[1]); found.append((t, art))
+            _log(log, f"Interview: researched segments - {len(found)} of {len(topics)} thing(s) the guest mentions found")
+            if not found: out.write_text("[]", encoding="utf-8"); return []
+            words = int(max(50, min(220, need_secs * 2.6 / len(found))))
+            said = lambda i: " ".join(s["text"] for s in segs[max(0, i - 1):i + 2])
+            items = "\n\n".join(f"Topic {k + 1}: {t['topic']} (reference: {a[0]})\nWhat the guest said: \"{said(int(t['seg']))}\"\nReference text:\n{a[2][:3500]}"
+                                for k, (t, a) in enumerate(found))
+            def check2(j):
+                for d in j.get("dives") or []:
+                    if not 1 <= int(d.get("topic", 0)) <= len(found): raise ValueError(f"topic {d.get('topic')} is not 1-{len(found)}")
+                    if d.get("fits") is False: continue
+                    if not d.get("lines"): raise ValueError("every segment that fits needs lines")
+                    w = sum(len(str(x.get("text") or "").split()) for x in d["lines"])
+                    if w < 0.6 * words and not d.get("thin"): raise ValueError(f"topic {d['topic']} has {w} words; write about {words} (or say thin)")
+            dv = llm.chat_json("You are a careful documentary writer. Reply with JSON only.", DIVES.format(words=words, context=context, items=items),
+                               max_tokens=8000, check=check2).get("dives") or []
+    except Exception as e:
+        if str(e) == "cancelled": raise
+        _log(log, f"  researched segments skipped ({str(e)[:120]})"); return []
+    res, budget = [], need_secs * 2.6 * 1.15
+    for d in dv:
+        t, a = found[int(d["topic"]) - 1]
+        if d.get("fits") is False:
+            _log(log, f"  segment {t['seg']} ({t['topic']}): {a[0]} doesn't fit what she means - left out"); continue
+        ls = [{"text": re.sub(r"\s+", " ", str(x.get("text") or "")).strip(), "visual": str(x.get("visual") or "")[:80], "card": str(x.get("card") or "")[:40]}
+              for x in d.get("lines") or [] if len(str(x.get("text") or "").split()) >= 4]
+        keep = []
+        for x in ls:
+            if budget - len(x["text"].split()) < 0: break
+            budget -= len(x["text"].split()); keep.append(x)
+        if keep: res.append({"seg": int(t["seg"]), "title": str(d.get("title") or t["topic"])[:40], "lines": keep, "source": a[1], "topic": str(t["topic"])[:60]})
+    for r_ in res: _log(log, f"  segment {r_['seg']}: \"{r_['title']}\" - {len(r_['lines'])} line(s), {sum(len(x['text'].split()) for x in r_['lines'])} words ({r_['source']})")
+    out.write_text(json.dumps(res, indent=1, ensure_ascii=False), encoding="utf-8")
+    return res
 
 
 def topic_notes(cfg, segs, context, work, log=print, n=6):
@@ -317,12 +480,12 @@ Mark up the WHOLE conversation. Reply with JSON only:
  "title": "a YouTube title, under 70 characters, honest, no clickbait",
  "guest": "the guest's name as said in the conversation or the creator's note, else empty",
  "preview": [[first_seg, last_seg], ...],
- "background": ["one or two sentences", ...],
+ "background": [{{"text": "one or two sentences", "visual": "what to show under it, 3-8 words, e.g. 'Royal Naval Dockyard Bermuda clock tower'"}}, ...],
  "drop": [[first_seg, last_seg, "why"], ...],
  "facts": [{{"after": seg, "note": n, "text": "1-2 sentences, only what note n says", "visual": "what a photo for it should show, 3-8 words", "card": "on-screen fact under 40 characters"}}],
  "jokes": [{{"after": seg, "text": "one light, warm line"}}],
  "chapters": [{{"at": seg, "title": "2-5 words"}}],
- "pictures": [{{"from": seg, "to": seg, "visual": "the photographable thing being talked about, 3-8 words, e.g. 'Tucker's Town Bermuda', 'St. George's Bermuda harbour', or empty"}}]
+ "pictures": [{{"from": seg, "to": seg, "visual": "the photographable thing being talked about, 3-8 words, e.g. 'Tucker's Town Bermuda', 'St. George's Bermuda harbour', or empty", "away": true}}]
 }}
 Rules:
 - preview: 2-4 of the most intriguing moments from LATER in the conversation (each 3-10 seconds, a complete phrase, the guest
@@ -343,6 +506,8 @@ Rules:
   slavery, race, land losses, poverty or religion.
 - chapters: 4-8, at the segment where a new topic starts; the first at segment 0.
 - pictures: cover every kept stretch with what is being talked about (one entry per topic stretch); empty when it's personal talk.
+  "away": true when the guest describes a place or thing somewhere else (a beach, a boat tour, a town, an event) - the viewer
+  then sees that place with the guest talking from a corner; false when the talk is about the guest or the room you are in.
 - Spell people's and places' names the way the creator's note spells them (the transcript may mishear a name).
 - Never put words in anyone's mouth; never invent facts."""
 
@@ -375,7 +540,8 @@ def triage(cfg, segs, context, notes, work, log=print):
             if not (isinstance(p, list) and len(p) >= 2 and 0 <= int(p[0]) <= int(p[1]) < n): raise ValueError(f"preview {p} is outside 0-{n - 1}")
             if span(int(p[0]), int(p[1])) > 15: raise ValueError(f"preview {p[:2]} is {span(int(p[0]), int(p[1])):.0f} s; a teaser is 3-10 s")
         bg = j.get("background") or []
-        if not isinstance(bg, list) or len(bg) > 4 or not all(isinstance(x, str) for x in bg): raise ValueError("background is a list of up to 4 sentences")
+        if not isinstance(bg, list) or len(bg) > 4 or not all(isinstance(x, str) or (isinstance(x, dict) and str(x.get("text") or "").strip()) for x in bg):
+            raise ValueError("background is a list of up to 4 lines, each {text, visual}")
         dropped = sum(span(int(d[0]), int(d[1])) for d in j.get("drop") or [])
         if dropped > 0.6 * total: raise ValueError(f"{dropped / 60:.0f} min dropped; drop only boring or repeated stretches")
     _log(log, f"Interview: marking up all {n} segments (keep / drop / facts / jokes; script AI)")
@@ -426,15 +592,24 @@ def augment_items(tri, segs, max_bite=45.0):
     after = {}
     for f in tri.get("facts") or []: after.setdefault(at_end(int(f["after"])), []).append(dict(insert=f["text"], note=f.get("note"), visual=f.get("visual", ""), card=f.get("card", "")))
     for f in tri.get("jokes") or []: after.setdefault(at_end(int(f["after"])), []).append(dict(narr=f["text"], broll="", joke=True))
+    for dv in tri.get("dives") or []:   # a researched segment on what the guest just mentioned (owner, 2026-11-08: colour, length)
+        lines = [x for x in dv.get("lines") or [] if str(x.get("text") or "").strip()]
+        if not lines or not 0 <= int(dv.get("seg", -1)) < n: continue
+        for m, x in enumerate(lines):
+            after.setdefault(at_end(int(dv["seg"])), []).append(dict(insert=str(x["text"]).strip(), visual=str(x.get("visual") or dv.get("title") or ""),
+                                                                     card=str(x.get("card") or (dv.get("title") if m == 0 else "") or ""),
+                                                                     source=str(dv.get("source") or ""), dive=True))
     chap = {int(c["at"]): str(c.get("title") or "")[:40] for c in tri.get("chapters") or [] if 0 <= int(c.get("at", -1)) < n}
-    pics = [(int(p.get("from", 0)), int(p.get("to", 0)), str(p.get("visual") or "")) for p in tri.get("pictures") or []]
-    def visual(a, b): return next((v for f, t, v in pics if v and f <= b and t >= a), "")
+    pics = [(int(p.get("from", 0)), int(p.get("to", 0)), str(p.get("visual") or ""), bool(p.get("away"))) for p in tri.get("pictures") or []]
+    def visual(a, b): return next((v for f, t, v, _w in pics if v and f <= b and t >= a), "")
+    def away(a, b): return next((w for f, t, v, w in pics if v and f <= b and t >= a), False)
     items, cur, pend_chap = [], None, ""
     def flush():
         nonlocal cur
         if cur:
             it = {"bite": [cur[0], cur[1]], "visual": visual(cur[0], cur[1])}
             if cur[2]: it["chapter"] = cur[2]
+            if it["visual"] and away(cur[0], cur[1]): it["pip"] = True   # she describes somewhere else: that place, her in a corner
             items.append(it); cur = None
     for i in range(n):
         if i in chap:
@@ -449,7 +624,7 @@ def augment_items(tri, segs, max_bite=45.0):
         if i in after:
             flush()
             for x in after[i]:
-                if not tri.get("exact") and items and ("insert" in x or "narr" in x) and ("insert" in items[-1] or "narr" in items[-1]): continue   # never two in a row
+                if not tri.get("exact") and not x.get("dive") and items and ("insert" in x or "narr" in x) and ("insert" in items[-1] or "narr" in items[-1]): continue   # never two in a row
                 items.append(x)
     flush()
     head = []
@@ -458,7 +633,8 @@ def augment_items(tri, segs, max_bite=45.0):
         if 0 <= a <= b < n: head.append({"bite": [a, b], "visual": visual(a, b), "preview": True})
     if head: head[-1]["title_after"] = True   # the title card comes after the teasers
     for line in tri.get("background") or []:   # who, where, why: before the conversation starts
-        if str(line).strip(): head.append({"narr": str(line).strip(), "broll": "", "background": True})
+        t_, v_ = (line.get("text"), line.get("visual")) if isinstance(line, dict) else (line, "")
+        if str(t_ or "").strip(): head.append({"narr": str(t_).strip(), "broll": "", "background": True, "visual": str(v_ or "")})
     return head + items
 
 
@@ -815,7 +991,7 @@ class Ladder:
         self.cfg, self.src, self.flip, self.kd, self.kind, self.log = cfg, src, flip, Path(kd), kind, log
         self.trip = trip
         self.scenic = scenic   # (file, start, flip, rotation): the bay, blurred under a stretch where only the holder is in shot
-        self.photos, self.stock, self.uses, self.stock_tries = {}, {}, {}, 0
+        self.photos, self.stock, self.uses, self.stock_tries, self.rung_tries = {}, {}, {}, 0, 0
         self.own, self.own_i, self.own_pos = list(own or []), 0, {}
         (self.kd / "ladder").mkdir(exist_ok=True)
 
@@ -839,19 +1015,19 @@ class Ladder:
         if img and self.uses.get(str(img), 0) < 2: self.uses[str(img)] = self.uses.get(str(img), 0) + 1; return img, credit
         return None, ""
 
-    def _stock(self, visual, text):
+    def _stock(self, visual, text, local=True):
         if visual in self.stock: return self.stock[visual]
         self.stock[visual] = None
-        if self.stock_tries >= int(self.cfg.get("interview_stock_max", 10)): return None
         self.stock_tries += 1
         try:
             from . import footage
             sid = f"s{len(self.stock):02}"
-            got = footage.fill(self.cfg, [{"id": sid, "text": text[:300], "narration": text[:300], "queries": [visual, re.sub(r"\bBermuda\b", "", visual).strip() + " Bermuda"]}],
+            qs = [visual, re.sub(r"\bBermuda\b", "", visual).strip() + " Bermuda"] if local else [visual]
+            got = footage.fill(self.cfg, [{"id": sid, "text": text[:300], "narration": text[:300], "queries": qs}],
                                "portrait" if self.kind == "short" else "landscape", {sid: 1}, self.kd / "ladder" / "stock", self.log, lambda: False,
                                1920, 12, self.kd / "ladder" / f"stock_{sid}.json")
             c = (got.get(sid) or [None])[0]
-            if c and "bermuda" not in (str(c.get("desc", "")) + " " + str(c.get("seen", ""))).lower():
+            if c and local and "bermuda" not in (str(c.get("desc", "")) + " " + str(c.get("seen", ""))).lower():   # (a line on New Hampshire needs no Bermuda)
                 _log(self.log, f"    stock clip {c.get('id')} not used: nothing says it is Bermuda ({str(c.get('desc', ''))[:50]}); a mosque elsewhere would mislead")
                 c = None
             f = self.kd / "ladder" / "stock" / "clips" / f"{c['id']}.mp4" if c else None
@@ -868,6 +1044,52 @@ class Ladder:
             if pk and self.trip.render(pk, d, out, self.kind):
                 r = pk[2]
                 return out, f"trip {m}", ""
+        return None
+
+    def media(self, visual, text, d, out):
+        """Media of what is being talked about for d seconds (owner, 2026-11-08: "instead of her fuzzy face, show the actual
+        yard... stills, video snippets, stock, renditions - anything from the rungs"): your trip footage of that place, a Commons
+        photo, your footage of that kind of thing, stock, then the repair ladder's picture rungs (AI image, ChatGPT chain, still),
+        then scenery from the area. -> (out, how, credit) or None."""
+        visual = (visual or text[:80]).strip()
+        # your trip footage only under a line about where you filmed (Nov 8: a line on Merrimack, New Hampshire got Bermuda scenery)
+        here = getattr(self, "here", set())
+        mine = not here or bool(here & {w[:5] for w in re.findall(r"[a-z]{4,}", (visual + " " + text).lower())})
+        got = self.trip_clip(visual, text, d, out, ("place",)) if mine else None
+        if got: return got
+        img, credit = self._photo(visual, text)
+        if img: still_clip(img, d, out, self.kind); return out, "photo", credit
+        got = self.trip_clip(visual, text, d, out, ("subject",)) if mine else None
+        if got: return got
+        st = self._stock(visual, text, local=mine)
+        if st:
+            from . import shots
+            f, credit = st
+            vf = shots.vf_frame(self.kind, None, 0.0, False, 1080 if self.kind == "short" else 1920, 1920 if self.kind == "short" else 1080)
+            media.ff(*(["-stream_loop", "-1"] if media.dur(f) < d else []), "-i", f, "-t", f"{d:.2f}", "-an", "-vf", vf, *ENC[:6], out, timeout=900)
+            return out, "stock", credit
+        # owner, 2026-11-08: no cap on AI pictures - make as many as needed; a failure moves to the next rung; cards last
+        rungs = self.cfg.get("interview_rungs")
+        rungs = tuple(("ai_image", "chatgpt_chain", "static_image") if rungs is None else rungs)
+        got = self._rungs(text, visual, d, out, rungs) if rungs else None
+        if got: return got
+        got = self.trip_clip(visual, text, d, out, ("scenery",)) if mine else None
+        if got: return got
+        return self._rungs(text, visual, d, out, ("card",)) if self.cfg.get("interview_card_fallback", True) else None
+
+    def _rungs(self, text, visual, d, out, rungs):
+        self.rung_tries += 1
+        try:
+            from . import qc_repair
+            import hashlib   # a folder per line (Nov 8: numbered folders restarted each run, and a Merrimack line got a passport picture)
+            rd = "r_" + hashlib.md5(f"{text}|{visual}|{d:.1f}|{','.join(rungs)}".encode()).hexdigest()[:10]
+            clip, rung = qc_repair.ladder_clip(self.cfg, text, visual, d, self.kind, self.kd / "ladder" / rd, self.kd.parent,
+                                               src=self.src, log=self.log, rungs=rungs)
+            if clip:
+                shutil.copyfile(clip, out); return out, "rung " + rung.split(":")[0], ""
+        except Exception as e:
+            if str(e) == "cancelled" or type(e).__name__ == "Paused": raise
+            _log(self.log, f"    rungs failed ({type(e).__name__}: {str(e)[:120]}); next")
         return None
 
     def picture(self, a, b, out, visual="", text="", why=""):
@@ -1108,6 +1330,35 @@ def scene_part(src, flip, an, start, wav, out, kind, log=print):
     return out
 
 
+def cover_part(ladder, visual, text, wav, out, log=print):
+    """Narration over media of what it is about (the ladder), never over a face. -> (out, how, credit) or None."""
+    d = media.dur(wav) + 0.35
+    pic = Path(out).with_name(Path(out).stem + "_cov.mp4")
+    got = ladder.media(visual, text, d, pic)
+    if not got: return None
+    media.ff("-i", pic, "-i", wav, "-t", f"{d:.2f}", "-map", "0:v:0", "-map", "1:a:0",
+             "-vf", f"fade=t=in:st=0:d=0.3,fade=t=out:st={d - 0.3:.2f}:d=0.3", "-af", "loudnorm=I=-16:TP=-1.5:LRA=11,apad", *ENC, "-shortest", out, timeout=900)
+    return out, got[1], got[2]
+
+
+PIP_LEAD = 3.0   # seconds of the guest full-frame before the place takes over
+
+
+def pip_part(bite, bg, out, kind, lead=PIP_LEAD):
+    """The guest in a corner over what she describes (owner, 2026-11-08: "if a subject is describing something and it is not
+    where she is, show actual media of the scene while she talks in a cut-out"): her face full-frame for the first seconds, then
+    the place dissolves in and she talks from an inset at the top right (clear of the captions). Her audio throughout."""
+    W, H = (1080, 1920) if kind == "short" else (1920, 1080)
+    pw = int(W * (0.46 if kind == "short" else 0.33)) // 2 * 2
+    flt = (f"[1:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,format=yuva420p,fade=t=in:st=0:d=0.5:alpha=1,"
+           f"setpts=PTS-STARTPTS+{lead}/TB[bg];"
+           f"[0:v]split[full][s];[s]scale={pw}:-2,pad=iw+8:ih+8:4:4:white,format=yuva420p,fade=t=in:st={lead}:d=0.5:alpha=1[p];"
+           f"[bg][p]overlay={W - pw - 8 - int(W * 0.03)}:{int(H * 0.05)}:eof_action=pass[bp];"
+           f"[full][bp]overlay=0:0:eof_action=pass,format=yuv420p[v]")
+    media.ff("-i", bite, "-i", bg, "-filter_complex", flt, "-map", "[v]", "-map", "0:a:0", "-t", f"{media.dur(bite):.2f}", *ENC, out, timeout=1800)
+    return out
+
+
 def clip_part(clip, wav, out, kind, root, log=print, start=0.0, flip=False):
     """Narration over one of the creator's own clips of that exact place (named in the note), upright, back camera."""
     from . import shots
@@ -1326,10 +1577,20 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
     bfiles = [x for x in sorted(bdir.iterdir()) if x.stem in broll and x.suffix.lower() in VIDEO_EXT]
     nice = next((x for x in bfiles if "bay" in x.stem.lower() or "wave" in x.stem.lower()), bfiles[0] if bfiles else None)
     keep = bool(cfg.get("interview_keep_scene", True))   # owner, 2026-10-25: never swap his footage for another place
+    cover = bool(cfg.get("interview_cutaways", False))   # owner, 2026-11-08: narration over media of what it's about; the guest in a corner
     place = [(Path(x["src"]), bool(x.get("flip", False))) for x in cfg.get("interview_place_clips") or [] if Path(x["src"]).exists()]
     card_bg = (src, 30.0, flip, "") if keep or not nice else (nice, 2.0, False, shots.orient(nice, root, log))
     sdur = {i: media.dur(p_) for i, (p_, _, _) in enumerate(sources)}
     tri_all = triage(cfg, segs, context, notes, work, log) if cfg.get("interview_doc_mode", "augment") == "augment" else None
+    target = float(cfg.get("interview_target_min") or 0) * 60
+    if tri_all and target and not cfg.get("interview_plan_only_no_dives"):   # the longer cut: researched segments up to the target length
+        est = total_secs(augment_items(dict(tri_all, dives=[]), segs), segs)
+        _log(log, f"  longer cut so far: ~{est / 60:.1f} min of {target / 60:.0f} min wanted")
+        dv = deep_dives(cfg, segs, context, work, target - est, log)
+        if dv:   # a fact on the same thing as a researched segment would only repeat it
+            near = lambda f: any(abs(int(f.get("after", -99)) - d["seg"]) <= 3 for d in dv)
+            tri_all = dict(tri_all, dives=dv, facts=[f for f in tri_all.get("facts") or [] if not near(f)])
+            _log(log, f"  with researched segments: ~{total_secs(augment_items(tri_all, segs), segs) / 60:.1f} min")
     if tri_all and cfg.get("interview_keep_srcs"):   # clips that are the visit itself (the kebab window): never dropped
         ks = set(int(x) for x in cfg["interview_keep_srcs"])
         tri_all = dict(tri_all, drop=[d_ for d_ in tri_all.get("drop") or [] if not any(segs[i].get("src", 0) in ks for i in range(int(d_[0]), int(d_[1]) + 1))])
@@ -1352,8 +1613,8 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
         tri = tri_all if kind == "documentary" else None
         if tri: items = augment_items(tri, segs)
         else: items = (_items(sp) if sp else _items(pl.get("short") or {})) if kind == "short" else [x for c in pl["documentary"]["chapters"] for x in c.get("items", [])]
-        vtitle = (tri or {}).get("title") or pl.get("title", name)
-        guest = str((tri_all or {}).get("guest") or "").strip()[:40]
+        vtitle = spell_as_noted((tri or {}).get("title") or pl.get("title", name), context)
+        guest = spell_as_noted(str((tri_all or {}).get("guest") or "").strip()[:40], context)
         sub = str(cfg.get("interview_subtitle") or ("A conversation with " + guest if guest else "A conversation"))
         import hashlib   # cuts are cached per plan: a changed plan never reuses another plan's numbered parts
         kd = work / f"{kind}_{hashlib.md5((CUT_VERSION + json.dumps(items, sort_keys=True)).encode()).hexdigest()[:6]}"; kd.mkdir(exist_ok=True)
@@ -1370,6 +1631,7 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
             trip = TripFootage(Path(src).parent / "labeled" / "catalog", [src] + [p_ for p_, _, _ in sources[1:]] + [f for f, _, _ in oc], root, log, near=gps_of(src),
                                radius_km=float(cfg.get("interview_trip_radius_km", 2.0))) if cfg.get("interview_trip_footage", True) else False
         ladder = Ladder(cfg, src, flip, kd, kind, log, own=oc, scenic=card_bg, trip=trip or None)
+        ladder.here = {w.lower()[:5] for w in re.findall(r"\b[A-Z][a-z]{3,}", str(context or ""))} - {"there", "their", "about", "after", "when", "this", "these", "that", "with", "from", "what", "where", "which"}   # the place names in your note
         has_preview = bool(items and items[0].get("preview"))
         hk = hook(cfg, main_segs, context, kind, work, log) if cfg.get("interview_hook", True) and not (kind == "short" and sp) and not has_preview else None
         if kind == "short" and sp and items and "bite" in items[0]:   # the Short's own opener is its cold open: hook text from its thread
@@ -1398,9 +1660,18 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                                     soft_in=not (k > 0 and "bite" in items[k - 1] and int(items[k - 1]["bite"][1]) == a - 1),
                                     soft_out=not (k + 1 < len(items) and "bite" in items[k + 1] and int(items[k + 1]["bite"][0]) == b + 1), keep=keep,
                                     place=place if segs[a].get("src", 0) in set(int(x) for x in cfg.get("interview_place_srcs") or []) else None)
+                if cover and it.get("pip") and it.get("visual") and t1 - t0 >= PIP_LEAD + 5:   # she describes somewhere else: show it
+                    pf = kd / f"{k:02}_pip.mp4"
+                    if not media.ok(pf, 0.5):
+                        got = ladder.media(str(it["visual"]), said, t1 - t0 - PIP_LEAD, kd / f"{k:02}_pipbg.mp4")
+                        if got:
+                            pip_part(f, got[0], pf, kind)
+                            _log(log, f"    picture-in-picture over {got[1]}" + (f" ({got[2]})" if got[2] else "") + f": {it['visual']}")
+                            if got[2]: credits.append((PIP_LEAD, t1 - t0, got[1], got[2]))
+                    if media.ok(pf, 0.5): f = pf
                 cj.write_text(json.dumps(credits), encoding="utf-8")
                 if cfg.get("interview_qc", False): qc_part(f, cfg, log, label=f"{kind} {k:02}", kind=kind)
-                words = [(wd, s - t0, e - t0) for x in segs[a:b + 1] for wd, s, e in x["words"]]
+                words = [(spell_as_noted(wd, context), s - t0, e - t0) for x in segs[a:b + 1] for wd, s, e in x["words"]]
                 parts.append({"file": f, "words": words, "style": "Cap", "hook": it.get("hook_text", ""), "chapter": it.get("chapter", ""),
                               "credits": [(x[0], x[1], x[3]) for x in credits if x[3]],
                               "m": {"type": "bite", "src": str(bsrc), "flip": bflip, "si": segs[a].get("src", 0), "t0": t0, "t1": t1, "text": said}})
@@ -1415,6 +1686,9 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                 if not wav.exists(): tts.kokoro_batch(cfg, [(it["narr"], wav)], log, "interview narration")
                 si, st = scene_window(segs, items, k, media.dur(wav) + 0.35, sdur)
                 f = kd / f"{k:02}_narr.mp4"
+                if cover and not it.get("joke") and not media.ok(f, 0.5):   # background lines: over what they are about (a joke stays on the scene)
+                    got = cover_part(ladder, str(it.get("visual") or ""), it["narr"], wav, f, log)
+                    if got: _log(log, f"    narration over {got[1]}" + (f" ({got[2]})" if got[2] else ""))
                 if not media.ok(f, 0.5): scene_part(sources[si][0], sources[si][1], sources[si][2], st, wav, f, kind, log)
                 try: words = captions.word_times(wav, it["narr"])
                 except Exception: words = []
@@ -1452,10 +1726,14 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                         else: clip_part(c, wav, f, kind, root, log, start=float(note_.get("clip_start", 0.0)), flip=bool(note_.get("clip_flip", False)))
                         credit = ""; _log(log, f"    fact over your clip {c.name}")
                     else:
-                        si, st = scene_window(segs, items, k, media.dur(wav) + 0.35, sdur)
-                        scene_part(sources[si][0], sources[si][1], sources[si][2], st, wav, f, kind, log)
-                        _log(log, f"    fact over the scene: clip {si} at {st:.0f}s")
-                    (kd / f"{k:02}_insert.json").write_text(json.dumps({"credit": ""}), encoding="utf-8")
+                        got = cover_part(ladder, str(it.get("visual") or ""), it["insert"], wav, f, log) if cover else None
+                        if got:
+                            credit = got[2]; _log(log, f"    fact over {got[1]}" + (f" ({credit})" if credit else ""))
+                        else:
+                            si, st = scene_window(segs, items, k, media.dur(wav) + 0.35, sdur)
+                            scene_part(sources[si][0], sources[si][1], sources[si][2], st, wav, f, kind, log)
+                            _log(log, f"    fact over the scene: clip {si} at {st:.0f}s")
+                    (kd / f"{k:02}_insert.json").write_text(json.dumps({"credit": credit}), encoding="utf-8")
                 if not media.ok(f, 0.5) and cfg.get("interview_fact_ladder", False):   # owner, 2026-10-27: outside media through the QC repair ladder
                     try:
                         from . import qc_repair
@@ -1501,8 +1779,8 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
                 note = (notes or [{}] * 99)[int(it.get("note", 0))] if notes and str(it.get("note", "")).isdigit() and int(it["note"]) < len(notes) else {}
                 if cfg.get("interview_qc", False): qc_part(f, cfg, log, label=f"{kind} {k:02} fact", kind=kind)
                 parts.append({"file": f, "words": words, "style": "Narr", "credit": credit, "card": str(it.get("card") or "")[:48],
-                              "source": note.get("source", ""), "m": {"type": "fact", "text": it["insert"], "note": it.get("note")}})
-                _log(log, f"  {kind} {k:02}: context \"{it['insert'][:60]}\"" + (f" [{credit}]" if credit else " (over blurred footage)"))
+                              "source": note.get("source", "") or it.get("source", ""), "m": {"type": "fact", "text": it["insert"], "note": it.get("note")}})
+                _log(log, f"  {kind} {k:02}: context \"{it['insert'][:60]}\"" + (f" [{credit}]" if credit else ""))
         ec = kd / "end.mp4"   # end card: thanks + subscribe, music carries it out
         if not media.ok(ec, 0.5): card_part(card_bg, 6.0 if kind == "documentary" else 4.0, ec, kind)
         thanks = str(cfg.get("interview_thanks") or (f"Thank you, {guest}" if guest else "Thanks for watching"))   # the guest's name, never one old video's
@@ -1518,7 +1796,7 @@ def build(cfg, src, work, context, log=print, kinds=("short", "documentary"), fl
         if cfg.get("interview_qc", False):
             try: qc_final(outs[kind], cfg, kd, log, every=30.0 if kind == "documentary" else 10.0)
             except Exception as e: _log(log, f"  final QC failed to run ({str(e)[:100]})")
-    srcs = sorted({n.get("source", "") for n in (notes or []) if n.get("source")})
+    srcs = sorted({n.get("source", "") for n in (notes or []) if n.get("source")} | {d["source"] for d in (tri_all or {}).get("dives") or [] if d.get("source")})
     (work / "sources.txt").write_text("Sources for the context notes:\n" + "\n".join(srcs), encoding="utf-8")
     (work / "result.json").write_text(json.dumps({k: str(v) for k, v in outs.items()} | {"title": pl.get("title", ""), "sources": srcs}, indent=1), encoding="utf-8")
     return outs

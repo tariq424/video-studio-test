@@ -94,3 +94,26 @@ def test_pid_alive_false_for_dead_pid(res_env):
     p = subprocess.Popen([sys.executable, "-c", "pass"])
     p.wait(timeout=5)
     assert editor_session._pid_alive(p.pid) is False
+
+
+def test_looking_at_a_job_reserves_nothing_an_edit_does(res_env, monkeypatch):
+    """Owner, 2026-11-08: reviewing a finished job never holds up the pipeline; only a real edit takes the editor."""
+    import contextlib, tempfile, threading
+    from pathlib import Path
+    from studio import config, edit, gpu_lock
+    tmp = Path(tempfile.mkdtemp())
+    monkeypatch.setattr(config, "load", lambda: {"jobs_dir": str(tmp / "jobs")})
+    monkeypatch.setattr(threading.Thread, "start", lambda self: None)
+    import server
+    monkeypatch.setattr(server.studio, "job", lambda jid: type("J", (), {"dir": tmp, "log": staticmethod(lambda m: None)})())
+    monkeypatch.setattr(edit, "open_beat", lambda *a, **k: {"beats": {}})
+    monkeypatch.setattr(edit, "kind", lambda d: "short")
+    monkeypatch.setattr(edit, "preview", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(gpu_lock, "holder", lambda desc="": contextlib.nullcontext())
+    c = server.app.test_client()
+    r = c.post("/api/jobs/jobA/edit/open/b01", json={"sid": "s1"})
+    assert r.status_code == 200 and r.get_json()["editor"]["ok"] and editor_session.active() is None
+    assert c.post("/api/jobs/jobA/edit/preview/b01", json={"sid": "s1"}).status_code == 200
+    assert editor_session.active()["jid"] == "jobA"
+    r = c.post("/api/jobs/jobB/edit/preview/b01", json={"sid": "s2"})
+    assert r.status_code == 409 and "editor in use (jobA)" in r.get_json()["error"]

@@ -240,7 +240,7 @@ class Studio:
         what = url or (f"file {up}" if up else "pasted text")
         j.log(f"Job created for {what} (output: {'SMOKE TEST, ' if smoke else ''}{mode}; long {minutes} min, short {short_secs:.0f}s)"); self._enqueue(jid); return jid
 
-    def create_interview(self, src, context="", extras=None, thanks=""):
+    def create_interview(self, src, context="", extras=None, thanks="", back_camera=True, minutes=15):
         """Your own interview footage (owner, 2026-11-08): the real conversation leads - a preview of later moments, background
         lines, then your questions and the guest's answers in order, with commentary where the guest gets specific. Makes a
         Short and a longer cut (studio/interview.py), opened as an interview job you can edit (studio/interview_edit.py)."""
@@ -253,11 +253,15 @@ class Studio:
             if not str(x).strip(): continue
             if not p.is_file(): raise ValueError(f"Clip not found on this PC: {p}")
             ex.append(str(p))
-        jid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        jid = base = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        for n in range(2, 99):   # two made in the same second: never the same folder
+            if not self.job(jid).dir.exists(): break
+            jid = f"{base}_{n}"
         j = self.job(jid); j.dir.mkdir(parents=True)
         j.save(kind="interview", url="", mode="both", minutes=0, captions=True, auto_approve=True, visual_review="never", status="queued",
                stage="interview", done=[], title="", created=time.time(), priority="normal", src_title=src.name,
-               interview={"src": str(src), "context": str(context or "").strip(), "extras": ex, "thanks": str(thanks or "").strip()})
+               interview={"src": str(src), "context": str(context or "").strip(), "extras": ex, "thanks": str(thanks or "").strip(),
+                          "back_camera": bool(back_camera), "minutes": max(0.0, min(30.0, float(minutes or 0)))})
         j.log(f"Interview job created for {src}" + (f" (+{len(ex)} more clip(s))" if ex else "")); self._enqueue(jid); return jid
 
     def _interview(self, j, s, cfg, log):
@@ -267,6 +271,11 @@ class Studio:
         src = Path(iv.get("src") or "")
         if not src.is_file(): raise RuntimeError(f"the interview footage is gone: {src}")
         if iv.get("thanks"): cfg["interview_thanks"] = iv["thanks"]
+        # owner, 2026-11-08: you filmed the guest (her face is never "the holder" to blur), narration goes over media of what it
+        # is about with the guest in a corner where she describes somewhere else, and the longer cut is filled to its length
+        cfg["interview_back_camera"] = bool(iv.get("back_camera", True))
+        cfg["interview_cutaways"] = bool(cfg.get("interview_cutaways", True))
+        cfg["interview_target_min"] = float(iv.get("minutes", 15) or 0)
         work = j.dir / "iwork"
         name = re.sub(r"[^A-Za-z0-9]+", "_", src.stem).strip("_").lower()[:40] or "interview"
         j.save(stage="interview", prog={"out": "short", "stage": "interview", "n": 0, "of": 0})

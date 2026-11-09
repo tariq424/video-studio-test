@@ -75,7 +75,10 @@ def create():
         ex = b.get("interview_extras") or []
         if isinstance(ex, str): ex = [x for x in ex.splitlines() if x.strip()]
         if not str(b.get("src_path") or "").strip(): return jsonify(error="Give the path of the interview video on this PC."), 400
-        try: return jsonify(id=studio.create_interview(b.get("src_path", ""), b.get("interview_context", ""), ex, b.get("interview_thanks", "")))
+        try: mins = float(b.get("interview_minutes", 15) or 0)
+        except (TypeError, ValueError): return jsonify(error="Longer cut length must be a number of minutes."), 400
+        try: return jsonify(id=studio.create_interview(b.get("src_path", ""), b.get("interview_context", ""), ex, b.get("interview_thanks", ""),
+                                                       str(b.get("interview_back_camera", "1")).lower() not in ("0", "false", "off", ""), mins))
         except ValueError as e: return jsonify(error=str(e)[:300]), 400
     sp = (b.get("src_path") or "").strip().strip('"')
     if sp and not (f and f.filename):   # a file on this PC by path (the /make page can't put a file into an upload field)
@@ -246,8 +249,9 @@ def _editor_ns():
 def _editor_owner(jid, sid):
     from studio import editor_session
     st = editor_session.state(namespace=_editor_ns())
-    if not st:
-        return False, "No editor session is open; open a beat first."
+    if not st:   # owner, 2026-11-08: looking at a job never holds up the pipeline; the first real edit takes the editor
+        ed = editor_session.acquire(jid, pid=os.getpid(), port=VS_PORT, sid=sid, namespace=_editor_ns())
+        return (True, editor_session.state(namespace=_editor_ns())) if ed.get("ok") else (False, f"Waiting: editor in use ({ed.get('holder_jid')})")
     if st.get("jid") != jid or not editor_session.is_owner(jid, os.getpid(), VS_PORT, sid, namespace=_editor_ns()):
         return False, f"Waiting: editor in use ({st.get('jid')})"
     return True, st
@@ -267,7 +271,8 @@ def edit_open(jid, bid):
     j = studio.job(jid)
     b = request.get_json(silent=True) or {}
     sid = b.get("sid", "")
-    ed = editor_session.acquire(jid, pid=os.getpid(), port=VS_PORT, sid=sid, namespace=_editor_ns())
+    st = editor_session.state(namespace=_editor_ns())   # opening a piece to look at it reserves nothing (only an edit does)
+    ed = editor_session.acquire(jid, pid=os.getpid(), port=VS_PORT, sid=sid, namespace=_editor_ns()) if st and st.get("jid") == jid else         {"ok": not st, "waiting": bool(st), "holder_jid": (st or {}).get("jid"), "holder_port": (st or {}).get("port"), "age": (st or {}).get("age", 0)}
     try: rv = edit.open_beat(j.dir, bid, config.load(), j.log)
     except Exception as e: return jsonify(error=str(e)[:300]), 400
     return jsonify(space="short" if edit.kind(j.dir) == "short" else "long", rv=rv,

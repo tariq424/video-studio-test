@@ -54,6 +54,8 @@ def adopt(job, manifests, log=print):
         m = json.loads(Path(mp).read_text(encoding="utf-8"))
         if not Path(m["out"]).exists(): continue
         dst = job / "output" / Path(m["out"]).name; dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.exists() and not os.path.samefile(dst, m["out"]):   # a re-run made a new cut: it replaces the old one (Nov 8: output kept the old cut)
+            dst.unlink()
         if not dst.exists():
             try: os.link(m["out"], dst)
             except OSError: shutil.copy2(m["out"], dst)

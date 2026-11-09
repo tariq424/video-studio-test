@@ -24,7 +24,7 @@ The image goes on to rung 4 (source parallax: rembg cut-out + Remotion 2.5D, dep
 Failures are logged and the ladder moves on (Flow is next). Not signed in or a CAPTCHA / "unusual traffic" check skips
 Gemini for the job (never automated); a usage-limit message cools it down for imagegen_cooldown_hours (default 6, saved
 across jobs). Each failure saves <key>_gemini_<step>_fail.png/.html for selector fixes.
-Settings: imagegen_on, gemini_profile ("" = the Flow profile), gemini_url, imagegen_timeout (240), imagegen_max_per_video (8),
+Settings: imagegen_on, gemini_profile ("" = the Flow profile), gemini_url, imagegen_timeout (240), imagegen_max_per_video (0 = no cap),
 imagegen_cooldown_hours, imagegen_headless (true), imagegen_delay_secs ([15, 30]: human pacing between requests, per
 service), imagegen_providers (["gemini", "chatgpt", "bing"]: the rotation), chatgpt_profile, bing_profile.
 """
@@ -981,8 +981,8 @@ def generate_many(cfg, sd, sec, key, log, aspect="9:16", image=None, count=1):
             led.write_text(json.dumps(used, indent=1), encoding="utf-8")
             log(f"  fit: cached {site} image(s) failed narration fit; trying next provider")
 
-    cap = int(cfg.get("imagegen_max_per_video", 8))
-    if len(used) >= cap:
+    cap = int(cfg.get("imagegen_max_per_video", 0) or 0)   # 0 = no cap
+    if cap > 0 and len(used) >= cap:
         log(f"  image generators: {cap} images already made for this video; next rung"); return []
     if not cfg.get("imagegen_rotate", False):   # fixed priority (default): the list order, every beat
         pref, first, tries = None, order[0], list(order)
